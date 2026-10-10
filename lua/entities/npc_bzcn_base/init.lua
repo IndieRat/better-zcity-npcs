@@ -549,6 +549,11 @@ function ENT:AttackTarget(target)
     if distance > meleeRange then return end
     self.LastAttack = now + (profile.AttackDelay or 1)
     self:PlayBZCNAttackAnimation()
+    if BZCN and isfunction(BZCN.AttackRuntimeMelee)
+        and BZCN.AttackRuntimeMelee(self, target) then
+        hook.Run("BZCN_NPCAttack", self, target, nil)
+        return
+    end
     self:EmitSound(profile.MeleeSound or "Flesh.ImpactHard", 72, math.random(92, 108), 0.8)
 
     local damage = DamageInfo()
