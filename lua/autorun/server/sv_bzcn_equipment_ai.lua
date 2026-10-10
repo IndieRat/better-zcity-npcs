@@ -188,6 +188,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
     if not IsValid(weapon) then return FireStatBasedShot(ent, target, nil) end
 
     local now = CurTime()
+    PlaceRuntimeWeapon(ent, weapon)
     local primary = istable(weapon.Primary) and weapon.Primary or {}
     local entityNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
     local scriptNext = math.max(tonumber(primary.Next) or 0, tonumber(primary.NextFire) or 0)
@@ -352,6 +353,8 @@ end
 local function UseMedicalItem(healer, target, class)
     local med = ConfigureWeaponEntity(healer, class, "BZCNRuntimeMedicalWeapon")
     if not IsValid(med) then return false end
+    local previousWeaponClass = healer.BZCN_SelectedWeapon
+        or (healer.BZCNClassProfile and healer.BZCNClassProfile.WeaponClass)
 
     med.modeValues = istable(med.modeValues) and med.modeValues or {[1] = 80, [2] = 1, [3] = 10, [4] = 1, [5] = 1}
     med.modeValues[1] = tonumber(med.modeValues[1]) or 0
@@ -380,6 +383,18 @@ local function UseMedicalItem(healer, target, class)
             if ok then applied = true end
         end
         if mode == 1 then break end
+    end
+
+    -- Native medicine sometimes calls owner:SelectWeapon("weapon_hands_sh")
+    -- when its supply is exhausted. Restore the NPC's combat loadout afterward
+    -- so healing one ally doesn't permanently delete its rifle/pistol.
+    if isstring(previousWeaponClass) and previousWeaponClass ~= ""
+        and previousWeaponClass ~= "weapon_medkit_sh" and previousWeaponClass ~= "weapon_bandage_sh"
+        and healer.BZCN_SelectedWeapon ~= previousWeaponClass then
+        local inventory = GetInventory(healer)
+        if istable(inventory.Weapons) and inventory.Weapons[previousWeaponClass] then
+            BZCN.SelectWeapon(healer, previousWeaponClass)
+        end
     end
 
     if applied then
