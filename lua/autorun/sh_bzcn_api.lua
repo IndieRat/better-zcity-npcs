@@ -44,7 +44,7 @@ BZCN.RegisterClass("default", {
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1200, HelpMemory = 10,
     AnimationClass = nil, Ranged = true, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
     MedicalRange = 320, WeaponClass = "weapon_glock17", WeaponModel = "models/weapons/w_pist_glock18.mdl",
-    Inventory = {Weapons = {weapon_glock17 = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
+    Inventory = {Weapons = {weapon_glock17 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
 BZCN.RegisterClass("Combine", {
@@ -54,7 +54,7 @@ BZCN.RegisterClass("Combine", {
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
     AnimationClass = "overwatch", Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
     MedicalRange = 300, WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
-    Inventory = {Weapons = {weapon_mp7 = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "combine_helmet"}}
+    Inventory = {Weapons = {weapon_mp7 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "combine_helmet"}}
 })
 
 BZCN.RegisterClass("Rebel", {
@@ -64,7 +64,7 @@ BZCN.RegisterClass("Rebel", {
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
     AnimationClass = "citizen_male", Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
     MedicalRange = 320, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
-    Inventory = {Weapons = {weapon_ak74 = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
+    Inventory = {Weapons = {weapon_ak74 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
 -- Model and claw model checked against Z-City's own furry class. Its player-only
@@ -411,18 +411,15 @@ end
 function BZCN.GetWeaponModel(ent, weaponClass)
     if not IsValid(ent) then return nil end
     local profile = ent.BZCNClassProfile or BZCN.GetClass(ent.BZCNClass or ent.PlayerClassName)
-    if profile and isstring(profile.WeaponModel) and profile.WeaponModel ~= "" then
-        return profile.WeaponModel
-    end
     weaponClass = weaponClass or ent.BZCN_SelectedWeapon
-    if not isstring(weaponClass) or weaponClass == "" then
-        local inventory = BZCN.GetNetVar(ent, "Inventory", {})
-        weaponClass = nil
-        if istable(inventory.Weapons) then
-            for key, value in pairs(inventory.Weapons) do
-                if value then weaponClass = key break end
-            end
-        end
+        or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
+
+    -- A profile override is appropriate only while its configured weapon is
+    -- selected. Otherwise use the selected Z-City SWEP's real world model
+    -- (medkits/bandages included), rather than continuing to show the old gun.
+    if profile and isstring(profile.WeaponModel) and profile.WeaponModel ~= ""
+        and (not weaponClass or weaponClass == "" or weaponClass == profile.WeaponClass) then
+        return profile.WeaponModel
     end
     if not isstring(weaponClass) or weaponClass == "" then return nil end
     local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
