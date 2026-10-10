@@ -61,7 +61,7 @@ function ENT:Initialize()
             end
         end
     end
-    if self.organism and profile.BloodType then self.organism.bloodtype = profile.BloodType end
+    if self.BZCN_Organism and profile.BloodType then self.BZCN_Organism.bloodtype = profile.BloodType end
     if self.CapabilitiesAdd then self:CapabilitiesAdd(CAP_MOVE_GROUND) end
 
     timer.Simple(0.1, function()
@@ -149,8 +149,27 @@ function ENT:FindEnemy()
 end
 
 function ENT:PlayBZCNAttackAnimation()
-    local sequence = self:FindSequence({"zombie_attack_01", "seq_meleeattack01", "attack01"})
-    if sequence >= 0 then self:AddGestureSequence(sequence) end
+    local sequence = self:FindSequence({
+        "zombie_attack_01", "seq_meleeattack01", "attack01",
+        "melee_gunhit", "melee_attack1", "attack"
+    })
+    if sequence < 0 and self.SelectWeightedSequence then
+        local ok, selected = pcall(self.SelectWeightedSequence, self, ACT_MELEE_ATTACK1)
+        if ok and isnumber(selected) and selected >= 0 then sequence = selected end
+    end
+    if sequence < 0 then return false end
+
+    self.BZCNActionSequence = sequence
+    local duration = 0.65
+    local ok, sequenceDuration = pcall(self.SequenceDuration, self, sequence)
+    if ok and isnumber(sequenceDuration) and sequenceDuration > 0 then
+        duration = math.Clamp(sequenceDuration, 0.3, 1.5)
+    end
+    self.BZCNActionSequenceEnd = CurTime() + duration
+    self:ResetSequence(sequence)
+    self:SetCycle(0)
+    self:SetPlaybackRate(1)
+    return true
 end
 
 function ENT:AttackTarget(target)
@@ -281,9 +300,27 @@ function ENT:OnInjured(damageInfo)
 end
 
 function ENT:OnKilled(damageInfo)
+    if self.BZCNDeathHandled then return end
+    self.BZCNDeathHandled = true
+    self:SetHealth(0)
     BZCN.HideHeldWeapon(self)
+
+    if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.OnNPCDeath then
+        hg.BZCNNPCSupport.OnNPCDeath(self)
+    end
     hook.Run("BZCN_NPCKilled", self, damageInfo)
-    if self.BecomeRagdoll then self:BecomeRagdoll(damageInfo) else self:Remove() end
+
+    local becomeRagdoll = self.BecomeRagdoll
+    if isfunction(becomeRagdoll) then
+        local ok = pcall(becomeRagdoll, self, damageInfo)
+        if ok then
+            timer.Simple(0, function()
+                if IsValid(self) then self:Remove() end
+            end)
+            return
+        end
+    end
+    self:Remove()
 end
 
 function ENT:HandleStuck()
