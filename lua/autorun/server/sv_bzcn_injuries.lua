@@ -671,9 +671,12 @@ local function ClearDownedState(owner, restoreEntity)
     if IsValid(rag) then
         rag.BZCNNPCOwner = nil
         rag.Player = nil
+        rag.ply = nil
+        if owner.FakeRagdoll == rag then owner.FakeRagdoll = nil end
         if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
         rag:SetNWEntity("BZCNNPCOwner", NULL)
         rag:SetNWEntity("RagdollOwner", NULL)
+        rag:SetNWEntity("ply", NULL)
         if owner.ragdoll == rag then owner.ragdoll = nil end
         owner:SetNWEntity("FakeRagdoll", NULL)
         owner:SetNWEntity("ragdoll", NULL)
@@ -765,9 +768,12 @@ local function Recover(owner, rag, removedExternally)
     if IsValid(rag) then
         rag.BZCNNPCOwner = nil
         rag.Player = nil
+        rag.ply = nil
+        if owner.FakeRagdoll == rag then owner.FakeRagdoll = nil end
         if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
         rag:SetNWEntity("BZCNNPCOwner", NULL)
         rag:SetNWEntity("RagdollOwner", NULL)
+        rag:SetNWEntity("ply", NULL)
         if owner.ragdoll == rag then owner.ragdoll = nil end
         owner:SetNWEntity("FakeRagdoll", NULL)
         owner:SetNWEntity("ragdoll", NULL)
@@ -822,6 +828,11 @@ local function EnterDownedState(owner, reason)
     owner.BZCNNPCRagdoll = rag
     rag.BZCNNPCOwner = owner
     rag.Player = owner
+    -- Z-City's hg.RagdollOwner(rag) checks rag.ply plus owner.FakeRagdoll.
+    -- Keep both fields synchronized so organism-aware addons resolve this as
+    -- the live body's ragdoll rather than an unrelated prop_ragdoll.
+    rag.ply = owner
+    owner.FakeRagdoll = rag
     rag.BZCNNPCOrg = state
     rag.BZCN_Organism = owner.BZCN_Organism
     rag.organism = nil
@@ -831,6 +842,7 @@ local function EnterDownedState(owner, reason)
     owner.ragdoll = rag
     owner:SetNWEntity("FakeRagdoll", rag)
     owner:SetNWEntity("ragdoll", rag)
+    rag:SetNWEntity("ply", owner)
     SyncEntity(rag, state)
 
     rag:CallOnRemove("BZCNNPCSupport_ExternalRemoval", function(removed)
@@ -961,6 +973,8 @@ local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
     rag.BZCNNPCOwner = nil
     rag.BZCNNPCDeathCorpse = true
     rag.Player = nil
+    rag.ply = nil
+    rag:SetNWEntity("ply", NULL)
     rag:SetNWEntity("BZCNNPCOwner", NULL)
     rag:SetNWEntity("RagdollOwner", NULL)
     if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
@@ -1001,10 +1015,13 @@ local function DetachLivingRagdoll(owner, rag)
     if not IsValid(owner) or not IsValid(rag) then return end
     rag.BZCNNPCOwner = nil
     rag.BZCNNPCOrg = nil
+    rag.ply = nil
+    if owner.FakeRagdoll == rag then owner.FakeRagdoll = nil end
     -- InstallDeathRagdollOrganism already gave this corpse its own registered
     -- Z-City table; never replace it with the removed living owner's table.
+    rag:SetNWEntity("ply", NULL)
     if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
-    rag:SetNWEntity("BZCNNPCOwner", NULL)
+    if rag.SetNWEntity then rag:SetNWEntity("BZCNNPCOwner", NULL) end
     rag:SetNWEntity("RagdollOwner", NULL)
     if owner.ragdoll == rag then owner.ragdoll = nil end
     owner.BZCNNPCRagdoll = nil
