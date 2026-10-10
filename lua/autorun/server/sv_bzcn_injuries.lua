@@ -133,58 +133,187 @@ local function NewHealthTable(ent)
     }
 end
 
+local function ScaleZCityLimb(value)
+    value = math.max(tonumber(value) or 0, 0)
+    -- Z-City organ damage is normalized (usually 0..1); the local fallback
+    -- injury model uses 0..100. Normalize to the latter without inflating an
+    -- already-percent-based value.
+    return value <= 1.5 and value * 100 or value
+end
+
+local function PullZCityOrganism(owner, state)
+    if not IsValid(owner) or not istable(owner.organism) then return false end
+    local org = owner.organism
+    state.usesZCityOrganism = true
+    state.health = math.max(owner:Health(), 0)
+    state.maxHealth = math.max(tonumber(owner:GetMaxHealth()) or state.maxHealth or 1, 1)
+    state.blood = tonumber(org.blood) or state.blood or 5000
+    state.maxBlood = tonumber(org.maxBlood) or state.maxBlood or 5000
+    state.pain = tonumber(org.pain) or state.pain or 0
+    state.shock = tonumber(org.shock) or state.shock or 0
+    state.skull = ScaleZCityLimb(org.skull)
+    state.brain = ScaleZCityLimb(org.brain)
+    state.chest = ScaleZCityLimb(org.chest)
+    state.pelvis = ScaleZCityLimb(org.pelvis)
+    state.stomach = ScaleZCityLimb(org.stomach)
+    state.spine1 = ScaleZCityLimb(org.spine1)
+    state.spine2 = ScaleZCityLimb(org.spine2)
+    state.spine3 = ScaleZCityLimb(org.spine3)
+    state.larm = ScaleZCityLimb(org.larm)
+    state.rarm = ScaleZCityLimb(org.rarm)
+    state.lleg = ScaleZCityLimb(org.lleg)
+    state.rleg = ScaleZCityLimb(org.rleg)
+    state.heart = ScaleZCityLimb(org.heart)
+    state.liver = ScaleZCityLimb(org.liver)
+    state.intestines = ScaleZCityLimb(org.intestines)
+    state.lungsL = istable(org.lungsL) and {tonumber(org.lungsL[1]) or 0, tonumber(org.lungsL[2]) or 0} or state.lungsL
+    state.lungsR = istable(org.lungsR) and {tonumber(org.lungsR[1]) or 0, tonumber(org.lungsR[2]) or 0} or state.lungsR
+    state.wounds = istable(org.wounds) and org.wounds or state.wounds
+    state.arterialwounds = istable(org.arterialwounds) and org.arterialwounds or state.arterialwounds
+    state.crawling = org.llegamputated == true or org.rlegamputated == true
+        or state.lleg >= 55 or state.rleg >= 55
+        or (state.lleg >= 35 and state.rleg >= 35)
+    return true
+end
+
+local function EnsureZCityOrganism(owner)
+    if not IsValid(owner) then return nil, false end
+
+    local current = owner.organism
+    if istable(current) and current.owner == owner and current.fakePlayer == true then
+        current.owner = owner
+        current.fakePlayer = true
+        current.alive = owner:Health() > 0
+        current.entindex = owner:EntIndex()
+        owner.BZCN_Organism = current
+        local nativeList = hg.organism and hg.organism.list
+        if istable(nativeList) then nativeList[owner] = current end
+        return current, owner.BZCN_ZCityOrgInitialized == true
+    end
+
+    local seed = owner.BZCN_Organism
+    local addedNative = false
+    if hg.organism and isfunction(hg.organism.Add) then
+        local ok = pcall(hg.organism.Add, owner)
+        if ok and istable(owner.organism) then
+            current = owner.organism
+            addedNative = true
+            if isfunction(hg.organism.Clear) then
+                -- Clear runs Z-City's own "Org Clear" initialization modules;
+                -- do this once, never from the recurring state-sync loop.
+                pcall(hg.organism.Clear, current)
+            end
+        end
+    end
+
+    if not istable(current) then
+        current = istable(seed) and seed or {}
+        owner.organism = current
+    elseif istable(seed) and seed ~= current then
+        -- Carry adapter-only seed fields across the native Add/Clear step.
+        if isstring(seed.bloodtype) and seed.bloodtype ~= "" and seed.bloodtype ~= "unknown" then
+            current.bloodtype = seed.bloodtype
+        end
+        if istable(seed.wounds) and #current.wounds == 0 then current.wounds = seed.wounds end
+        if istable(seed.arterialwounds) and #current.arterialwounds == 0 then current.arterialwounds = seed.arterialwounds end
+    end
+
+    current.owner = owner
+    current.fakePlayer = true
+    current.alive = owner:Health() > 0
+    current.entindex = owner:EntIndex()
+    current.health = math.max(owner:Health(), 0)
+    current.maxHealth = math.max(tonumber(owner:GetMaxHealth()) or tonumber(owner.MaxHealthLimit) or 1, 1)
+    current.blood = tonumber(current.blood) or 5000
+    current.maxBlood = tonumber(current.maxBlood) or 5000
+    current.bloodtype = current.bloodtype or (owner.BZCNClassProfile and owner.BZCNClassProfile.BloodType) or "unknown"
+    current.pain = tonumber(current.pain) or 0
+    current.shock = tonumber(current.shock) or 0
+    current.wounds = istable(current.wounds) and current.wounds or {}
+    current.arterialwounds = istable(current.arterialwounds) and current.arterialwounds or {}
+    current.dmgstack = istable(current.dmgstack) and current.dmgstack or {}
+    current.bulletwounds = tonumber(current.bulletwounds) or 0
+    current.stabwounds = tonumber(current.stabwounds) or 0
+    current.slashwounds = tonumber(current.slashwounds) or 0
+    current.bruises = tonumber(current.bruises) or 0
+    current.burns = tonumber(current.burns) or 0
+    current.explosionwounds = tonumber(current.explosionwounds) or 0
+    owner.organism = current
+    owner.BZCN_Organism = current
+    owner.BZCN_ZCityOrgInitialized = true
+
+    local nativeList = hg.organism and hg.organism.list
+    if istable(nativeList) then nativeList[owner] = current end
+    return current, addedNative
+end
+
 local function SyncEntity(ent, state)
     if not IsValid(ent) then return end
 
-    -- Keep the full organism-compatible data in our own namespace on the
-    -- server. Z-City treats ent.organism as a player/ragdoll damage marker and
-    -- returns true for non-NPC NextBots, suppressing their engine damage.
     local owner = state.owner
+    local org, nativeReady
     if IsValid(owner) then
-        local org = owner.BZCN_Organism or {}
-        org.owner = owner
-        org.alive = IsAlive(owner)
-        org.entindex = owner:EntIndex()
-        org.health = math.max(tonumber(state.health) or owner:Health(), 0)
-        org.maxHealth = math.max(tonumber(state.maxHealth) or owner:GetMaxHealth(), 1)
-        org.blood = state.blood
-        org.maxBlood = state.maxBlood
-        org.bloodtype = org.bloodtype or "unknown"
-        org.pain = state.pain
-        org.shock = state.shock
-        org.skull = state.skull
-        org.brain = state.brain
-        org.chest = state.chest
-        org.pelvis = state.pelvis
-        org.stomach = state.stomach
-        org.spine1 = state.spine1
-        org.spine2 = state.spine2
-        org.spine3 = state.spine3
-        org.larm = state.larm
-        org.rarm = state.rarm
-        org.lleg = state.lleg
-        org.rleg = state.rleg
-        org.heart = state.heart
-        org.liver = state.liver
-        org.intestines = state.intestines
-        org.lungsL = {state.lungsL[1], state.lungsL[2]}
-        org.lungsR = {state.lungsR[1], state.lungsR[2]}
-        org.wounds = state.wounds
-        org.arterialwounds = state.arterialwounds
-        org.otrub = state.downed or state.gettingUp
-        org.canmove = not (state.downed or state.gettingUp)
-        org.dmgstack = org.dmgstack or {}
-        org.bulletwounds = org.bulletwounds or 0
-        org.stabwounds = org.stabwounds or 0
-        org.slashwounds = org.slashwounds or 0
-        org.bruises = org.bruises or 0
-        org.burns = org.burns or 0
-        org.explosionwounds = org.explosionwounds or 0
+        org, nativeReady = EnsureZCityOrganism(owner)
+        if org then
+            org.owner = owner
+            org.fakePlayer = true
+            org.alive = owner:Health() > 0
+            org.entindex = owner:EntIndex()
+            org.health = math.max(owner:Health(), 0)
+            org.maxHealth = math.max(tonumber(owner:GetMaxHealth()) or state.maxHealth or 1, 1)
+            owner.organism = org
+            owner.BZCN_Organism = org
+            if ent ~= owner then
+                -- A temporary injury ragdoll shares the live organism and owner
+                -- reference while downed, so Project Homogen and Z-City effects
+                -- recognize it as the same body rather than an unrelated prop.
+                ent.organism = org
+                ent.BZCN_Organism = org
+                ent.BZCNNPCOwner = owner
+            end
+            PullZCityOrganism(owner, state)
+        end
+    end
 
-        owner.BZCN_Organism = org
-        ent.BZCN_Organism = org
-        owner.organism = nil
-        ent.organism = nil
+    -- Keep a valid owner even in non-Z-City/fallback environments.
+    if not org then
+        org = IsValid(owner) and (owner.BZCN_Organism or {}) or {}
+        if IsValid(owner) then
+            org.owner = owner
+            org.alive = owner:Health() > 0
+            org.entindex = owner:EntIndex()
+            org.health = math.max(owner:Health(), 0)
+            org.maxHealth = math.max(tonumber(owner:GetMaxHealth()) or state.maxHealth or 1, 1)
+            org.blood = state.blood
+            org.maxBlood = state.maxBlood
+            org.bloodtype = org.bloodtype or "unknown"
+            org.pain = state.pain
+            org.shock = state.shock
+            org.skull = state.skull / 100
+            org.brain = state.brain / 100
+            org.chest = state.chest / 100
+            org.pelvis = state.pelvis / 100
+            org.stomach = state.stomach / 100
+            org.spine1 = state.spine1 / 100
+            org.spine2 = state.spine2 / 100
+            org.spine3 = state.spine3 / 100
+            org.larm = state.larm / 100
+            org.rarm = state.rarm / 100
+            org.lleg = state.lleg / 100
+            org.rleg = state.rleg / 100
+            org.heart = state.heart / 100
+            org.liver = state.liver / 100
+            org.intestines = state.intestines / 100
+            org.lungsL = state.lungsL
+            org.lungsR = state.lungsR
+            org.wounds = state.wounds
+            org.arterialwounds = state.arterialwounds
+            org.fakePlayer = true
+            owner.organism = org
+            owner.BZCN_Organism = org
+            ent.organism = org
+            ent.BZCN_Organism = org
+        end
     end
 
     SetNWFloat(ent, "BZCNNPCHealth", state.health)
@@ -238,6 +367,12 @@ function Support.Attach(ent)
         ent.BZCNNPCOldMoveType = ent:GetMoveType()
         ent.BZCNNPCOldSolid = ent:GetSolid()
         ent.BZCNNPCOldCollisionGroup = ent:GetCollisionGroup()
+    end
+
+    local organism = EnsureZCityOrganism(ent)
+    if organism then
+        state.usesZCityOrganism = true
+        PullZCityOrganism(ent, state)
     end
 
     tracked[ent] = state
