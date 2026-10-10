@@ -369,9 +369,9 @@ function Support.Attach(ent)
         ent.BZCNNPCOldCollisionGroup = ent:GetCollisionGroup()
     end
 
-    local organism = EnsureZCityOrganism(ent)
+    local organism, nativeReady = EnsureZCityOrganism(ent)
     if organism then
-        state.usesZCityOrganism = true
+        state.usesZCityOrganism = nativeReady == true
         PullZCityOrganism(ent, state)
     end
 
@@ -934,6 +934,16 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
     local state = Support.Attach(target)
     if not state then return end
 
+    if state.usesZCityOrganism then
+        -- Z-City's own EntityTakeDamage callback is the injury authority for
+        -- native organism-backed NPCs. Avoid applying the fallback injury
+        -- model a second time if this hook runs before Z-City's hook.
+        state.health = math.max(target:Health(), 0)
+        PullZCityOrganism(target, state)
+        SyncEntity(target, state)
+        return
+    end
+
     local amount = math.max(dmg:GetDamage(), 0)
     if amount <= 0 then return end
 
@@ -963,6 +973,31 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
 
     state.health = target:Health()
     SyncEntity(target, state)
+end)
+
+hook.Add("PostEntityTakeDamage", "BZCNNPCSupport_ZCityDamageSync", function(target, dmg, tookDamage)
+    if not IsSupportedNPC(target) or not target.BZCNNPCOrg then return end
+    local state = target.BZCNNPCOrg
+    if not state.usesZCityOrganism then return end
+
+    PullZCityOrganism(target, state)
+    state.health = math.max(target:Health(), 0)
+    SyncEntity(target, state)
+
+    local legFailure = state.lleg >= 65 or state.rleg >= 65
+        or (state.lleg >= 45 and state.rleg >= 45)
+    local organismDown = target.organism and target.organism.otrub == true
+    if (legFailure or organismDown) and not state.downed and not state.knockdownQueued and IsAlive(target) then
+        state.knockdownQueued = true
+        local reason = legFailure and "legs" or "impact"
+        timer.Simple(0, function()
+            if not IsValid(target) then return end
+            local current = target.BZCNNPCOrg
+            if not current then return end
+            current.knockdownQueued = false
+            if not current.downed and IsAlive(target) then EnterDownedState(target, reason) end
+        end)
+    end
 end)
 
 hook.Add("OnNPCKilled", "BZCNNPCSupport_DeathCleanup", function(ent)
