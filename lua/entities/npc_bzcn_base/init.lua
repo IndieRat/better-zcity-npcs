@@ -446,7 +446,8 @@ function ENT:PlayBZCNAttackAnimation()
     if istable(animationClass) then
         local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass
         local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-        local holdType = istable(stored) and (stored.HoldType or stored.holdtype) or nil
+        local holdType = profile.AnimationHoldType
+            or (istable(stored) and (stored.HoldType or stored.holdtype)) or nil
         if not isstring(holdType) or holdType == "" then
             holdType = profile.Ranged and (string.find(weaponClass or "", "pistol") and "pistol"
                 or (string.find(weaponClass or "", "smg") or string.find(weaponClass or "", "ar2")) and "smg"
@@ -457,7 +458,7 @@ function ENT:PlayBZCNAttackAnimation()
             slam = "smg", fist = "normal", melee2 = "melee", knife = "melee",
             duel = "pistol", revolver = "smg"
         }
-        holdType = translators[holdType] or holdType
+        holdType = profile.AnimationHoldType or translators[holdType] or holdType
         local animationSet = animationClass[holdType] or animationClass.normal
             or animationClass.melee or animationClass
         local activity = istable(animationSet) and animationSet.attack or nil
