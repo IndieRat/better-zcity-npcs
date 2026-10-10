@@ -975,6 +975,10 @@ local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
     rag.armors = IsValid(owner) and table.Copy(owner.armors or {}) or (rag.armors or {})
     if IsValid(owner) then
         rag.inventory = table.Copy(owner.inventory or owner.Inventory or {Weapons = {}, Items = {}, Armor = {}})
+        if isfunction(rag.SetNetVar) then
+            pcall(rag.SetNetVar, rag, "Inventory", rag.inventory)
+            pcall(rag.SetNetVar, rag, "Armor", rag.armors)
+        end
         rag:SetNWEntity("BZCNNPCDeathOwner", owner)
         -- Match Z-City's own NPC death conversion so Project Homogen and other
         -- ragdoll extensions receive their usual event and networked metadata.
