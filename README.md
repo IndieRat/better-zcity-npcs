@@ -75,6 +75,10 @@ The adapter dump shows the actor snapshot, visible targets, hostiles, and fields
 
 The normalized actor exposes fields like `PlayerClassName`, `Health`, `MaxHealth`, `Speed`, `Inventory`, `Armor`, `Ammo`, `SelectedWeapon`, and `Organism`. Target records are available as `context.sense.Targets`; player-shaped records are available as `context.players`. Z-City inventory weapon entries that refer to live SWEP entities become virtual owned-item flags when copied to NPC state, so the NPC never takes ownership of another player's weapon entity. Class writeback is restricted to registered BZCN classes. Only approved data fields are reflected back onto the NPC.
 
+### HUD and organism bridge
+
+Server-side physiology lives in `BZCN_Organism`; its fields are mirrored to clients, where the bridge adds an `organism` view with a valid `owner` for HUD and visual hooks. The addon keeps that client display shape separate from the server-side entity marker so Z-City's player-oriented damage path does not swallow normal NextBot health damage. Aim at a managed NPC or its temporary ragdoll to see the adapted class, health, blood, pain, shock, and body-part state.
+
 ## Compatibility approach and limits
 
 NPCs expose Z-City-style fields such as `PlayerClassName`, `Inventory.Weapons/Items/Armor`, `armors`, `armors_health`, `organism`, `GetNetVar`, and `SetNetVar`. Entity-valued netvars and ragdoll ownership links are mirrored for systems that inspect them.
