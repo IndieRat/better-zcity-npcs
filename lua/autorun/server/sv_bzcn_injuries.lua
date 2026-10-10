@@ -910,10 +910,12 @@ Support.Recover = Recover
 local function InstallZCityFakeAdapter()
     if not hg or not isfunction(hg.Fake) then return false end
     if hg.BZCNNPCFakeAdapter and hg.Fake == hg.BZCNNPCFakeAdapter then return true end
-    if hg.BZCNNPCFakeAdapter then return true end
 
+    -- Another addon may have wrapped/replaced hg.Fake since our last retry.
+    -- Compose over its current function rather than silently leaving our
+    -- NextBot bridge disconnected or overwriting the other addon's behavior.
     local nativeFake = hg.Fake
-    hg.BZCNNPCOriginalFake = nativeFake
+    hg.BZCNNPCOriginalFake = hg.BZCNNPCOriginalFake or nativeFake
     local function BZCNNPCFakeAdapter(ent, ...)
         if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
@@ -931,10 +933,10 @@ end
 local function InstallZCityFakeUpAdapter()
     if not hg or not isfunction(hg.FakeUp) then return false end
     if hg.BZCNNPCFakeUpAdapter and hg.FakeUp == hg.BZCNNPCFakeUpAdapter then return true end
-    if hg.BZCNNPCFakeUpAdapter then return true end
 
+    -- Match the hg.Fake retry behavior above when other addons load later.
     local nativeFakeUp = hg.FakeUp
-    hg.BZCNNPCOriginalFakeUp = nativeFakeUp
+    hg.BZCNNPCOriginalFakeUp = hg.BZCNNPCOriginalFakeUp or nativeFakeUp
     local function BZCNNPCFakeUpAdapter(ent, ...)
         if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
@@ -949,9 +951,58 @@ local function InstallZCityFakeUpAdapter()
     return true
 end
 
+local function InstallZCityStunAdapters()
+    if not hg then return end
+
+    if isfunction(hg.StunPlayer) then
+        if hg.BZCNNPCStunAdapter ~= hg.StunPlayer then
+            local nativeStun = hg.StunPlayer
+            hg.BZCNNPCOriginalStunPlayer = hg.BZCNNPCOriginalStunPlayer or nativeStun
+            local function BZCNNPCStunAdapter(ent, duration, ...)
+                if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
+                    local state = Support.Attach(ent)
+                    if not state then return false end
+                    local seconds = math.max(tonumber(duration) or 1, 0.1)
+                    local org = ent.organism or ent.BZCN_Organism
+                    if istable(org) then org.stun = CurTime() + seconds end
+                    if not state.downed then EnterDownedState(ent, "stun") end
+                    hook.Run("BZCN_NPCStunned", ent, seconds, false)
+                    return true
+                end
+                return nativeStun(ent, duration, ...)
+            end
+            hg.BZCNNPCStunAdapter = BZCNNPCStunAdapter
+            hg.StunPlayer = BZCNNPCStunAdapter
+        end
+    end
+
+    if isfunction(hg.LightStunPlayer) then
+        if hg.BZCNNPCLightStunAdapter ~= hg.LightStunPlayer then
+            local nativeLightStun = hg.LightStunPlayer
+            hg.BZCNNPCOriginalLightStunPlayer = hg.BZCNNPCOriginalLightStunPlayer or nativeLightStun
+            local function BZCNNPCLightStunAdapter(ent, duration, ...)
+                if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
+                    local state = Support.Attach(ent)
+                    if not state then return false end
+                    local seconds = math.max(tonumber(duration) or 1, 0.1)
+                    local org = ent.organism or ent.BZCN_Organism
+                    if istable(org) then org.lightstun = CurTime() + seconds end
+                    if not state.downed then EnterDownedState(ent, "lightstun") end
+                    hook.Run("BZCN_NPCStunned", ent, seconds, true)
+                    return true
+                end
+                return nativeLightStun(ent, duration, ...)
+            end
+            hg.BZCNNPCLightStunAdapter = BZCNNPCLightStunAdapter
+            hg.LightStunPlayer = BZCNNPCLightStunAdapter
+        end
+    end
+end
+
 local function InstallZCityKnockdownAdapters()
     InstallZCityFakeAdapter()
     InstallZCityFakeUpAdapter()
+    InstallZCityStunAdapters()
 end
 
 hook.Add("Initialize", "BZCNNPCSupport_ZCityKnockdownAdapters", function()
