@@ -110,6 +110,8 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "downed"
     elseif gettingUp then
         state = "getting_up"
+    elseif CurTime() < (self.BZCNMedicalUntil or 0) then
+        state = "treating"
     elseif CurTime() < (self.BZCNClimbUntil or 0) then
         state = "climbing"
     elseif support and support.ShouldCrawl and support.ShouldCrawl(self) then
@@ -125,6 +127,7 @@ function ENT:UpdateBZCNMovementState(speed)
     local previous = self.BZCNMovementState
     if previous ~= state then
         self.BZCNMovementState = state
+        if previous == "treating" and state ~= "treating" then self.BZCNMedicalSequence = nil end
         if SERVER and self.SetNW2String then self:SetNW2String("BZCNMovementState", state) end
         hook.Run("BZCN_NPCMovementStateChanged", self, previous, state)
     end
@@ -199,7 +202,7 @@ end
 function ENT:TryBZCNClimb()
     if not SERVER or not self.loco or not self:OnGround() then return false end
     if CurTime() < (self.BZCNNextClimbTry or 0) then return false end
-    if self:GetNW2Bool("BZCNNPCDowned", false) then return false end
+    if self:GetNW2Bool("BZCNNPCDowned", false) or CurTime() < (self.BZCNMedicalUntil or 0) then return false end
     self.BZCNNextClimbTry = CurTime() + 0.75
 
     local forward = self:GetForward()
@@ -255,6 +258,32 @@ function ENT:BodyUpdate()
     if state == "getting_up" then
         self:SetPlaybackRate(1)
         self:FrameAdvance()
+        return
+    end
+
+    if state == "treating" then
+        if self.loco then self.loco:SetDesiredSpeed(0) end
+        local sequence = self.BZCNMedicalSequence
+        if not isnumber(sequence) or sequence < 0 then
+            sequence = GetFirstSequence(self, {
+                "use_item", "use_medkit", "medic", "item_use", "gesture_item_place", "use"
+            })
+            if sequence < 0 and isnumber(ACT_GESTURE_ITEM_PLACE) and self.SelectWeightedSequence then
+                local ok, selected = pcall(self.SelectWeightedSequence, self, ACT_GESTURE_ITEM_PLACE)
+                if ok and isnumber(selected) and selected >= 0 then sequence = selected end
+            end
+            self.BZCNMedicalSequence = sequence
+        end
+        if isnumber(sequence) and sequence >= 0 then
+            if self:GetSequence() ~= sequence then
+                self:ResetSequence(sequence)
+                self:SetCycle(0)
+            end
+            self:SetPlaybackRate(1)
+            self:FrameAdvance()
+        else
+            self:BodyMoveXY()
+        end
         return
     end
 
