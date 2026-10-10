@@ -982,6 +982,7 @@ end
 
 hook.Add("CreateEntityRagdoll", "BZCNNPCSupport_ZCityDeathRagdoll", function(owner, rag)
     if not IsValid(owner) or not IsValid(rag) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return end
+    if not owner.BZCN_DeathRagdollPending and not owner.BZCNDeathHandled then return end
     local sourceOrg = owner.BZCN_DeathOrganismSnapshot or owner.organism or owner.BZCN_Organism
     InstallDeathRagdollOrganism(owner, rag, sourceOrg or {})
     if hg.organism and isfunction(hg.organism.Remove) and owner.organism then
@@ -1128,6 +1129,14 @@ end)
 hook.Add("EntityRemoved", "BZCNNPCSupport_EntityCleanup", function(ent)
     if not ent then return end
     tracked[ent] = nil
+
+    -- Do not leave a stale entry in Z-City's native Think list if an external
+    -- cleanup removes a managed entity before the death-ragdoll hook runs.
+    if BZCN and BZCN.IsManaged and BZCN.IsManaged(ent)
+        and hg.organism and isfunction(hg.organism.Remove)
+        and istable(hg.organism.list) and hg.organism.list[ent] then
+        pcall(hg.organism.Remove, ent)
+    end
 
     local state = ent.BZCNNPCOrg
     if state then
