@@ -141,9 +141,37 @@ function BZCN.InstallAdapter(ent)
     local data = ent:GetTable()
     data.BZCN_NetVars = data.BZCN_NetVars or {}
 
-    -- Instance-local methods only: do not mutate the global Entity metatable.
-    data.GetNetVar = function(self, key, default) return BZCN.GetNetVar(self, key, default) end
-    data.SetNetVar = function(self, key, value) return BZCN.SetNetVar(self, key, value) end
+    -- Preserve the original Z-City netvar functions. Many organism modules
+    -- use SetNetVar for wounds/armor/name sync; a BZCN-only replacement makes
+    -- those changes invisible to Project Homogen and other client consumers.
+    if not data.BZCN_NativeNetVarsCaptured then
+        data.BZCN_NativeGetNetVar = ent.GetNetVar
+        data.BZCN_NativeSetNetVar = ent.SetNetVar
+        data.BZCN_NativeNetVarsCaptured = true
+    end
+    local nativeGetNetVar = data.BZCN_NativeGetNetVar
+    local nativeSetNetVar = data.BZCN_NativeSetNetVar
+
+    -- Instance-local wrappers only: keep Z-City replication and the BZCN
+    -- snapshot adapter synchronized without mutating global Entity metatables.
+    data.GetNetVar = function(self, key, default)
+        local tableData = self:GetTable()
+        local values = tableData.BZCN_NetVars
+        if values and values[key] ~= nil then
+            return BZCN.GetNetVar(self, key, default)
+        end
+        if isfunction(nativeGetNetVar) then
+            local ok, value = pcall(nativeGetNetVar, self, key, default)
+            if ok and value ~= nil then return value end
+        end
+        return BZCN.GetNetVar(self, key, default)
+    end
+    data.SetNetVar = function(self, key, value)
+        if isfunction(nativeSetNetVar) then
+            pcall(nativeSetNetVar, self, key, value)
+        end
+        return BZCN.SetNetVar(self, key, value)
+    end
 
     -- Z-City's damage hook has a separate NPC branch and suppresses engine
     -- damage for organism-backed entities whose IsNPC() returns false. Keep
