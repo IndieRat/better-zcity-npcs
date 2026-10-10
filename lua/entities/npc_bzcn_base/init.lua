@@ -427,10 +427,12 @@ function ENT:FollowAlly(target)
             end
             if path:IsValid() then path:Update(self) end
             local speed = self:GetRunSpeed() or profile.Speed or self.MoveSpeed or 175
-            self.loco:SetDesiredSpeed(speed * 0.62)
+            local crawl = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
+                and hg.BZCNNPCSupport.ShouldCrawl(self)
+            self.loco:SetDesiredSpeed(speed * (crawl and 0.42 or 0.62))
             if self.loco:IsStuck() then
                 self.loco:ClearStuck()
-                self.loco:Jump()
+                if not (self.TryBZCNClimb and self:TryBZCNClimb()) then self.loco:Jump() end
                 return
             end
             coroutine.yield()
@@ -692,5 +694,7 @@ function ENT:OnKilled(damageInfo)
 end
 
 function ENT:HandleStuck()
-    if self.loco then self.loco:ClearStuck() end
+    if not self.loco then return end
+    if self.TryBZCNClimb and self:TryBZCNClimb() then return end
+    self.loco:ClearStuck()
 end
