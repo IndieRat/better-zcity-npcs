@@ -216,8 +216,8 @@ function ENT:ApplyBZCNRelationships()
 end
 
 function ENT:FindEnemy()
-    -- Enemy selection consumes the adapter chain's sight records instead of
-    -- independently scanning players/NPCs with different perception rules.
+    -- Enemy selection consumes the adapter chain's sense records. Before
+    -- taking the nearest hostile, look for a threat that recently hurt an ally.
     local context = BZCN.AdapterCycle and BZCN.AdapterCycle(self, false)
     if not context and BZCN.GetLastAdapterContext then
         context = BZCN.GetLastAdapterContext(self)
@@ -225,16 +225,49 @@ function ENT:FindEnemy()
 
     local sense = context and context.sense
     local hostiles = sense and sense.Hostiles or {}
+    local targets = sense and sense.Targets or {}
+    local profile = self:GetBZCNProfile()
     local radius = self.LoseTargetDist or 1400
     local preferred = context and context.intent and context.intent.Target
     local best, bestDistance
 
-    if IsValid(preferred) then
+    local function IsVisibleHostile(target)
         for _, record in ipairs(hostiles) do
-            if record.Entity == preferred and record.Visible and self:IsBZCNEnemy(preferred) then
-                best = preferred
-                bestDistance = self:GetPos():DistToSqr(preferred:GetPos())
+            if record.Entity == target and record.Visible and self:IsBZCNEnemy(target) then
+                return true
+            end
+        end
+        return false
+    end
+
+    if IsValid(preferred) and IsVisibleHostile(preferred) then
+        best = preferred
+        bestDistance = self:GetPos():DistToSqr(preferred:GetPos())
+    end
+
+    -- Protect players, civilians, native Z-City NPCs and other friendly NextBots.
+    local memory = tonumber(profile.HelpMemory) or 10
+    local helpRange = tonumber(profile.HelpRange) or radius
+    for _, allyRecord in ipairs(targets) do
+        local ally = allyRecord.Entity
+        if IsValid(ally) and self:IsBZCNAlly(ally)
+            and self:GetPos():DistToSqr(ally:GetPos()) <= helpRange * helpRange then
+            local attacker = ally.BZCNLastAttacker
+            local recent = CurTime() - (tonumber(ally.BZCNLastDamageTime) or 0) <= memory
+            if IsValid(attacker) and attacker ~= self and recent
+                and IsVisibleHostile(attacker) then
+                best = attacker
+                bestDistance = self:GetPos():DistToSqr(attacker:GetPos())
                 break
+            end
+
+            if isfunction(ally.GetEnemy) then
+                local ok, allyEnemy = pcall(ally.GetEnemy, ally)
+                if ok and IsValid(allyEnemy) and IsVisibleHostile(allyEnemy) then
+                    best = allyEnemy
+                    bestDistance = self:GetPos():DistToSqr(allyEnemy:GetPos())
+                    break
+                end
             end
         end
     end
@@ -251,6 +284,82 @@ function ENT:FindEnemy()
 
     self.BZCNEnemy = best
     return best
+end
+
+function ENT:FindFollowTarget()
+    local profile = self:GetBZCNProfile()
+    if profile.FollowAllies == false then return nil end
+    local context = BZCN.GetLastAdapterContext and BZCN.GetLastAdapterContext(self)
+    local sense = context and context.sense
+    if not sense then return nil end
+
+    local followRange = tonumber(profile.FollowRange) or 900
+    local followRangeSqr = followRange * followRange
+    local preferred = self.BZCNFollowTarget
+    if not IsValid(preferred) and self.GetNW2Entity then
+        preferred = self:GetNW2Entity("BZCNFollowTarget")
+    end
+    if IsValid(preferred) and self:IsBZCNAlly(preferred) then
+        for _, record in ipairs(sense.Targets or {}) do
+            if record.Entity == preferred and record.Visible
+                and record.DistanceSquared <= followRangeSqr then return preferred end
+        end
+    end
+
+    local best, bestDistance
+    for _, record in ipairs(sense.Targets or {}) do
+        local target = record.Entity
+        if IsValid(target) and record.Visible and self:IsBZCNAlly(target)
+            and record.DistanceSquared <= followRangeSqr then
+            -- Prefer a player to an NPC crowd when choosing whom to escort.
+            local score = record.DistanceSquared + (target:IsPlayer() and 0 or 90000)
+            if not bestDistance or score < bestDistance then
+                best, bestDistance = target, score
+            end
+        end
+    end
+    self.BZCNFollowTarget = best
+    return best
+end
+
+function ENT:FollowAlly(target)
+    if not IsValid(target) then return end
+    local profile = self:GetBZCNProfile()
+    local followDistance = tonumber(profile.FollowDistance) or 150
+    local path = Path("Follow")
+    path:SetMinLookAheadDistance(125)
+    path:SetGoalTolerance(followDistance)
+    path:Compute(self, target:GetPos())
+    if not path:IsValid() then return end
+
+    while IsValid(target) and self:IsBZCNAlly(target) do
+        if self:GetNW2Bool("BZCNNPCDowned", false)
+            or (hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
+                and hg.BZCNNPCSupport.IsGettingUp(self)) then return end
+
+        if IsValid(self:FindEnemy()) then return end
+        local distanceSquared = self:GetPos():DistToSqr(target:GetPos())
+        if distanceSquared > (tonumber(profile.FollowRange) or 900)^2 then return end
+
+        if distanceSquared <= followDistance * followDistance then
+            self.loco:SetDesiredSpeed(0)
+            self.loco:FaceTowards(target:GetPos())
+            coroutine.wait(0.15)
+        else
+            if path:GetAge() > 0.35 or not path:IsValid() then
+                path:Compute(self, target:GetPos())
+            end
+            if path:IsValid() then path:Update(self) end
+            local speed = self:GetRunSpeed() or profile.Speed or self.MoveSpeed or 175
+            self.loco:SetDesiredSpeed(speed * 0.62)
+            if self.loco:IsStuck() then
+                self.loco:ClearStuck()
+                self.loco:Jump()
+                return
+            end
+            coroutine.yield()
+        end
+    end
 end
 
 function ENT:PlayBZCNAttackAnimation()
