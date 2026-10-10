@@ -51,6 +51,45 @@ function ENT:Initialize()
     -- with the shared class template here.
     self.BZCNClassProfile = self.BZCNClassProfile or profile
     self.BZCN_Faction = profile.Faction or className
+
+    if className == "default" then
+        local appearance
+        if hg and hg.Appearance and isfunction(hg.Appearance.GetRandomAppearance)
+            and isfunction(hg.Appearance.ForceApplyAppearance) then
+            local ok, result = pcall(hg.Appearance.GetRandomAppearance)
+            if ok and istable(result) then
+                appearance = result
+                -- This is the same appearance entry point Z-City uses for
+                -- its converted NPCs; it applies their model/clothes/bodygroups.
+                pcall(hg.Appearance.ForceApplyAppearance, self, appearance)
+            end
+        end
+
+        if not util.IsValidModel(self:GetModel()) or self:GetModel() == profile.Model then
+            local civilianModels = {
+                "models/player/group03/male_01.mdl", "models/player/group03/male_02.mdl",
+                "models/player/group03/male_03.mdl", "models/player/group03/male_04.mdl",
+                "models/player/group03/male_05.mdl", "models/player/group03/male_06.mdl",
+                "models/player/group03/male_07.mdl", "models/player/group03/male_08.mdl",
+                "models/player/group03/male_09.mdl", "models/player/group03/female_01.mdl",
+                "models/player/group03/female_02.mdl", "models/player/group03/female_03.mdl",
+                "models/player/group03/female_04.mdl", "models/player/group03/female_05.mdl",
+                "models/player/group03/female_06.mdl"
+            }
+            local selectedModel = civilianModels[math.random(#civilianModels)]
+            if util.IsValidModel(selectedModel) then self:SetModel(selectedModel) end
+            self:SetSkin(math.random(0, math.max(self:SkinCount() - 1, 0)))
+        end
+
+        if appearance then self.CurAppearance = table.Copy(appearance) end
+        self.BZCNClassProfile.Model = self:GetModel()
+        local displayName = appearance and appearance.AName or "Civilian"
+        self.BZCNDisplayName = displayName
+        self.PlayerName = displayName
+        self:SetNW2String("BZCNDisplayName", displayName)
+        if self.SetNWString then self:SetNWString("PlayerName", displayName) end
+    end
+
     if profile.FurryStyle and self:GetModel() == profile.Model then
         self:SetSkin(profile.Skin or 4)
         for _, bodygroup in ipairs(self:GetBodyGroups() or {}) do
