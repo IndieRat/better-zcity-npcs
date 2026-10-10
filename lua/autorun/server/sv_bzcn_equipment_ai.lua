@@ -188,9 +188,35 @@ function BZCN.FireRuntimeWeapon(ent, target)
     if not IsValid(weapon) then return FireStatBasedShot(ent, target, nil) end
 
     local now = CurTime()
-    local beforeNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
+    local primary = istable(weapon.Primary) and weapon.Primary or {}
+    local entityNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
+    local scriptNext = math.max(tonumber(primary.Next) or 0, tonumber(primary.NextFire) or 0)
+    local beforeNext = math.max(entityNext, scriptNext)
     if beforeNext > now then return true end
+
+    local clipSize = weapon.GetMaxClip1 and weapon:GetMaxClip1() or tonumber(primary.ClipSize) or 0
     local beforeClip = weapon.Clip1 and weapon:Clip1() or -1
+    if clipSize > 0 and beforeClip == 0 then
+        -- A NextBot has no native Player reload input/viewmodel. Still call the
+        -- real SWEP Reload method, then refill its own clip after a short
+        -- reload window so native weapons don't become infinite-ammo fallback guns.
+        if not weapon.BZCNReloadUntil then
+            weapon.BZCNReloadUntil = now + math.max(tonumber(profile.ReloadDelay) or 1.25, 0.5)
+            if isfunction(weapon.Reload) then pcall(weapon.Reload, weapon) end
+            hook.Run("BZCN_NPCWeaponReload", ent, weapon)
+            return true
+        end
+        if now < weapon.BZCNReloadUntil then return true end
+        local defaultClip = tonumber(primary.DefaultClip)
+        if not defaultClip or defaultClip < 1 then defaultClip = clipSize end
+        weapon:SetClip1(math.Clamp(defaultClip, 1, clipSize))
+        if weapon.SetNWInt then weapon:SetNWInt("Clip1", weapon:Clip1()) end
+        weapon.drawBullet = true
+        primary.Next = now + 0.2
+        weapon.BZCNReloadUntil = nil
+        return true
+    end
+
     PlaceRuntimeWeapon(ent, weapon)
     local source = ent:WorldSpaceCenter() + Vector(0, 0, 8)
     local destination = target:WorldSpaceCenter()
@@ -206,8 +232,12 @@ function BZCN.FireRuntimeWeapon(ent, target)
     end
 
     local afterNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
+    local afterPrimaryNext = math.max(
+        tonumber(istable(weapon.Primary) and weapon.Primary.Next) or 0,
+        tonumber(istable(weapon.Primary) and weapon.Primary.NextFire) or 0
+    )
     local afterClip = weapon.Clip1 and weapon:Clip1() or -1
-    local fired = attemptedNative and ok and (afterNext > beforeNext or
+    local fired = attemptedNative and ok and (afterNext > entityNext or afterPrimaryNext > scriptNext or
         (beforeClip >= 0 and afterClip >= 0 and afterClip < beforeClip))
 
     -- Don't pre-set NextPrimaryFire: native PrimaryAttack implementations
@@ -220,7 +250,9 @@ function BZCN.FireRuntimeWeapon(ent, target)
     if fired and weapon.SetNextPrimaryFire then
         local currentNext = weapon:GetNextPrimaryFire()
         if currentNext <= now then
-            weapon:SetNextPrimaryFire(now + math.max(tonumber(profile.AttackDelay) or 0.35, 0.08))
+            local delay = math.max(tonumber(profile.AttackDelay) or 0.35, 0.08)
+            weapon:SetNextPrimaryFire(now + delay)
+            if istable(weapon.Primary) then weapon.Primary.Next = now + delay end
         end
     end
 
