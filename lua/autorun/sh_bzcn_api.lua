@@ -184,9 +184,23 @@ function BZCN.InstallAdapter(ent)
     -- damage for organism-backed entities whose IsNPC() returns false. Keep
     -- the true Player/NextBot identity intact while giving Z-City its expected
     -- NPC predicate for managed adapters.
-    local nativeIsNPC = ent.IsNPC
+    local nativeIsNPC = data.BZCN_NativeIsNPC
+    if not data.BZCN_NativeIsNPCCaptured then
+        nativeIsNPC = ent.IsNPC
+        data.BZCN_NativeIsNPC = nativeIsNPC
+        data.BZCN_NativeIsNPCCaptured = true
+    end
     data.IsNPC = function(self)
         if BZCN.IsManaged and BZCN.IsManaged(self) then return true end
+
+        -- A temporary downed rag is a hit proxy for a live managed NPC. Make
+        -- the Z-City damage hook take its NPC path, then relay the applied
+        -- damage to the hidden owner in PostEntityTakeDamage.
+        local owner = self.BZCNNPCOwner
+        if not IsValid(owner) and istable(self.organism) then owner = self.organism.owner end
+        if IsValid(owner) and BZCN.IsManaged and BZCN.IsManaged(owner)
+            and owner.BZCNNPCDowned then return true end
+
         if isfunction(nativeIsNPC) then
             local ok, result = pcall(nativeIsNPC, self)
             if ok then return result end
