@@ -200,20 +200,24 @@ function ENT:ApplyBZCNRelationships()
     if not SERVER then return end
     local ownFaction = self.BZCN_Faction or "civilian"
     if ownFaction == "civilian" then ownFaction = "default" end
+    local profile = self:GetBZCNProfile()
+
     for _, other in ipairs(ents.FindByClass("npc_*")) do
-        if not IsValid(other) or other == self or not isfunction(other.AddEntityRelationship) then continue end
+        if not IsValid(other) or other == self then continue end
         local otherFaction = nativeNPCFaction[other:GetClass()]
         if not otherFaction then continue end
-        local disposition
-        if otherFaction == ownFaction then
-            disposition = D_LI
-        elseif otherFaction == "Combine" and (ownFaction == "Rebel" or ownFaction == "default" or ownFaction == "furry") then
-            disposition = D_HT
-        elseif ownFaction == "Combine" and (otherFaction == "Rebel" or otherFaction == "default") then
-            disposition = D_HT
+
+        local hostile = false
+        for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
+            if enemyFaction == otherFaction then hostile = true break end
         end
-        if disposition ~= nil then
-            pcall(other.AddEntityRelationship, other, self, disposition, disposition == D_HT and 99 or 90)
+        local disposition = hostile and D_HT or D_LI
+        if isfunction(other.AddEntityRelationship) then
+            pcall(other.AddEntityRelationship, other, self, disposition, hostile and 99 or 90)
+        end
+        if isfunction(self.AddEntityRelationship) then
+            pcall(self.AddEntityRelationship, self, other,
+                hostile and D_HT or D_LI, hostile and 99 or 90)
         end
     end
 end
