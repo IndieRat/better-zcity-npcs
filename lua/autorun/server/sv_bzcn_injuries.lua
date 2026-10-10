@@ -1013,7 +1013,13 @@ hook.Add("InitPostEntity", "BZCNNPCSupport_ZCityKnockdownAdapters", function()
 end)
 timer.Create("BZCNNPCSupport_ZCityKnockdownAdapterRetry", 0.5, 20, function()
     InstallZCityKnockdownAdapters()
-    if hg and hg.BZCNNPCFakeAdapter and hg.BZCNNPCFakeUpAdapter then
+    if not hg then return end
+
+    local fakeReady = not isfunction(hg.Fake) or hg.Fake == hg.BZCNNPCFakeAdapter
+    local fakeUpReady = not isfunction(hg.FakeUp) or hg.FakeUp == hg.BZCNNPCFakeUpAdapter
+    local stunReady = not isfunction(hg.StunPlayer) or hg.StunPlayer == hg.BZCNNPCStunAdapter
+    local lightStunReady = not isfunction(hg.LightStunPlayer) or hg.LightStunPlayer == hg.BZCNNPCLightStunAdapter
+    if fakeReady and fakeUpReady and stunReady and lightStunReady then
         timer.Remove("BZCNNPCSupport_ZCityKnockdownAdapterRetry")
     end
 end)
