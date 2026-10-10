@@ -1430,17 +1430,10 @@ hook.Add("PostEntityTakeDamage", "BZCNNPCSupport_ZCityDamageSync", function(targ
 
     local legFailure = state.lleg >= 65 or state.rleg >= 65
         or (state.lleg >= 45 and state.rleg >= 45)
-    local organismDown = target.organism and target.organism.otrub == true
-    if (legFailure or organismDown) and not state.downed and not state.knockdownQueued and IsAlive(target) then
-        state.knockdownQueued = true
-        local reason = legFailure and "legs" or "impact"
-        timer.Simple(0, function()
-            if not IsValid(target) then return end
-            local current = target.BZCNNPCOrg
-            if not current then return end
-            current.knockdownQueued = false
-            if not current.downed and IsAlive(target) then EnterDownedState(target, reason) end
-        end)
+    local physiologicallyDown, physiologicalReason = IsZCityPhysiologicallyIncapacitated(target, state)
+    if (legFailure or physiologicallyDown) and not state.downed
+        and not state.knockdownQueued and IsAlive(target) then
+        QueueZCityDowned(target, physiologicalReason or (legFailure and "legs" or "impact"), false)
     end
 end)
 
