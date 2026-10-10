@@ -75,9 +75,21 @@ The adapter dump shows the actor snapshot, visible targets, hostiles, and fields
 
 The normalized actor exposes fields like `PlayerClassName`, `Health`, `MaxHealth`, `Speed`, `Inventory`, `Armor`, `Ammo`, `SelectedWeapon`, and `Organism`. Target records are available as `context.sense.Targets`; player-shaped records are available as `context.players`. Z-City inventory weapon entries that refer to live SWEP entities become virtual owned-item flags when copied to NPC state, so the NPC never takes ownership of another player's weapon entity. Class writeback is restricted to registered BZCN classes. Only approved data fields are reflected back onto the NPC.
 
-### HUD and organism bridge
+### Native Z-City organism and ragdolls
 
-Server-side physiology lives in `BZCN_Organism`; its fields are mirrored to clients, where the bridge adds an `organism` view with a valid `owner` for HUD and visual hooks. The addon keeps that client display shape separate from the server-side entity marker so Z-City's player-oriented damage path does not swallow normal NextBot health damage. Aim at a managed NPC or its temporary ragdoll to see the adapted class, health, blood, pain, shock, and body-part state.
+The server now follows the same conversion path used by Z-City's own NPC support in `lua/homigrad/sv_npcstuff.lua`: call `hg.organism.Add(ent)`, run `hg.organism.Clear(ent.organism)` once, and set `ent.organism.fakePlayer = true`. The adapter installs an instance-local `IsNPC()` facade for managed NextBots, which is important because Z-City's damage hook ends with an NPC-specific return value. It does not spoof `IsPlayer()`.
+
+Injury updates are read back from Z-City's real organism table, including blood, pain, shock, body-part damage and wounds. A temporary knockdown ragdoll shares the live organism/owner reference so Z-City-side visual systems can recognize it. On death, the ragdoll gets its own registered organism with `owner = ragdoll`, `alive = false`, and `fakePlayer = true`, following the pattern in Z-City's `CreateEntityRagdoll` conversion. Native `GetNetVar/SetNetVar` are preserved and bridged with BZCN's smaller metadata fields so wound/armor/name replication remains available to Z-City addons such as Project Homogen.
+
+The client HUD bridge mirrors health, blood, pain, shock and body-part state for inspection when aiming at a living managed NPC or its temporary knockdown ragdoll.
+
+## Animation, civilian appearance, and ally AI
+
+Movement asks `hg.IXAnims.GetModelClass(model)` and uses the corresponding `hg.IXAnims` activity table for idle, walk, run, crouch-walk and weapon hold type. Attacks consult the same table's attack activity before falling back to available model sequences. This lets supported Z-City animation classes work without running Player-only `CalcMainActivity`/Player animation callbacks on a NextBot.
+
+The `default` civilian first tries Z-City's `hg.Appearance.GetRandomAppearance()` and `hg.Appearance.ForceApplyAppearance()` path, which supplies its civilian model/clothing/bodygroups. If that API is unavailable or fails, it falls back to a random standard Group03 male/female civilian model and skin.
+
+Managed NPCs classify native Z-City Combine/civilian NPCs, establish entity relationships, and use a shared sensing context to follow visible allies. If a nearby ally or player has recently been attacked, their next visible hostile is prioritized as a help target. The behaviour is cooperative for the managed NPCs; it cannot take over a real player's controls or guarantee that unrelated native NPC AI will actively follow the scripted NextBot.
 
 ## Compatibility approach and limits
 
