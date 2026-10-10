@@ -7,7 +7,7 @@ ENT.Category = "Better ZCity NPCs"
 ENT.Spawnable = false
 ENT.AdminOnly = false
 ENT.RenderGroup = RENDERGROUP_OPAQUE
-ENT.BZCNClass = "humanityForces"
+ENT.BZCNClass = "default"
 ENT.Model = "models/player/group03/male_07.mdl"
 ENT.MoveSpeed = 175
 ENT.AttackRange = 78
@@ -22,8 +22,8 @@ end
 
 function ENT:BodyUpdate()
     if not IsValid(self) then return end
-    if hg and hg.GooberNPCSupport and hg.GooberNPCSupport.IsGettingUp
-        and hg.GooberNPCSupport.IsGettingUp(self) then
+    if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
+        and hg.BZCNNPCSupport.IsGettingUp(self) then
         self:SetPlaybackRate(1)
         self:FrameAdvance()
         return
@@ -41,8 +41,8 @@ function ENT:BodyUpdate()
     local target = idle
     if speed > 150 then target = run elseif speed > 8 then target = walk end
 
-    local crawling = hg and hg.GooberNPCSupport and hg.GooberNPCSupport.ShouldCrawl
-        and hg.GooberNPCSupport.ShouldCrawl(self)
+    local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
+        and hg.BZCNNPCSupport.ShouldCrawl(self)
     if crawling then
         local crawl = self:FindSequence({"crawl_all", "crawl", "crawl_01", "zombie_crawl", "crawl_aim"})
         if crawl >= 0 then target = crawl end

@@ -1,12 +1,12 @@
--- Shared NPC injury/ragdoll bridge for GooberZ / ZCity.
+-- Z-City-compatible injury/ragdoll bridge for managed NextBots.
 -- NPCs retain their actual entity for AI and health; the ragdoll is a temporary
 -- physical proxy whose damage is forwarded to that living entity.
 
 -- Server-side injury, ragdoll, recovery and diagnostic support.
 
 hg = hg or {}
-hg.GooberNPCSupport = hg.GooberNPCSupport or {}
-local Support = hg.GooberNPCSupport
+hg.BZCNNPCSupport = hg.BZCNNPCSupport or {}
+local Support = hg.BZCNNPCSupport
 
 local function IsSupportedNPC(ent)
     if not IsValid(ent) or ent:IsPlayer() then return false end
@@ -35,9 +35,9 @@ end
 
 local function ResolveNPC(ent)
     if not IsValid(ent) then return nil end
-    local owner = ent.GooberNPCOwner
+    local owner = ent.BZCNNPCOwner
     if not IsValid(owner) and ent.GetNW2Entity then
-        owner = ent:GetNW2Entity("GooberNPCOwner")
+        owner = ent:GetNW2Entity("BZCNNPCOwner")
     end
     if IsValid(owner) then return owner end
     if IsSupportedNPC(ent) then return ent end
@@ -47,23 +47,23 @@ end
 function Support.ShouldCrawl(ent)
     if not IsValid(ent) then return false end
     local owner = ResolveNPC(ent)
-    local state = IsValid(owner) and owner.GooberNPCOrg or nil
+    local state = IsValid(owner) and owner.BZCNNPCOrg or nil
     if state then return state.crawling == true end
-    return ent.GetNW2Bool and ent:GetNW2Bool("GooberNPCCrawling", false) or false
+    return ent.GetNW2Bool and ent:GetNW2Bool("BZCNNPCCrawling", false) or false
 end
 
 function Support.GetNPCHealthTable(ent)
     local owner = ResolveNPC(ent)
     if not IsValid(owner) then return nil end
-    return owner.GooberNPCOrg
+    return owner.BZCNNPCOrg
 end
 
 function Support.IsGettingUp(ent)
     if not IsValid(ent) then return false end
     local owner = ResolveNPC(ent)
-    local state = IsValid(owner) and owner.GooberNPCOrg or nil
+    local state = IsValid(owner) and owner.BZCNNPCOrg or nil
     if state then return state.gettingUp == true end
-    return ent.GetNW2Bool and ent:GetNW2Bool("GooberNPCGettingUp", false) or false
+    return ent.GetNW2Bool and ent:GetNW2Bool("BZCNNPCGettingUp", false) or false
 end
 
 if not SERVER then return end
@@ -169,11 +169,11 @@ local function SyncEntity(ent, state)
         ent.organism = org
     end
 
-    SetNWFloat(ent, "GooberNPCHealth", state.health)
-    SetNWFloat(ent, "GooberNPCMaxHealth", state.maxHealth)
-    SetNWFloat(ent, "GooberNPCBlood", state.blood)
-    SetNWFloat(ent, "GooberNPCPain", state.pain)
-    SetNWFloat(ent, "GooberNPCShock", state.shock)
+    SetNWFloat(ent, "BZCNNPCHealth", state.health)
+    SetNWFloat(ent, "BZCNNPCMaxHealth", state.maxHealth)
+    SetNWFloat(ent, "BZCNNPCBlood", state.blood)
+    SetNWFloat(ent, "BZCNNPCPain", state.pain)
+    SetNWFloat(ent, "BZCNNPCShock", state.shock)
 
     local networkParts = {
         head = state.skull,
@@ -187,26 +187,26 @@ local function SyncEntity(ent, state)
     }
 
     for part, value in pairs(networkParts) do
-        SetNWFloat(ent, "GooberNPCPart_" .. part, value)
+        SetNWFloat(ent, "BZCNNPCPart_" .. part, value)
     end
 
-    SetNWBool(ent, "GooberNPCDowned", state.downed)
-    SetNWBool(ent, "GooberNPCCrawling", state.crawling)
-    SetNWBool(ent, "GooberNPCGettingUp", state.gettingUp)
+    SetNWBool(ent, "BZCNNPCDowned", state.downed)
+    SetNWBool(ent, "BZCNNPCCrawling", state.crawling)
+    SetNWBool(ent, "BZCNNPCGettingUp", state.gettingUp)
 end
 
 function Support.Attach(ent)
     if not IsSupportedNPC(ent) then return nil end
 
-    local state = ent.GooberNPCOrg
+    local state = ent.BZCNNPCOrg
     if not state then
         state = NewHealthTable(ent)
-        ent.GooberNPCOrg = state
-        ent.GooberNPCWasNoDraw = ent.GetNoDraw and ent:GetNoDraw() or false
-        ent.GooberNPCWasNotSolid = ent.GetNotSolid and ent:GetNotSolid() or false
-        ent.GooberNPCOldMoveType = ent:GetMoveType()
-        ent.GooberNPCOldSolid = ent:GetSolid()
-        ent.GooberNPCOldCollisionGroup = ent:GetCollisionGroup()
+        ent.BZCNNPCOrg = state
+        ent.BZCNNPCWasNoDraw = ent.GetNoDraw and ent:GetNoDraw() or false
+        ent.BZCNNPCWasNotSolid = ent.GetNotSolid and ent:GetNotSolid() or false
+        ent.BZCNNPCOldMoveType = ent:GetMoveType()
+        ent.BZCNNPCOldSolid = ent:GetSolid()
+        ent.BZCNNPCOldCollisionGroup = ent:GetCollisionGroup()
     end
 
     tracked[ent] = state
@@ -472,7 +472,7 @@ end
 
 local function ClearDownedState(owner, restoreEntity)
     if not IsValid(owner) then return end
-    local state = owner.GooberNPCOrg
+    local state = owner.BZCNNPCOrg
     if not state then return end
 
     if state.recoverTimer then timer.Remove(state.recoverTimer) end
@@ -481,25 +481,25 @@ local function ClearDownedState(owner, restoreEntity)
     state.getUpTimer = nil
     state.gettingUp = false
     state.downed = false
-    owner.GooberNPCDowned = false
+    owner.BZCNNPCDowned = false
 
-    local rag = owner.GooberNPCRagdoll
-    owner.GooberNPCRagdoll = nil
+    local rag = owner.BZCNNPCRagdoll
+    owner.BZCNNPCRagdoll = nil
     RestoreRagdollWeapon(state)
 
     if restoreEntity and IsAlive(owner) then
-        owner:SetNoDraw(owner.GooberNPCWasNoDraw == true)
-        owner:SetNotSolid(owner.GooberNPCWasNotSolid == true)
-        owner:SetSolid(owner.GooberNPCOldSolid or SOLID_BBOX)
-        owner:SetMoveType(owner.GooberNPCOldMoveType or MOVETYPE_STEP)
-        owner:SetCollisionGroup(owner.GooberNPCOldCollisionGroup or COLLISION_GROUP_NPC)
+        owner:SetNoDraw(owner.BZCNNPCWasNoDraw == true)
+        owner:SetNotSolid(owner.BZCNNPCWasNotSolid == true)
+        owner:SetSolid(owner.BZCNNPCOldSolid or SOLID_BBOX)
+        owner:SetMoveType(owner.BZCNNPCOldMoveType or MOVETYPE_STEP)
+        owner:SetCollisionGroup(owner.BZCNNPCOldCollisionGroup or COLLISION_GROUP_NPC)
     end
 
     if IsValid(rag) then
-        rag.GooberNPCOwner = nil
+        rag.BZCNNPCOwner = nil
         rag.Player = nil
-        if rag.SetNW2Entity then rag:SetNW2Entity("GooberNPCOwner", NULL) end
-        rag:SetNWEntity("GooberNPCOwner", NULL)
+        if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
+        rag:SetNWEntity("BZCNNPCOwner", NULL)
         rag:SetNWEntity("RagdollOwner", NULL)
         if owner.ragdoll == rag then owner.ragdoll = nil end
         owner:SetNWEntity("FakeRagdoll", NULL)
@@ -512,10 +512,10 @@ end
 
 local function Recover(owner, rag, removedExternally)
     if not IsAlive(owner) then return end
-    local state = owner.GooberNPCOrg
+    local state = owner.BZCNNPCOrg
     if not state or not state.downed then return end
 
-    if not IsValid(rag) then rag = owner.GooberNPCRagdoll end
+    if not IsValid(rag) then rag = owner.BZCNNPCRagdoll end
     local position, angles
     if IsValid(rag) then
         position, angles = FindStandPosition(owner, rag)
@@ -526,17 +526,17 @@ local function Recover(owner, rag, removedExternally)
     if state.recoverTimer then timer.Remove(state.recoverTimer) end
     state.recoverTimer = nil
     state.downed = false
-    owner.GooberNPCDowned = false
-    owner.GooberNPCRagdoll = nil
+    owner.BZCNNPCDowned = false
+    owner.BZCNNPCRagdoll = nil
     RestoreRagdollWeapon(state)
 
     owner:SetPos(position)
     owner:SetAngles(Angle(0, angles.y, 0))
-    owner:SetNoDraw(owner.GooberNPCWasNoDraw == true)
-    owner:SetNotSolid(owner.GooberNPCWasNotSolid == true)
-    owner:SetSolid(owner.GooberNPCOldSolid or SOLID_BBOX)
-    owner:SetMoveType(owner.GooberNPCOldMoveType or MOVETYPE_STEP)
-    owner:SetCollisionGroup(owner.GooberNPCOldCollisionGroup or COLLISION_GROUP_NPC)
+    owner:SetNoDraw(owner.BZCNNPCWasNoDraw == true)
+    owner:SetNotSolid(owner.BZCNNPCWasNotSolid == true)
+    owner:SetSolid(owner.BZCNNPCOldSolid or SOLID_BBOX)
+    owner:SetMoveType(owner.BZCNNPCOldMoveType or MOVETYPE_STEP)
+    owner:SetCollisionGroup(owner.BZCNNPCOldCollisionGroup or COLLISION_GROUP_NPC)
 
     local getUp = -1
     local getUpName
@@ -574,14 +574,14 @@ local function Recover(owner, rag, removedExternally)
         end
 
         owner:SetMoveType(MOVETYPE_NONE)
-        local timerName = "GooberNPCSupport_GetUp_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
+        local timerName = "BZCNNPCSupport_GetUp_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
         state.getUpTimer = timerName
         timer.Create(timerName, duration, 1, function()
-            if not IsValid(owner) or owner.GooberNPCOrg ~= state then return end
+            if not IsValid(owner) or owner.BZCNNPCOrg ~= state then return end
             state.gettingUp = false
             state.getUpTimer = nil
             if IsAlive(owner) then
-                owner:SetMoveType(owner.GooberNPCOldMoveType or MOVETYPE_STEP)
+                owner:SetMoveType(owner.BZCNNPCOldMoveType or MOVETYPE_STEP)
                 SyncEntity(owner, state)
             end
         end)
@@ -590,10 +590,10 @@ local function Recover(owner, rag, removedExternally)
     end
 
     if IsValid(rag) then
-        rag.GooberNPCOwner = nil
+        rag.BZCNNPCOwner = nil
         rag.Player = nil
-        if rag.SetNW2Entity then rag:SetNW2Entity("GooberNPCOwner", NULL) end
-        rag:SetNWEntity("GooberNPCOwner", NULL)
+        if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
+        rag:SetNWEntity("BZCNNPCOwner", NULL)
         rag:SetNWEntity("RagdollOwner", NULL)
         if owner.ragdoll == rag then owner.ragdoll = nil end
         owner:SetNWEntity("FakeRagdoll", NULL)
@@ -645,24 +645,24 @@ local function EnterDownedState(owner, reason)
     end
 
     state.downed = true
-    owner.GooberNPCDowned = true
-    owner.GooberNPCRagdoll = rag
-    rag.GooberNPCOwner = owner
+    owner.BZCNNPCDowned = true
+    owner.BZCNNPCRagdoll = rag
+    rag.BZCNNPCOwner = owner
     rag.Player = owner
-    rag.GooberNPCOrg = state
+    rag.BZCNNPCOrg = state
     rag.organism = owner.organism
-    rag:SetNWEntity("GooberNPCOwner", owner)
+    rag:SetNWEntity("BZCNNPCOwner", owner)
     rag:SetNWEntity("RagdollOwner", owner)
-    if rag.SetNW2Entity then rag:SetNW2Entity("GooberNPCOwner", owner) end
+    if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", owner) end
     owner.ragdoll = rag
     owner:SetNWEntity("FakeRagdoll", rag)
     owner:SetNWEntity("ragdoll", rag)
     SyncEntity(rag, state)
 
-    rag:CallOnRemove("GooberNPCSupport_ExternalRemoval", function(removed)
-        local living = removed.GooberNPCOwner
-        if IsValid(living) and living.GooberNPCDowned and living.GooberNPCRagdoll == removed then
-            living.GooberNPCRagdoll = nil
+    rag:CallOnRemove("BZCNNPCSupport_ExternalRemoval", function(removed)
+        local living = removed.BZCNNPCOwner
+        if IsValid(living) and living.BZCNNPCDowned and living.BZCNNPCRagdoll == removed then
+            living.BZCNNPCRagdoll = nil
             timer.Simple(0, function()
                 if IsAlive(living) then Recover(living, nil, true) end
             end)
@@ -677,15 +677,15 @@ local function EnterDownedState(owner, reason)
 
     AttachRagdollWeapon(owner, rag, state)
 
-    local timerName = "GooberNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
+    local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
     state.recoverTimer = timerName
     local duration = math.Clamp(2.8 + state.pain / 85, 2.8, 5.8)
     if reason == "legs" then duration = math.max(duration, 3.2) end
 
     timer.Create(timerName, duration, 1, function()
         if not IsAlive(owner) then return end
-        if not owner.GooberNPCOrg or not owner.GooberNPCOrg.downed then return end
-        Recover(owner, owner.GooberNPCRagdoll)
+        if not owner.BZCNNPCOrg or not owner.BZCNNPCOrg.downed then return end
+        Recover(owner, owner.BZCNNPCRagdoll)
     end)
 
     SyncEntity(owner, state)
@@ -694,13 +694,13 @@ end
 Support.EnterDownedState = EnterDownedState
 Support.Recover = Recover
 
-hook.Add("OnEntityCreated", "GooberNPCSupport_Attach", function(ent)
+hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", function(ent)
     timer.Simple(0, function()
         if IsSupportedNPC(ent) then Support.Attach(ent) end
     end)
 end)
 
-hook.Add("InitPostEntity", "GooberNPCSupport_Existing", function()
+hook.Add("InitPostEntity", "BZCNNPCSupport_Existing", function()
     timer.Simple(0.1, function()
         for _, ent in ipairs(ents.GetAll()) do
             if IsSupportedNPC(ent) then Support.Attach(ent) end
@@ -708,17 +708,17 @@ hook.Add("InitPostEntity", "GooberNPCSupport_Existing", function()
     end)
 end)
 
-hook.Add("EntityTakeDamage", "GooberNPCSupport_SharedDamage", function(target, dmg)
+hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg)
     if not IsValid(target) or not dmg then return end
 
-    local owner = target.GooberNPCOwner
+    local owner = target.BZCNNPCOwner
     if not IsValid(owner) and target.GetNW2Entity then
-        owner = target:GetNW2Entity("GooberNPCOwner")
+        owner = target:GetNW2Entity("BZCNNPCOwner")
     end
 
     -- The physical ragdoll owns no independent health: relay hits to the
     -- hidden NPC, which updates the same injury table and applies real damage.
-    if IsValid(owner) and owner.GooberNPCDowned then
+    if IsValid(owner) and owner.BZCNNPCDowned then
         local amount = math.max(dmg:GetDamage(), 0)
         local relayed = DamageInfo()
         relayed:SetDamage(amount)
@@ -727,10 +727,10 @@ hook.Add("EntityTakeDamage", "GooberNPCSupport_SharedDamage", function(target, d
         relayed:SetDamageForce(dmg:GetDamageForce())
         relayed:SetAttacker(IsValid(dmg:GetAttacker()) and dmg:GetAttacker() or game.GetWorld())
         relayed:SetInflictor(IsValid(dmg:GetInflictor()) and dmg:GetInflictor() or game.GetWorld())
-        owner.GooberNPCForcedPart = GetHitPart(target, dmg:GetDamagePosition())
+        owner.BZCNNPCForcedPart = GetHitPart(target, dmg:GetDamagePosition())
         dmg:SetDamage(0)
         owner:TakeDamageInfo(relayed)
-        owner.GooberNPCForcedPart = nil
+        owner.BZCNNPCForcedPart = nil
         return true
     end
 
@@ -741,8 +741,8 @@ hook.Add("EntityTakeDamage", "GooberNPCSupport_SharedDamage", function(target, d
     local amount = math.max(dmg:GetDamage(), 0)
     if amount <= 0 then return end
 
-    local part = target.GooberNPCForcedPart or GetHitPart(target, dmg:GetDamagePosition())
-    target.GooberNPCForcedPart = nil
+    local part = target.BZCNNPCForcedPart or GetHitPart(target, dmg:GetDamagePosition())
+    target.BZCNNPCForcedPart = nil
     AddInjury(state, part, amount, dmg:GetDamageType())
 
     local maxHealth = math.max(state.maxHealth, 1)
@@ -755,10 +755,10 @@ hook.Add("EntityTakeDamage", "GooberNPCSupport_SharedDamage", function(target, d
         local reason = legFailure and "legs" or "impact"
         timer.Simple(0, function()
             if not IsAlive(target) then
-                if target.GooberNPCOrg then target.GooberNPCOrg.knockdownQueued = false end
+                if target.BZCNNPCOrg then target.BZCNNPCOrg.knockdownQueued = false end
                 return
             end
-            local current = target.GooberNPCOrg
+            local current = target.BZCNNPCOrg
             if current then current.knockdownQueued = false end
             if current and not current.downed then EnterDownedState(target, reason) end
         end)
@@ -768,14 +768,14 @@ hook.Add("EntityTakeDamage", "GooberNPCSupport_SharedDamage", function(target, d
     SyncEntity(target, state)
 end)
 
-hook.Add("OnNPCKilled", "GooberNPCSupport_DeathCleanup", function(ent)
-    if not ent or not ent.GooberNPCOrg then return end
-    local rag = ent.GooberNPCRagdoll
-    local state = ent.GooberNPCOrg
+hook.Add("OnNPCKilled", "BZCNNPCSupport_DeathCleanup", function(ent)
+    if not ent or not ent.BZCNNPCOrg then return end
+    local rag = ent.BZCNNPCRagdoll
+    local state = ent.BZCNNPCOrg
     state.downed = false
     state.gettingUp = false
-    ent.GooberNPCDowned = false
-    ent.GooberNPCRagdoll = nil
+    ent.BZCNNPCDowned = false
+    ent.BZCNNPCRagdoll = nil
     if state.recoverTimer then timer.Remove(state.recoverTimer) end
     if state.getUpTimer then timer.Remove(state.getUpTimer) end
     state.recoverTimer = nil
@@ -783,17 +783,17 @@ hook.Add("OnNPCKilled", "GooberNPCSupport_DeathCleanup", function(ent)
     RestoreRagdollWeapon(state)
     timer.Simple(0, function()
         if IsValid(rag) then
-            rag.GooberNPCOwner = nil
+            rag.BZCNNPCOwner = nil
             rag:Remove()
         end
     end)
 end)
 
-hook.Add("EntityRemoved", "GooberNPCSupport_EntityCleanup", function(ent)
+hook.Add("EntityRemoved", "BZCNNPCSupport_EntityCleanup", function(ent)
     if not ent then return end
     tracked[ent] = nil
 
-    local state = ent.GooberNPCOrg
+    local state = ent.BZCNNPCOrg
     if state then
         if state.recoverTimer then timer.Remove(state.recoverTimer) end
         if state.getUpTimer then timer.Remove(state.getUpTimer) end
@@ -804,14 +804,14 @@ hook.Add("EntityRemoved", "GooberNPCSupport_EntityCleanup", function(ent)
         RestoreRagdollWeapon(state)
     end
 
-    local rag = ent.GooberNPCRagdoll
+    local rag = ent.BZCNNPCRagdoll
     if IsValid(rag) then
-        rag.GooberNPCOwner = nil
+        rag.BZCNNPCOwner = nil
         rag:Remove()
     end
 end)
 
-timer.Create("GooberNPCSupport_StateSync", 0.25, 0, function()
+timer.Create("BZCNNPCSupport_StateSync", 0.25, 0, function()
     for ent, state in pairs(tracked) do
         if not IsValid(ent) then
             tracked[ent] = nil
@@ -823,8 +823,8 @@ timer.Create("GooberNPCSupport_StateSync", 0.25, 0, function()
                 (state.lleg >= 35 and state.rleg >= 35)
 
             SyncEntity(ent, state)
-            if IsValid(ent.GooberNPCRagdoll) then
-                SyncEntity(ent.GooberNPCRagdoll, state)
+            if IsValid(ent.BZCNNPCRagdoll) then
+                SyncEntity(ent.BZCNNPCRagdoll, state)
             end
         end
     end
@@ -887,7 +887,7 @@ concommand.Add("bzcn_npc_test", function(ply, _, args)
         if istable(state.wounds) then table.Empty(state.wounds) end
         if istable(state.arterialwounds) then table.Empty(state.arterialwounds) end
         SyncEntity(target, state)
-        if state.downed then Recover(target, target.GooberNPCRagdoll) end
+        if state.downed then Recover(target, target.BZCNNPCRagdoll) end
     else
         local message = "Usage: bzcn_npc_test <entity-index> <down|crawl|reset>"
         if IsValid(ply) then ply:ChatPrint(message) else print(message) end
@@ -899,7 +899,7 @@ concommand.Add("bzcn_npc_test", function(ply, _, args)
     if IsValid(ply) then ply:ChatPrint(message) end
 end)
 
-timer.Create("GooberNPCSupport_CrawlVisual", 0.12, 0, function()
+timer.Create("BZCNNPCSupport_CrawlVisual", 0.12, 0, function()
     for ent, state in pairs(tracked) do
         if not IsValid(ent) or state.downed or state.gettingUp or not state.crawling then continue end
 
@@ -927,7 +927,7 @@ timer.Create("GooberNPCSupport_CrawlVisual", 0.12, 0, function()
     end
 end)
 
-local function GooberNPCHealthCommand(ply, _, args)
+local function BZCNNPCHealthCommand(ply, _, args)
     if IsValid(ply) and not ply:IsAdmin() then return end
 
     local target
@@ -942,13 +942,13 @@ local function GooberNPCHealthCommand(ply, _, args)
     local owner = ResolveNPC(target)
     local state = IsValid(owner) and Support.Attach(owner) or nil
     if not state then
-        local message = "[GooberNPC] Aim at an NPC/ragdoll or run gz_npc_health <entity index> from console."
+        local message = "[BZCNNPC] Aim at an NPC/ragdoll or run bzcn_npc_health <entity index> from console."
         if IsValid(ply) then ply:ChatPrint(message) else print(message) end
         return
     end
 
     local rows = {
-        "[GooberNPC] " .. owner:GetClass() .. " #" .. owner:EntIndex(),
+        "[BZCNNPC] " .. owner:GetClass() .. " #" .. owner:EntIndex(),
         "Health: " .. math.floor(owner:Health()) .. " / " .. math.floor(state.maxHealth),
         "Blood: " .. math.floor(state.blood) .. " / " .. state.maxBlood ..
             " | Pain: " .. math.floor(state.pain) .. " | Shock: " .. math.floor(state.shock),
@@ -965,5 +965,4 @@ local function GooberNPCHealthCommand(ply, _, args)
     end
 end
 
-concommand.Add("gz_npc_health", GooberNPCHealthCommand)
-concommand.Add("bzcn_npc_health", GooberNPCHealthCommand)
+concommand.Add("bzcn_npc_health", BZCNNPCHealthCommand)

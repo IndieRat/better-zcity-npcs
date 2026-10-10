@@ -4,11 +4,11 @@ include("shared.lua")
 
 local function GetProfile(self)
     return (BZCN and BZCN.GetClass and BZCN.GetClass(self.BZCNClass or self.PlayerClassName))
-        or {Name = "ZCity NPC", Health = 100, Speed = 175, Faction = "humanityForces", Ranged = false}
+        or {Name = "ZCity NPC", Health = 100, Speed = 175, Faction = "civilian", Ranged = false}
 end
 
 function ENT:Initialize()
-    local className = self.BZCNClass or "humanityForces"
+    local className = self.BZCNClass or "default"
     local profile = BZCN.GetClass(className) or GetProfile(self)
     if isstring(profile.Model) and util.IsValidModel(profile.Model) then
         self:SetModel(profile.Model)
@@ -36,13 +36,24 @@ function ENT:Initialize()
     BZCN.ApplyClass(self, className, true)
     self.BZCNClassProfile = profile
     self.BZCN_Faction = profile.Faction or className
+    if profile.FurryStyle and self:GetModel() == profile.Model then
+        self:SetSkin(profile.Skin or 4)
+        for _, bodygroup in ipairs(self:GetBodyGroups() or {}) do
+            if bodygroup.id == 1 and (bodygroup.num or 0) > 1 then
+                local selected = math.random(0, bodygroup.num - 1)
+                if selected == 1 then selected = 0 end
+                self:SetBodygroup(1, selected)
+            end
+        end
+    end
+    if self.organism and profile.BloodType then self.organism.bloodtype = profile.BloodType end
     if self.CapabilitiesAdd then self:CapabilitiesAdd(CAP_MOVE_GROUND) end
 
     timer.Simple(0.1, function()
         if not IsValid(self) then return end
         BZCN.ShowHeldWeapon(self)
-        if hg and hg.GooberNPCSupport and hg.GooberNPCSupport.Attach then
-            hg.GooberNPCSupport.Attach(self)
+        if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.Attach then
+            hg.BZCNNPCSupport.Attach(self)
         end
     end)
     hook.Run("BZCN_NPCSpawned", self, className, profile)
@@ -88,7 +99,7 @@ function ENT:FindEnemy()
     local best, bestDistance
     local candidates = {}
     for _, ply in ipairs(player.GetAll()) do candidates[#candidates + 1] = ply end
-    for _, className in ipairs({"npc_bzcn_goober", "npc_bzcn_humanityforces", "npc_bzcn_traitor"}) do
+    for _, className in ipairs({"npc_bzcn_default", "npc_bzcn_combine", "npc_bzcn_rebel", "npc_bzcn_furry"}) do
         for _, other in ipairs(ents.FindByClass(className)) do
             if other ~= self then candidates[#candidates + 1] = other end
         end
@@ -175,9 +186,9 @@ function ENT:ChaseEnemy(target)
     if not path:IsValid() then return end
 
     while path:IsValid() and self:IsBZCNEnemy(target) do
-        local downed = self:GetNW2Bool("GooberNPCDowned", false)
-        local gettingUp = hg and hg.GooberNPCSupport and hg.GooberNPCSupport.IsGettingUp
-            and hg.GooberNPCSupport.IsGettingUp(self)
+        local downed = self:GetNW2Bool("BZCNNPCDowned", false)
+        local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
+            and hg.BZCNNPCSupport.IsGettingUp(self)
         if downed or gettingUp then
             self.loco:SetDesiredSpeed(0)
             coroutine.wait(0.1)
@@ -185,8 +196,8 @@ function ENT:ChaseEnemy(target)
         end
 
         if path:GetAge() > 0.4 then path:Compute(self, target:GetPos()) end
-        local crawling = hg and hg.GooberNPCSupport and hg.GooberNPCSupport.ShouldCrawl
-            and hg.GooberNPCSupport.ShouldCrawl(self)
+        local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
+            and hg.BZCNNPCSupport.ShouldCrawl(self)
         local profile = self:GetBZCNProfile()
         self.loco:SetDesiredSpeed((profile.Speed or self.MoveSpeed or 175) * (crawling and 0.42 or 1))
         path:Update(self)
@@ -207,8 +218,8 @@ function ENT:Wander()
         if IsValid(area) then destination = area:GetRandomPoint() end
     end
     if not destination then destination = self:GetPos() + Vector(math.Rand(-1, 1), math.Rand(-1, 1), 0) * 350 end
-    local crawling = hg and hg.GooberNPCSupport and hg.GooberNPCSupport.ShouldCrawl
-        and hg.GooberNPCSupport.ShouldCrawl(self)
+    local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
+        and hg.BZCNNPCSupport.ShouldCrawl(self)
     self.loco:SetDesiredSpeed((self:GetBZCNProfile().Speed or 175) * (crawling and 0.42 or 0.68))
     self:MoveToPos(destination, {tolerance = 60})
     coroutine.wait(0.35)
@@ -216,9 +227,9 @@ end
 
 function ENT:RunBehaviour()
     while true do
-        local downed = self:GetNW2Bool("GooberNPCDowned", false)
-        local gettingUp = hg and hg.GooberNPCSupport and hg.GooberNPCSupport.IsGettingUp
-            and hg.GooberNPCSupport.IsGettingUp(self)
+        local downed = self:GetNW2Bool("BZCNNPCDowned", false)
+        local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
+            and hg.BZCNNPCSupport.IsGettingUp(self)
         if downed or gettingUp then
             if self.loco then self.loco:SetDesiredSpeed(0) end
             coroutine.wait(0.1)

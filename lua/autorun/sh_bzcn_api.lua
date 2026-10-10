@@ -31,34 +31,47 @@ function BZCN.RegisterClass(className, definition)
 end
 
 function BZCN.GetClass(className)
-    return BZCN.Classes[className] or BZCN.Classes.humanityForces
+    return BZCN.Classes[className] or BZCN.Classes.default
 end
 
-BZCN.RegisterClass("goober", {
-    Name = "Goober", PlayerClassName = "goober",
-    Model = "models/player/leymirba/protogenpm.mdl", Health = 140, Speed = 205,
-    Faction = "goober", EnemyPlayers = true, EnemyFactions = {"humanityForces", "traitor"},
-    Ranged = false, MeleeDamage = 22, MeleeRange = 78, AttackDelay = 1.0,
-    WeaponClass = "weapon_stunstick",
-    Inventory = {Weapons = {weapon_stunstick = true}, Items = {}, Armor = {}}
+BZCN.RegisterClass("default", {
+    Name = "Civilian", PlayerClassName = "default",
+    Model = "models/player/group03/male_07.mdl", Health = 100, Speed = 175,
+    Faction = "civilian", EnemyPlayers = true, EnemyFactions = {"Combine"},
+    Ranged = true, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
+    WeaponClass = "weapon_pistol", WeaponModel = "models/weapons/w_pistol.mdl",
+    Inventory = {Weapons = {weapon_pistol = true}, Items = {}, Armor = {}}
 })
 
-BZCN.RegisterClass("humanityForces", {
-    Name = "Humanity Forces", PlayerClassName = "humanityForces",
-    Model = "models/player/group03/male_07.mdl", Health = 125, Speed = 175,
-    Faction = "humanityForces", EnemyPlayers = true, EnemyFactions = {"goober", "traitor"},
-    Ranged = true, WeaponDamage = 10, WeaponRange = 1300, AttackDelay = 0.28,
-    WeaponClass = "weapon_ar2",
-    Inventory = {Weapons = {weapon_ar2 = true}, Items = {}, Armor = {}}
+BZCN.RegisterClass("Combine", {
+    Name = "Combine Soldier", PlayerClassName = "Combine",
+    Model = "models/player/combine_soldier.mdl", Health = 140, Speed = 180,
+    Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
+    Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
+    WeaponClass = "weapon_ar2", WeaponModel = "models/weapons/w_irifle.mdl",
+    Inventory = {Weapons = {weapon_ar2 = true}, Items = {}, Armor = {head = "combine_helmet"}}
 })
 
-BZCN.RegisterClass("traitor", {
-    Name = "Traitor", PlayerClassName = "traitor",
-    Model = "models/player/group03/male_04.mdl", Health = 110, Speed = 185,
-    Faction = "traitor", EnemyPlayers = true, EnemyFactions = {"goober", "humanityForces"},
-    Ranged = true, WeaponDamage = 8, WeaponRange = 1000, AttackDelay = 0.34,
-    WeaponClass = "weapon_smg1",
+BZCN.RegisterClass("Rebel", {
+    Name = "Resistance Fighter", PlayerClassName = "Rebel",
+    Model = "models/player/group03/male_04.mdl", Health = 115, Speed = 185,
+    Faction = "Rebel", EnemyPlayers = true, EnemyFactions = {"Combine", "furry"},
+    Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
+    WeaponClass = "weapon_smg1", WeaponModel = "models/weapons/w_smg1.mdl",
     Inventory = {Weapons = {weapon_smg1 = true}, Items = {}, Armor = {}}
+})
+
+-- Model and claw model checked against Z-City's own furry class. Its player-only
+-- conversion, UI and role callbacks are not invoked on NPC entities.
+BZCN.RegisterClass("furry", {
+    Name = "Furry Specimen", PlayerClassName = "furry",
+    Model = "models/eradium/protogen_player.mdl", Health = 125, Speed = 190,
+    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
+    Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
+    WeaponClass = "weapon_hands_sh",
+    WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
+    FurryStyle = true, Skin = 4, BloodType = "c-",
+    Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {head = "protovisor"}}
 })
 
 local function NetworkKey(key, kind)
@@ -134,6 +147,52 @@ function BZCN.InstallAdapter(ent)
     end
     data.BZCNGiveWeapon = function(self, weaponClass) return BZCN.GiveWeapon(self, weaponClass) end
     data.BZCNSelectWeapon = function(self, weaponClass) return BZCN.SelectWeapon(self, weaponClass) end
+    data.GetPlayerClass = function(self)
+        local classes = player and player.classList
+        return classes and classes[self.PlayerClassName or ""] or self.BZCNClassProfile
+    end
+    data.SetPlayerClass = function(self, className, data)
+        return BZCN.ChangeClass(self, className, true)
+    end
+    data.PlayerClassEvent = function(self, eventName, ...)
+        local profile = self.BZCNClassProfile
+        local handlers = profile and profile.NPCEvents
+        if handlers and isfunction(handlers[eventName]) then
+            return handlers[eventName](self, ...)
+        end
+        return hook.Run("BZCN_NPCPlayerClassEvent", self, self.PlayerClassName, eventName, ...)
+    end
+    data.GetRunSpeed = function(self)
+        local profile = self.BZCNClassProfile or {}
+        return self.BZCNRunSpeed or profile.Speed or 175
+    end
+    data.SetRunSpeed = function(self, speed)
+        speed = math.max(tonumber(speed) or 175, 1)
+        self.BZCNRunSpeed = speed
+        if self.BZCNClassProfile then self.BZCNClassProfile.Speed = speed end
+        if self.loco then self.loco:SetDesiredSpeed(speed) end
+    end
+    data.GetWalkSpeed = function(self) return self:GetRunSpeed() * 0.55 end
+    data.SetWalkSpeed = function(self, speed)
+        self.BZCNWalkSpeed = math.max(tonumber(speed) or 95, 1)
+    end
+    data.GetMaxSpeed = function(self) return self:GetRunSpeed() end
+    data.IsSprinting = function(self) return self.BZCN_Sprinting == true end
+    data.InVehicle = function() return false end
+    data.Crouching = function() return false end
+    data.GetActiveWeaponClass = function(self)
+        return self.BZCN_SelectedWeapon or self:GetNW2String("BZCNWeaponClass", "")
+    end
+    data.GetAmmoCount = function(self, ammoType)
+        self.BZCN_Ammo = self.BZCN_Ammo or {}
+        return self.BZCN_Ammo[ammoType] or 0
+    end
+    data.GiveAmmo = function(self, amount, ammoType)
+        self.BZCN_Ammo = self.BZCN_Ammo or {}
+        local old = self.BZCN_Ammo[ammoType] or 0
+        self.BZCN_Ammo[ammoType] = math.max(old + (tonumber(amount) or 0), 0)
+        return self.BZCN_Ammo[ammoType]
+    end
 
     if not isfunction(ent.Alive) then data.Alive = function(self) return IsValid(self) and self:Health() > 0 end end
     if not isfunction(ent.Nick) then
@@ -177,7 +236,7 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.BZCNClass = profile.ClassName
     ent.BZCNClassProfile = profile
     ent.PlayerClassName = profile.PlayerClassName
-    ent.IsGoober = profile.ClassName == "goober"
+    ent.IsFurry = profile.ClassName == "furry"
     ent.IsOrganism = true
     ent.hg_organism = true
     ent.BZCN_Faction = profile.Faction or profile.ClassName
@@ -227,6 +286,10 @@ end
 
 function BZCN.GetWeaponModel(ent, weaponClass)
     if not IsValid(ent) then return nil end
+    local profile = ent.BZCNClassProfile or BZCN.GetClass(ent.BZCNClass or ent.PlayerClassName)
+    if profile and isstring(profile.WeaponModel) and profile.WeaponModel ~= "" then
+        return profile.WeaponModel
+    end
     weaponClass = weaponClass or ent.BZCN_SelectedWeapon
     if not isstring(weaponClass) or weaponClass == "" then
         local inventory = BZCN.GetNetVar(ent, "Inventory", {})
@@ -245,13 +308,12 @@ function BZCN.GetWeaponModel(ent, weaponClass)
         if ok and isstring(result) and result ~= "" then model = result end
     end
     if isstring(model) and model ~= "" and string.EndsWith(string.lower(model), ".mdl") then return model end
-    local profile = ent.BZCNClassProfile or BZCN.GetClass(ent.BZCNClass or ent.PlayerClassName)
-    return profile and profile.WeaponModel or nil
+    return nil
 end
 
 function BZCN.ChangeClass(ent, className, heal)
     if not IsValid(ent) or not isstring(className) or not BZCN.Classes[className] then return false end
-    if ent.GetNW2Bool and ent:GetNW2Bool("GooberNPCDowned", false) then return false end
+    if ent.GetNW2Bool and ent:GetNW2Bool("BZCNNPCDowned", false) then return false end
     local profile = BZCN.GetClass(className)
     BZCN.HideHeldWeapon(ent)
     if isstring(profile.Model) and util.IsValidModel(profile.Model) then ent:SetModel(profile.Model) end
@@ -264,8 +326,8 @@ function BZCN.ChangeClass(ent, className, heal)
     local success = BZCN.ApplyClass(ent, className, true)
     if success then
         if ent.loco then ent.loco:SetDesiredSpeed(profile.Speed or 175) end
-        if hg and hg.GooberNPCSupport and hg.GooberNPCSupport.GetNPCHealthTable then
-            local healthState = hg.GooberNPCSupport.GetNPCHealthTable(ent)
+        if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.GetNPCHealthTable then
+            local healthState = hg.BZCNNPCSupport.GetNPCHealthTable(ent)
             if healthState then
                 healthState.maxHealth = profile.Health or 100
                 healthState.health = ent:Health()
@@ -392,7 +454,7 @@ if SERVER then
             target = IsValid(trace.Entity) and trace.Entity or nil
         end
         if not IsValid(target) or not BZCN.IsManaged(target) or not BZCN.Classes[className or ""] then
-            local message = "Usage: bzcn_npc_set_class <entity-index> <goober|humanityForces|traitor>"
+            local message = "Usage: bzcn_npc_set_class <entity-index> <default|Combine|Rebel|furry>"
             if IsValid(ply) then ply:ChatPrint(message) else print(message) end
             return
         end
@@ -411,7 +473,7 @@ if SERVER then
             target = IsValid(trace.Entity) and trace.Entity or nil
         end
         if IsValid(target) and target.GetNW2Entity then
-            local owner = target:GetNW2Entity("GooberNPCOwner")
+            local owner = target:GetNW2Entity("BZCNNPCOwner")
             if IsValid(owner) then target = owner end
         end
         if not IsValid(target) or not BZCN.IsManaged(target) then
@@ -424,7 +486,7 @@ if SERVER then
         local weaponsFound = {}
         for class, value in pairs(inventory.Weapons or {}) do if value then weaponsFound[#weaponsFound + 1] = class end end
         table.sort(weaponsFound)
-        local state = hg and hg.GooberNPCSupport and hg.GooberNPCSupport.GetNPCHealthTable(target)
+        local state = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.GetNPCHealthTable(target)
         local lines = {
             "[BZCN] " .. target:GetClass() .. " #" .. target:EntIndex(),
             "PlayerClassName: " .. tostring(target.PlayerClassName) .. " | IsPlayer(): " .. tostring(target:IsPlayer()),

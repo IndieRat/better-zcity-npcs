@@ -1,56 +1,53 @@
 # Better ZCity NPCs
 
-A Garry's Mod addon that gives NPC/NextBot entities a ZCity-style class and inventory compatibility layer, shared injury state, knockdown ragdolls, recovery animations, crawling, and held-weapon visuals.
+A Z-City / Homigrad-compatible scripted NextBot addon with vanilla-style classes, player-like inventory data, a shared organism/injury table, knockdown ragdolls, recovery, and crawling.
 
-## Included starter classes
+## Starter classes
 
-- `npc_bzcn_goober` — Goober-like melee hunter, class key `goober`.
-- `npc_bzcn_humanityforces` — human combat archetype, class key `humanityForces`.
-- `npc_bzcn_traitor` — hostile human archetype, class key `traitor`.
-- `npc_bzcn_base` — reusable NextBot base for further classes.
+- `npc_bzcn_default` — civilian / default class.
+- `npc_bzcn_combine` — Combine soldier.
+- `npc_bzcn_rebel` — Resistance fighter.
+- `npc_bzcn_furry` — adapted from Z-City's own `furry` player class.
 
-The class compatibility is deliberately an adapter, not an attempt to turn an engine NPC into a real `Player` userdata. `IsPlayer()`, `player.GetAll()`, client ownership and player-only engine features cannot be overridden by Lua. NPCs expose commonly used class-facing fields and helpers instead: `PlayerClassName`, `GetNetVar/SetNetVar`, an `Inventory` table with ZCity-style `Weapons` and `Items` subtables, an organism-like injury table, and inventory/weapon helper methods. The addon does not blindly execute arbitrary `player.RegClass(...).On` callbacks, since those may call player-only APIs.
+The furry profile uses the model from Z-City's `lua/homigrad/playerclass/classes/furry/sh_furry.lua` (`models/eradium/protogen_player.mdl`), the claw model used by `weapon_hands_sh`, the `c-` blood type, and the `protovisor` head-armor entry. It does **not** call the player's conversion, UI, or role callbacks, because those require a real Player entity.
 
 ## Install
 
-Copy this repository into `garrysmod/addons/better-zcity-npcs`, then restart the server or reload the addon.
+Copy this repository into `garrysmod/addons/better-zcity-npcs` and restart the server or reload the addon. The furry model and hand model are provided by Z-City content; ensure those assets are mounted.
 
-## Quick test
+## Spawn and test
 
-Spawn each starter class from the Entities tab under **Better ZCity NPCs**. They can also be spawned from server console:
+Spawn them from the Entities tab under **Better ZCity NPCs**, or use server console:
 
 ```text
-ent_create npc_bzcn_goober
-ent_create npc_bzcn_humanityforces
-ent_create npc_bzcn_traitor
+ent_create npc_bzcn_default
+ent_create npc_bzcn_combine
+ent_create npc_bzcn_rebel
+ent_create npc_bzcn_furry
 ```
 
-Aim at an NPC or its temporary ragdoll and run:
+Aim at a managed NPC or its temporary ragdoll and run `bzcn_npc_health`. Use `bzcn_npc_health <entity-index>` from server console to query a specific entity.
+
+For repeatable tests (admin or server console):
 
 ```text
-bzcn_npc_health
-```
-
-Use `bzcn_npc_health <entity-index>` from server console when needed. To swap an existing NPC between the three class profiles, run `bzcn_npc_set_class <entity-index> <goober|humanityForces|traitor>`. Check that the NPC reports one health/injury state through both its standing entity and ragdoll, recovers without spawning a duplicate, and resumes AI. Strong hits and severe leg injuries trigger downed/crawl states; model animation names vary, so a model without a crawl sequence uses slowed locomotion instead.
-
-For repeatable mechanics tests (run as admin or from server console):
-
-```text
+bzcn_npc_dump <entity-index>
 bzcn_npc_test <entity-index> down
 bzcn_npc_test <entity-index> crawl
 bzcn_npc_test <entity-index> reset
-bzcn_npc_dump <entity-index>
+bzcn_npc_set_class <entity-index> furry
 ```
 
-`down` forces the shared ragdoll/recovery flow; `crawl` simulates a severe leg injury; `reset` clears injuries and recovers a downed NPC. The dump command reports class, inventory keys, active fake weapon, health, organism fields, and the engine's true `IsPlayer()` status.
+The class-switch command accepts `default`, `Combine`, `Rebel`, or `furry`. `down` tests ragdoll/recovery, `crawl` simulates a serious leg injury, and `reset` clears injuries. The dump command reports the effective class, inventory, fake weapon, organism data and the engine's actual `IsPlayer()` result.
 
-## Adding a class
+## Compatibility approach
 
-Create a new scripted entity that inherits `npc_bzcn_base`, then set `ENT.BZCNClass` to one of the registered profile keys or register a profile through `BZCN.RegisterClass`. Do not call the player class's original `On` method unless that class has been explicitly adapted to operate on NPC entities.
+NPCs expose Z-City-style fields such as `PlayerClassName`, `Inventory.Weapons/Items/Armor`, `armors`, `armors_health`, `organism`, `GetNetVar`, and `SetNetVar`. Entity-valued netvars and ragdoll ownership links are mirrored for systems that inspect them.
 
-## Limitations
+Garry's Mod does not permit an NPC to become a real `Player` userdata: `IsPlayer()`, player enumeration, client ownership, and Player-only engine functions remain unchanged. Class data and inventory calls are adapted locally; player-only Z-City callbacks are not blindly invoked.
 
-- This is not a full Player replacement. Player-only APIs, player hooks and player ownership still require explicit NPC-aware adapters.
-- Inventory weapons are adapter entries with hand-held model proxies. The Humanity Forces and Traitor profiles use simple NPC raycast shooting, not the weapon SWEP's player-only firing/reload implementation.
-- Get-up/crawl animations depend on each model's available sequences.
-- Live Garry's Mod/ZCity runtime testing is required before considering every model or class fully validated.
+Inventory entries and held models are fake weapon proxies. Combine, Rebel, and civilian shooting uses a lightweight NPC trace/damage implementation, not the original SWEP firing/reload implementation. Ragdoll, crawl, and get-up animations still depend on the model's available sequences.
+
+## Source reference
+
+Z-City furry class: https://github.com/uzelezz123/Z-City/tree/main/lua/homigrad/playerclass/classes/furry
