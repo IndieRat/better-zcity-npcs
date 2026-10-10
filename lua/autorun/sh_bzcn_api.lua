@@ -508,7 +508,7 @@ if SERVER then
             "Inventory.Weapons: " .. (#weaponsFound > 0 and table.concat(weaponsFound, ", ") or "(empty)"),
             "Selected fake weapon: " .. tostring(target.BZCN_SelectedWeapon or target:GetNW2String("BZCNWeaponClass", "(none)")),
             "Netvars + Inventory bridge: " .. tostring(isfunction(target.GetNetVar) and isfunction(target.SetNetVar)),
-            "Organism table: " .. tostring(istable(target.organism)) .. " | shared injury table: " .. tostring(istable(state))
+            "Organism-compatible table: " .. tostring(istable(target.BZCN_Organism)) .. " | shared injury table: " .. tostring(istable(state))
         }
         for _, line in ipairs(lines) do print(line); if IsValid(ply) then ply:ChatPrint(line) end end
     end)
