@@ -879,6 +879,7 @@ local function InstallZCityFakeAdapter()
     local nativeFake = hg.Fake
     hg.BZCNNPCOriginalFake = nativeFake
     local function BZCNNPCFakeAdapter(ent, ...)
+        if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
             local state = Support.Attach(ent)
             if state and not state.downed then return EnterDownedState(ent, "shock") end
@@ -899,6 +900,7 @@ local function InstallZCityFakeUpAdapter()
     local nativeFakeUp = hg.FakeUp
     hg.BZCNNPCOriginalFakeUp = nativeFakeUp
     local function BZCNNPCFakeUpAdapter(ent, ...)
+        if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
             local state = ent.BZCNNPCOrg
             if state and state.downed then return Recover(ent, ent.BZCNNPCRagdoll, true) end
@@ -957,6 +959,7 @@ local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
     rag.BZCN_Organism = org
     rag.BZCNNPCOrg = nil
     rag.BZCNNPCOwner = nil
+    rag.BZCNNPCDeathCorpse = true
     rag.Player = nil
     rag:SetNWEntity("BZCNNPCOwner", NULL)
     rag:SetNWEntity("RagdollOwner", NULL)
