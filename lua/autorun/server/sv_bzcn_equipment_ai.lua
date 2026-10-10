@@ -427,6 +427,39 @@ local function UseMedicalItem(healer, target, class)
         healer.BZCNLastMedicalUse = CurTime()
         healer.BZCNLastMedicalTarget = target
         healer.BZCNLastMedicalClass = class
+
+        -- If the consumable still has supply, briefly display its real Z-City
+        -- world model and pause the actor as it treats the selected patient.
+        -- The hidden combat SWEP remains in its own runtime slot.
+        local remainingSupply = false
+        if IsValid(med) and istable(med.modeValues) then
+            for _, amount in pairs(med.modeValues) do
+                if (tonumber(amount) or 0) > 0 then remainingSupply = true break end
+            end
+        end
+        if remainingSupply and isstring(previousWeaponClass) and previousWeaponClass ~= ""
+            and previousWeaponClass ~= "weapon_medkit_sh" and previousWeaponClass ~= "weapon_bandage_sh" then
+            BZCN.SelectWeapon(healer, class)
+            local finishAt = CurTime() + 0.85
+            healer.BZCNMedicalUntil = finishAt
+            healer.BZCNMedicalTarget = target
+            healer.BZCNMedicalSequence = nil
+            if healer.SetNW2Entity then healer:SetNW2Entity("BZCNMedicalTarget", target) end
+            timer.Simple(0.9, function()
+                if not IsValid(healer) or healer.BZCNMedicalUntil ~= finishAt then return end
+                healer.BZCNMedicalUntil = nil
+                healer.BZCNMedicalTarget = nil
+                healer.BZCNMedicalSequence = nil
+                if healer.SetNW2Entity then healer:SetNW2Entity("BZCNMedicalTarget", NULL) end
+                if BZCN.IsManaged(healer) then
+                    local inventory = GetInventory(healer)
+                    if istable(inventory.Weapons) and inventory.Weapons[previousWeaponClass] then
+                        BZCN.SelectWeapon(healer, previousWeaponClass)
+                    end
+                end
+            end)
+        end
+
         hook.Run("BZCN_NPCUsedMedicalItem", healer, target, class)
         return true
     end
