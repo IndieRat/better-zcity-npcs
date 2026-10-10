@@ -692,6 +692,23 @@ local function Recover(owner, rag, removedExternally)
     if not state or not state.downed then return end
 
     if not IsValid(rag) then rag = owner.BZCNNPCRagdoll end
+
+    -- zcnpci calls out that a downed NPC must not automatically get back up
+    -- while a player is still holding the ragdoll. Keep all ownership links
+    -- live and retry recovery; external removal and explicit cleanup still pass.
+    if IsValid(rag) and not removedExternally and isfunction(rag.IsPlayerHolding) then
+        local heldOK, held = pcall(rag.IsPlayerHolding, rag)
+        if heldOK and held then
+            local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
+            state.recoverTimer = timerName
+            timer.Create(timerName, 0.5, 1, function()
+                if not IsAlive(owner) or owner.BZCNNPCOrg ~= state or not state.downed then return end
+                Recover(owner, owner.BZCNNPCRagdoll, false)
+            end)
+            return false
+        end
+    end
+
     local position, angles
     if IsValid(rag) then
         position, angles = FindStandPosition(owner, rag)
