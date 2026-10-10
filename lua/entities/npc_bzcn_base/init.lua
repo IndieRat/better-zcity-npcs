@@ -101,6 +101,7 @@ function ENT:Initialize()
         end
     end
     if self.BZCN_Organism and profile.BloodType then self.BZCN_Organism.bloodtype = profile.BloodType end
+    if self.ApplyBZCNRelationships then self:ApplyBZCNRelationships() end
     if self.CapabilitiesAdd then self:CapabilitiesAdd(CAP_MOVE_GROUND) end
 
     timer.Simple(0.1, function()
@@ -192,11 +193,7 @@ end
 function ENT:ApplyBZCNRelationships()
     if not SERVER then return end
     local ownFaction = self.BZCN_Faction or "civilian"
-    local friends = {"npc_citizen", "npc_barney", "npc_alyx", "npc_eli", "npc_kleiner",
-        "npc_magnusson", "npc_mossman", "npc_odessa", "npc_vortigaunt", "npc_rollermine_hacked"}
-    local combines = {"npc_combine_s", "npc_metropolice", "npc_combine", "npc_combinegunship",
-        "npc_hunter", "npc_stalker", "npc_strider", "npc_turret_floor", "npc_combine_camera",
-        "npc_manhack", "npc_cscanner", "npc_clawscanner"}
+    if ownFaction == "civilian" then ownFaction = "default" end
     for _, other in ipairs(ents.FindByClass("npc_*")) do
         if not IsValid(other) or other == self or not isfunction(other.AddEntityRelationship) then continue end
         local otherFaction = nativeNPCFaction[other:GetClass()]
@@ -500,8 +497,17 @@ function ENT:RunBehaviour()
             coroutine.wait(0.1)
         else
             local enemy = self:HaveEnemy()
-            if IsValid(enemy) then self:ChaseEnemy(enemy)
-            else self:Wander(); coroutine.wait(0.2) end
+            if IsValid(enemy) then
+                self:ChaseEnemy(enemy)
+            else
+                local ally = self:FindFollowTarget()
+                if IsValid(ally) then
+                    self:FollowAlly(ally)
+                else
+                    self:Wander()
+                    coroutine.wait(0.2)
+                end
+            end
         end
         coroutine.yield()
     end
@@ -510,6 +516,11 @@ end
 function ENT:OnInjured(damageInfo)
     if not damageInfo then return end
     self.BZCNLastDamageTime = CurTime()
+    local attacker = damageInfo:GetAttacker()
+    if IsValid(attacker) and attacker ~= self and not attacker:IsWorld() then
+        self.BZCNLastAttacker = attacker
+        hook.Run("BZCN_EntityDamaged", self, attacker, damageInfo, true)
+    end
     hook.Run("BZCN_NPCInjured", self, damageInfo)
 end
 
