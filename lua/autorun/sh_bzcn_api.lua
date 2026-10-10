@@ -68,8 +68,11 @@ end
 local function SyncNetVar(ent, key, value)
     if not SERVER or not IsValid(ent) or not ent.SetNW2String then return end
     local kind = type(value)
+    if IsValid(value) and isfunction(value.GetClass) then kind = "entity" end
     ent:SetNW2String(NetworkKey(key, "type"), kind)
-    if kind == "boolean" then
+    if kind == "entity" then
+        ent:SetNW2Entity(NetworkKey(key, "entity"), value)
+    elseif kind == "boolean" then
         ent:SetNW2Bool(NetworkKey(key, "bool"), value)
     elseif kind == "number" then
         ent:SetNW2Float(NetworkKey(key, "number"), value)
@@ -101,6 +104,7 @@ function BZCN.GetNetVar(ent, key, default)
     if not ent.GetNW2String then return default end
 
     local kind = ent:GetNW2String(NetworkKey(key, "type"), "")
+    if kind == "entity" then return ent:GetNW2Entity(NetworkKey(key, "entity"), IsValid(default) and default or NULL) end
     if kind == "boolean" then return ent:GetNW2Bool(NetworkKey(key, "bool"), default == true) end
     if kind == "number" then return ent:GetNW2Float(NetworkKey(key, "number"), tonumber(default) or 0) end
     if kind == "string" then return ent:GetNW2String(NetworkKey(key, "string"), isstring(default) and default or "") end
@@ -247,6 +251,7 @@ end
 
 function BZCN.ChangeClass(ent, className, heal)
     if not IsValid(ent) or not isstring(className) or not BZCN.Classes[className] then return false end
+    if ent.GetNW2Bool and ent:GetNW2Bool("GooberNPCDowned", false) then return false end
     local profile = BZCN.GetClass(className)
     BZCN.HideHeldWeapon(ent)
     if isstring(profile.Model) and util.IsValidModel(profile.Model) then ent:SetModel(profile.Model) end
@@ -259,6 +264,37 @@ function BZCN.ChangeClass(ent, className, heal)
     local success = BZCN.ApplyClass(ent, className, true)
     if success then
         if ent.loco then ent.loco:SetDesiredSpeed(profile.Speed or 175) end
+        if hg and hg.GooberNPCSupport and hg.GooberNPCSupport.GetNPCHealthTable then
+            local healthState = hg.GooberNPCSupport.GetNPCHealthTable(ent)
+            if healthState then
+                healthState.maxHealth = profile.Health or 100
+                healthState.health = ent:Health()
+                healthState.pain = 0
+                healthState.shock = 0
+                healthState.skull = 0
+                healthState.brain = 0
+                healthState.chest = 0
+                healthState.pelvis = 0
+                healthState.stomach = 0
+                healthState.spine1 = 0
+                healthState.spine2 = 0
+                healthState.spine3 = 0
+                healthState.larm = 0
+                healthState.rarm = 0
+                healthState.lleg = 0
+                healthState.rleg = 0
+                healthState.heart = 0
+                healthState.liver = 0
+                healthState.intestines = 0
+                healthState.lungsL = {0, 0}
+                healthState.lungsR = {0, 0}
+                healthState.blood = healthState.maxBlood or 5000
+                healthState.partDamage = {head = 0, chest = 0, abdomen = 0, pelvis = 0, leftarm = 0, rightarm = 0, leftleg = 0, rightleg = 0}
+                healthState.crawling = false
+                if healthState.wounds then table.Empty(healthState.wounds) end
+                if healthState.arterialwounds then table.Empty(healthState.arterialwounds) end
+            end
+        end
         BZCN.ShowHeldWeapon(ent)
         hook.Run("BZCN_NPCClassChanged", ent, className, profile)
     end
