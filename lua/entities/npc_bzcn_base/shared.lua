@@ -140,9 +140,10 @@ function ENT:GetBZCNMovementSequence(speed, state)
     local profile = self.BZCNClassProfile or {}
     local weaponClass = self.BZCN_SelectedWeapon or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local holdType = istable(stored) and (stored.HoldType or stored.holdtype) or "normal"
+    local holdType = profile.AnimationHoldType
+        or (istable(stored) and (stored.HoldType or stored.holdtype)) or "normal"
     holdType = isstring(holdType) and string.lower(holdType) or "normal"
-    self.ixAnimHoldType = HOLDTYPE_TRANSLATOR[holdType] or holdType
+    self.ixAnimHoldType = profile.AnimationHoldType or HOLDTYPE_TRANSLATOR[holdType] or holdType
     local animationSet = animClass[self.ixAnimHoldType] or animClass.normal or animClass
     if not istable(animationSet) then return -1 end
 
