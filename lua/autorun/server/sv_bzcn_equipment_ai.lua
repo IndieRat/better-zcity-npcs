@@ -225,6 +225,12 @@ end
 
 function BZCN.AttackRuntimeMelee(ent, target)
     if not IsValid(ent) or not IsValid(target) or not BZCN.IsManaged(ent) then return false end
+    local selectedClass = ent.BZCN_SelectedWeapon
+        or (ent.BZCNClassProfile and ent.BZCNClassProfile.WeaponClass)
+    -- The native Z-City fists SWEP is used for fists/claws profiles. Armed
+    -- profiles keep their own gun presentation and use the configured melee
+    -- fallback instead of suddenly punching while visibly holding a rifle.
+    if selectedClass ~= "weapon_hands_sh" then return false end
     local distance = ent:GetPos():Distance(target:GetPos())
     local weapon
     if IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon:GetClass() == "weapon_hands_sh" then
