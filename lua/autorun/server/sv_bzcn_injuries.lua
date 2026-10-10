@@ -136,11 +136,17 @@ end
 local function SyncEntity(ent, state)
     if not IsValid(ent) then return end
 
-    -- The injury table is authoritative; mirror it into ZCity-style organism
-    -- fields and reference the same organism table from the proxy ragdoll.
+    -- Keep the full organism-compatible data in our own namespace on the
+    -- server. Z-City treats ent.organism as a player/ragdoll damage marker and
+    -- returns true for non-NPC NextBots, suppressing their engine damage.
     local owner = state.owner
     if IsValid(owner) then
-        local org = owner.organism or {}
+        local org = owner.BZCN_Organism or {}
+        org.owner = owner
+        org.alive = IsAlive(owner)
+        org.entindex = owner:EntIndex()
+        org.health = math.max(tonumber(state.health) or owner:Health(), 0)
+        org.maxHealth = math.max(tonumber(state.maxHealth) or owner:GetMaxHealth(), 1)
         org.blood = state.blood
         org.maxBlood = state.maxBlood
         org.bloodtype = org.bloodtype or "unknown"
@@ -165,8 +171,20 @@ local function SyncEntity(ent, state)
         org.lungsR = {state.lungsR[1], state.lungsR[2]}
         org.wounds = state.wounds
         org.arterialwounds = state.arterialwounds
-        owner.organism = org
-        ent.organism = org
+        org.otrub = state.downed or state.gettingUp
+        org.canmove = not (state.downed or state.gettingUp)
+        org.dmgstack = org.dmgstack or {}
+        org.bulletwounds = org.bulletwounds or 0
+        org.stabwounds = org.stabwounds or 0
+        org.slashwounds = org.slashwounds or 0
+        org.bruises = org.bruises or 0
+        org.burns = org.burns or 0
+        org.explosionwounds = org.explosionwounds or 0
+
+        owner.BZCN_Organism = org
+        ent.BZCN_Organism = org
+        owner.organism = nil
+        ent.organism = nil
     end
 
     SetNWFloat(ent, "BZCNNPCHealth", state.health)
@@ -650,7 +668,8 @@ local function EnterDownedState(owner, reason)
     rag.BZCNNPCOwner = owner
     rag.Player = owner
     rag.BZCNNPCOrg = state
-    rag.organism = owner.organism
+    rag.BZCN_Organism = owner.BZCN_Organism
+    rag.organism = nil
     rag:SetNWEntity("BZCNNPCOwner", owner)
     rag:SetNWEntity("RagdollOwner", owner)
     if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", owner) end
@@ -693,6 +712,35 @@ end
 
 Support.EnterDownedState = EnterDownedState
 Support.Recover = Recover
+
+function Support.OnNPCDeath(owner)
+    if not IsValid(owner) then return end
+    local state = owner.BZCNNPCOrg
+    if not state then return end
+    if state.recoverTimer then timer.Remove(state.recoverTimer) end
+    if state.getUpTimer then timer.Remove(state.getUpTimer) end
+    state.recoverTimer = nil
+    state.getUpTimer = nil
+    state.downed = false
+    state.gettingUp = false
+    owner.BZCNNPCDowned = false
+    RestoreRagdollWeapon(state)
+
+    local rag = owner.BZCNNPCRagdoll
+    owner.BZCNNPCRagdoll = nil
+    if IsValid(rag) then
+        rag.BZCNNPCOwner = nil
+        rag.BZCNNPCOrg = nil
+        rag.BZCN_Organism = nil
+        rag.organism = nil
+        if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
+        rag:SetNWEntity("BZCNNPCOwner", NULL)
+        rag:SetNWEntity("RagdollOwner", NULL)
+        rag:Remove()
+    end
+    owner:SetNWEntity("FakeRagdoll", NULL)
+    owner:SetNWEntity("ragdoll", NULL)
+end
 
 hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", function(ent)
     timer.Simple(0, function()
@@ -750,7 +798,8 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
     local legFailure = state.lleg >= 65 or state.rleg >= 65 or
         (state.lleg >= 45 and state.rleg >= 45)
 
-    if (hardHit or legFailure) and not state.downed and not state.knockdownQueued then
+    local lethalHit = amount >= math.max(target:Health(), 1)
+    if (hardHit or legFailure) and not lethalHit and not state.downed and not state.knockdownQueued then
         state.knockdownQueued = true
         local reason = legFailure and "legs" or "impact"
         timer.Simple(0, function()
