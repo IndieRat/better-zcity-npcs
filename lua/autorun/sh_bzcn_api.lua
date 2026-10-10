@@ -2,7 +2,10 @@
 -- NPCs remain actual NPC/NextBot entities; this bridges Lua-facing data
 -- patterns commonly used by ZCity classes without spoofing engine IsPlayer().
 
-if SERVER then AddCSLuaFile() end
+if SERVER then
+    AddCSLuaFile()
+    AddCSLuaFile("autorun/client/cl_bzcn_hud_bridge.lua")
+end
 
 BZCN = BZCN or {}
 BZCN.Classes = BZCN.Classes or {}
