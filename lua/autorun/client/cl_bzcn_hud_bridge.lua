@@ -40,6 +40,12 @@ end
 
 local function MirrorOrganism(npc)
     if not IsManaged(npc) then return nil end
+    if not isstring(npc.PlayerClassName) or npc.PlayerClassName == "" then
+        npc.PlayerClassName = npc:GetNW2String("PlayerClassName", npc:GetNW2String("BZCNClass", "default"))
+    end
+    if BZCN.InstallAdapter and not isfunction(npc.PlayerClassEvent) then
+        BZCN.InstallAdapter(npc)
+    end
 
     local health = ReadNumber(npc, "BZCNNPCHealth", npc:Health())
     local maxHealth = ReadNumber(npc, "BZCNNPCMaxHealth", npc:GetMaxHealth())
