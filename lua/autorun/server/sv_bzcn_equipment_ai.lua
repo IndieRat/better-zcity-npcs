@@ -49,6 +49,12 @@ local function RemoveRuntimeWeapon(ent, key)
     if IsValid(weapon) then weapon:Remove() end
 end
 
+local function PlaceRuntimeWeapon(owner, weapon)
+    if not IsValid(owner) or not IsValid(weapon) then return end
+    weapon:SetPos(owner:GetPos())
+    weapon:SetAngles(owner:GetAngles())
+end
+
 local function ConfigureWeaponEntity(owner, class, slotKey)
     if not IsValid(owner) or not BZCN.IsManaged(owner) then return nil end
     local current = owner[slotKey]
@@ -185,6 +191,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
     local beforeNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
     if beforeNext > now then return true end
     local beforeClip = weapon.Clip1 and weapon:Clip1() or -1
+    PlaceRuntimeWeapon(ent, weapon)
     local source = ent:WorldSpaceCenter() + Vector(0, 0, 8)
     local destination = target:WorldSpaceCenter()
     local direction = (destination - source):GetNormalized()
@@ -251,6 +258,7 @@ function BZCN.AttackRuntimeMelee(ent, target)
     local nextFire = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
     if nextFire > now then return true end
 
+    PlaceRuntimeWeapon(ent, weapon)
     ent.BZCNCombatTarget = target
     ent.BZCN_SimulatedButtons = IN_ATTACK
     local beforeNext = nextFire
@@ -323,6 +331,7 @@ local function UseMedicalItem(healer, target, class)
     -- Z-City's existing weapon_medkit_sh/weapon_bandage_sh Heal() is used on
     -- purpose: wounds and blood-loss treatment should be native, not re-created
     -- by this addon. Prefer bandaging, then internal-bleeding mode when applicable.
+    PlaceRuntimeWeapon(healer, med)
     local org = target.organism or target.BZCN_Organism or {}
     local actions = {1}
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
