@@ -865,6 +865,67 @@ end
 Support.EnterDownedState = EnterDownedState
 Support.Recover = Recover
 
+-- Z-City's shock/knockout path calls hg.Fake(org.owner). Its implementation
+-- is Player-specific, so route only managed NextBots into our organism-aware
+-- knockdown/recovery lifecycle while leaving real Player calls untouched.
+local function InstallZCityFakeAdapter()
+    if not hg or not isfunction(hg.Fake) then return false end
+    if hg.BZCNNPCFakeAdapter and hg.Fake == hg.BZCNNPCFakeAdapter then return true end
+    if hg.BZCNNPCFakeAdapter then return true end
+
+    local nativeFake = hg.Fake
+    hg.BZCNNPCOriginalFake = nativeFake
+    local function BZCNNPCFakeAdapter(ent, ...)
+        if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
+            local state = Support.Attach(ent)
+            if state and not state.downed then return EnterDownedState(ent, "shock") end
+            return false
+        end
+        return nativeFake(ent, ...)
+    end
+    hg.BZCNNPCFakeAdapter = BZCNNPCFakeAdapter
+    hg.Fake = BZCNNPCFakeAdapter
+    return true
+end
+
+local function InstallZCityFakeUpAdapter()
+    if not hg or not isfunction(hg.FakeUp) then return false end
+    if hg.BZCNNPCFakeUpAdapter and hg.FakeUp == hg.BZCNNPCFakeUpAdapter then return true end
+    if hg.BZCNNPCFakeUpAdapter then return true end
+
+    local nativeFakeUp = hg.FakeUp
+    hg.BZCNNPCOriginalFakeUp = nativeFakeUp
+    local function BZCNNPCFakeUpAdapter(ent, ...)
+        if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
+            local state = ent.BZCNNPCOrg
+            if state and state.downed then return Recover(ent, ent.BZCNNPCRagdoll, true) end
+            return false
+        end
+        return nativeFakeUp(ent, ...)
+    end
+    hg.BZCNNPCFakeUpAdapter = BZCNNPCFakeUpAdapter
+    hg.FakeUp = BZCNNPCFakeUpAdapter
+    return true
+end
+
+local function InstallZCityKnockdownAdapters()
+    InstallZCityFakeAdapter()
+    InstallZCityFakeUpAdapter()
+end
+
+hook.Add("Initialize", "BZCNNPCSupport_ZCityKnockdownAdapters", function()
+    timer.Simple(0, InstallZCityKnockdownAdapters)
+end)
+hook.Add("InitPostEntity", "BZCNNPCSupport_ZCityKnockdownAdapters", function()
+    timer.Simple(0, InstallZCityKnockdownAdapters)
+end)
+timer.Create("BZCNNPCSupport_ZCityKnockdownAdapterRetry", 0.5, 20, function()
+    InstallZCityKnockdownAdapters()
+    if hg and hg.BZCNNPCFakeAdapter and hg.BZCNNPCFakeUpAdapter then
+        timer.Remove("BZCNNPCSupport_ZCityKnockdownAdapterRetry")
+    end
+end)
+
 local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
     if not IsValid(rag) then return nil end
     sourceOrg = istable(sourceOrg) and sourceOrg or {}
