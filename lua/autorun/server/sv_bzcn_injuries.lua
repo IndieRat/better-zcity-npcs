@@ -190,8 +190,21 @@ local function SyncEntity(ent, state)
     SetNWFloat(ent, "BZCNNPCHealth", state.health)
     SetNWFloat(ent, "BZCNNPCMaxHealth", state.maxHealth)
     SetNWFloat(ent, "BZCNNPCBlood", state.blood)
+    SetNWFloat(ent, "BZCNNPCMaxBlood", state.maxBlood)
     SetNWFloat(ent, "BZCNNPCPain", state.pain)
     SetNWFloat(ent, "BZCNNPCShock", state.shock)
+    SetNWFloat(ent, "BZCNNPCBrain", state.brain)
+    SetNWFloat(ent, "BZCNNPCSpine1", state.spine1)
+    SetNWFloat(ent, "BZCNNPCSpine2", state.spine2)
+    SetNWFloat(ent, "BZCNNPCSpine3", state.spine3)
+    SetNWFloat(ent, "BZCNNPCHeart", state.heart)
+    SetNWFloat(ent, "BZCNNPCLiver", state.liver)
+    SetNWFloat(ent, "BZCNNPCIntestines", state.intestines)
+    SetNWFloat(ent, "BZCNNPCLungsL1", state.lungsL[1])
+    SetNWFloat(ent, "BZCNNPCLungsL2", state.lungsL[2])
+    SetNWFloat(ent, "BZCNNPCLungsR1", state.lungsR[1])
+    SetNWFloat(ent, "BZCNNPCLungsR2", state.lungsR[2])
+    if ent.SetNW2String then ent:SetNW2String("BZCNNPCBloodType", state.bloodtype or "unknown") end
 
     local networkParts = {
         head = state.skull,
