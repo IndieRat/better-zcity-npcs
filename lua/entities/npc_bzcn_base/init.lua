@@ -249,6 +249,7 @@ function ENT:FindEnemy()
     local radius = self.LoseTargetDist or 1400
     local preferred = context and context.intent and context.intent.Target
     local best, bestDistance
+    local priorityTarget = false
 
     local function IsVisibleHostile(target)
         for _, record in ipairs(hostiles) do
@@ -262,6 +263,7 @@ function ENT:FindEnemy()
     if IsValid(preferred) and IsVisibleHostile(preferred) then
         best = preferred
         bestDistance = self:GetPos():DistToSqr(preferred:GetPos())
+        priorityTarget = true
     end
 
     -- Protect players, civilians, native Z-City NPCs and other friendly NextBots.
@@ -277,6 +279,7 @@ function ENT:FindEnemy()
                 and IsVisibleHostile(attacker) then
                 best = attacker
                 bestDistance = self:GetPos():DistToSqr(attacker:GetPos())
+                priorityTarget = true
                 break
             end
 
@@ -285,18 +288,21 @@ function ENT:FindEnemy()
                 if ok and IsValid(allyEnemy) and IsVisibleHostile(allyEnemy) then
                     best = allyEnemy
                     bestDistance = self:GetPos():DistToSqr(allyEnemy:GetPos())
+                    priorityTarget = true
                     break
                 end
             end
         end
     end
 
-    for _, record in ipairs(hostiles) do
-        local target = record.Entity
-        if IsValid(target) and record.Visible and self:IsBZCNEnemy(target) then
-            local distance = self:GetPos():DistToSqr(target:GetPos())
-            if distance <= radius * radius and (not bestDistance or distance < bestDistance) then
-                best, bestDistance = target, distance
+    if not priorityTarget then
+        for _, record in ipairs(hostiles) do
+            local target = record.Entity
+            if IsValid(target) and record.Visible and self:IsBZCNEnemy(target) then
+                local distance = self:GetPos():DistToSqr(target:GetPos())
+                if distance <= radius * radius and (not bestDistance or distance < bestDistance) then
+                    best, bestDistance = target, distance
+                end
             end
         end
     end
