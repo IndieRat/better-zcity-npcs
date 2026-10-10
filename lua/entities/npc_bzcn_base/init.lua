@@ -344,10 +344,18 @@ function ENT:OnKilled(damageInfo)
     self:SetHealth(0)
     BZCN.HideHeldWeapon(self)
 
+    local deathRagdoll
     if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.OnNPCDeath then
-        hg.BZCNNPCSupport.OnNPCDeath(self)
+        deathRagdoll = hg.BZCNNPCSupport.OnNPCDeath(self)
     end
     hook.Run("BZCN_NPCKilled", self, damageInfo)
+
+    -- If already downed, preserve that physical ragdoll and convert its shared
+    -- physiology into the native dead-body organism format.
+    if IsValid(deathRagdoll) then
+        self:Remove()
+        return
+    end
 
     local becomeRagdoll = self.BecomeRagdoll
     if isfunction(becomeRagdoll) then
