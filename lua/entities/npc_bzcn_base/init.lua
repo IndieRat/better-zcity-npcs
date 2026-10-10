@@ -212,6 +212,22 @@ function ENT:ApplyBZCNRelationships()
     end
 end
 
+if SERVER then
+    -- Native NPCs spawned after a scripted citizen/Combine should receive the
+    -- reciprocal Z-City dispositions too.
+    hook.Add("OnEntityCreated", "BZCN_RefreshNativeNPCRelations", function(ent)
+        timer.Simple(0.2, function()
+            if not IsValid(ent) or (BZCN.IsManaged and BZCN.IsManaged(ent)) then return end
+            if not ent:IsNPC() then return end
+            for _, candidate in ipairs(ents.GetAll()) do
+                if BZCN.IsManaged(candidate) and isfunction(candidate.ApplyBZCNRelationships) then
+                    candidate:ApplyBZCNRelationships()
+                end
+            end
+        end)
+    end)
+end
+
 function ENT:FindEnemy()
     -- Enemy selection consumes the adapter chain's sense records. Before
     -- taking the nearest hostile, look for a threat that recently hurt an ally.
@@ -360,15 +376,55 @@ function ENT:FollowAlly(target)
 end
 
 function ENT:PlayBZCNAttackAnimation()
-    local sequence = self:FindSequence({
-        "zombie_attack_01", "seq_meleeattack01", "attack01",
-        "melee_gunhit", "melee_attack1", "attack"
-    })
+    local sequence = -1
+    local profile = self:GetBZCNProfile()
+    local modelClass = hg and hg.IXAnims and isfunction(hg.IXAnims.GetModelClass)
+        and hg.IXAnims.GetModelClass(self:GetModel())
+    local animationClass = modelClass and hg.IXAnims[modelClass]
+    if istable(animationClass) then
+        local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass
+        local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
+        local holdType = istable(stored) and (stored.HoldType or stored.holdtype) or nil
+        if not isstring(holdType) or holdType == "" then
+            holdType = profile.Ranged and (string.find(weaponClass or "", "pistol") and "pistol"
+                or (string.find(weaponClass or "", "smg") or string.find(weaponClass or "", "ar2")) and "smg"
+                or "normal") or "melee"
+        end
+        local translators = {
+            physgun = "smg", ar2 = "smg", crossbow = "shotgun", rpg = "grenade",
+            slam = "smg", fist = "normal", melee2 = "melee", knife = "melee",
+            duel = "pistol", revolver = "smg"
+        }
+        holdType = translators[holdType] or holdType
+        local animationSet = animationClass[holdType] or animationClass.normal
+            or animationClass.melee or animationClass
+        local activity = istable(animationSet) and animationSet.attack or nil
+        if isnumber(activity) and self.SelectWeightedSequence then
+            local ok, selected = pcall(self.SelectWeightedSequence, self, activity)
+            if ok and isnumber(selected) and selected >= 0 then sequence = selected end
+        elseif isstring(activity) then
+            sequence = self:LookupSequence(activity)
+        end
+    end
+
+    if sequence < 0 then
+        sequence = self:FindSequence({
+            "zombie_attack_01", "seq_meleeattack01", "attack01",
+            "melee_gunhit", "melee_attack1", "attack"
+        })
+    end
     if sequence < 0 and self.SelectWeightedSequence then
-        local ok, selected = pcall(self.SelectWeightedSequence, self, ACT_MELEE_ATTACK1)
+        local ok, selected = pcall(self.SelectWeightedSequence, self,
+            profile.Ranged and ACT_GESTURE_RANGE_ATTACK_SMG1 or ACT_MELEE_ATTACK1)
         if ok and isnumber(selected) and selected >= 0 then sequence = selected end
     end
     if sequence < 0 then return false end
+
+    -- Try the framework's gesture layer first so locomotion keeps animating.
+    if isfunction(self.AddGestureSequence) then
+        local ok = pcall(self.AddGestureSequence, self, sequence)
+        if ok then return true end
+    end
 
     self.BZCNActionSequence = sequence
     local duration = 0.65
