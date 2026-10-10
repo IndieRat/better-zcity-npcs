@@ -55,11 +55,16 @@ local function ReadNetVar(ent, key)
     return nil
 end
 
-local function GetClassName(ent)
+local function GetExplicitPlayerClassName(ent)
     local className = ent.PlayerClassName
     if not isstring(className) or className == "" then
         className = SafeCall(ent, "GetNW2String", "PlayerClassName", "")
     end
+    return isstring(className) and className ~= "" and className or nil
+end
+
+local function GetClassName(ent)
+    local className = GetExplicitPlayerClassName(ent)
     if not isstring(className) or className == "" then className = ent.BZCNClass end
     if not isstring(className) or className == "" then className = "default" end
     return className
@@ -147,13 +152,14 @@ end
 function BZCN.CapturePlayerData(source)
     if not IsValid(source) then return nil end
 
+    local explicitClassName = GetExplicitPlayerClassName(source)
     local className = GetClassName(source)
     local profile = source.BZCNClassProfile or BZCN.GetClass(className) or {}
     local classData
     if source:IsPlayer() then
         classData = SafeCall(source, "GetPlayerClass")
         if not istable(classData) and player and istable(player.classList) then
-            classData = player.classList[className]
+            classData = player.classList[explicitClassName or ""]
         end
     end
     local health = GetHealth(source)
@@ -209,6 +215,9 @@ function BZCN.CapturePlayerData(source)
         Class = source:GetClass(),
         ClassName = className,
         PlayerClassName = className,
+        ExplicitPlayerClassName = explicitClassName,
+        HasRegisteredClass = isstring(explicitClassName) and BZCN.Classes[explicitClassName] ~= nil
+            or (not source:IsPlayer() and BZCN.Classes[className] ~= nil),
         ClassData = SafeCopy(classData),
         Name = displayName,
         Model = model,
@@ -615,7 +624,7 @@ function BZCN.CopyPlayerDataToNPC(source, npc, options)
     local data = BZCN.CapturePlayerData(source)
     if not data then return false end
 
-    if options.copyClass and BZCN.Classes[data.PlayerClassName]
+    if options.copyClass and data.HasRegisteredClass and BZCN.Classes[data.PlayerClassName]
         and data.PlayerClassName ~= npc.PlayerClassName then
         BZCN.ChangeClass(npc, data.PlayerClassName, false)
     end
