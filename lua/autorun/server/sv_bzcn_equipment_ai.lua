@@ -363,26 +363,52 @@ local function UseMedicalItem(healer, target, class)
     med.modeValues[4] = tonumber(med.modeValues[4]) or 0
     med.modeValues[5] = tonumber(med.modeValues[5]) or 0
 
-    -- Z-City's existing weapon_medkit_sh/weapon_bandage_sh Heal() is used on
-    -- purpose: wounds and blood-loss treatment should be native, not re-created
-    -- by this addon. Prefer bandaging, then internal-bleeding mode when applicable.
+    -- Use the actual Z-City item modes: 1 bandage, 2 painkiller,
+    -- 3 tranexamic/internal-bleed treatment, and 4 tourniquet.
     PlaceRuntimeWeapon(healer, med)
     local org = target.organism or target.BZCN_Organism or {}
-    local actions = {1}
+    local actions = {}
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
-    if internalBleed > 0 and med:GetClass() == "weapon_medkit_sh" then
-        actions = {3, 1}
+    local woundCount = WoundCount(org.wounds)
+    local arterialCount = WoundCount(org.arterialwounds)
+    local blood = tonumber(org.blood) or 5000
+    local pain = tonumber(org.pain) or 0
+    local shock = tonumber(org.shock) or 0
+    local hasMedkit = med:GetClass() == "weapon_medkit_sh"
+
+    if hasMedkit and internalBleed > 0 and med.modeValues[3] > 0 then actions[#actions + 1] = 3 end
+    if hasMedkit and arterialCount > 0 and med.modeValues[4] > 0 then actions[#actions + 1] = 4 end
+    if hasMedkit and (pain >= 65 or shock >= 75) and (target == healer or org.otrub)
+        and med.modeValues[2] > 0 then actions[#actions + 1] = 2 end
+    if (woundCount > 0 or arterialCount > 0 or blood < 4600) and med.modeValues[1] > 0 then
+        actions[#actions + 1] = 1
     end
+    if #actions == 0 and hasMedkit and target == healer and (pain >= 75 or shock >= 80)
+        and med.modeValues[2] > 0 then
+        actions[#actions + 1] = 2
+    end
+    if #actions == 0 then return false end
 
     local applied = false
     for _, mode in ipairs(actions) do
+        if not IsValid(med) then break end
         med.mode = mode
         local fn = med.Heal
         if isfunction(fn) then
+            local beforeSupply = tonumber(med.modeValues[mode]) or 0
+            local beforeAnalgesia = tonumber(org.analgesiaAdd) or 0
+            local beforeInternalHeal = tonumber(org.internalBleedHeal) or 0
             local ok = pcall(fn, med, target, mode)
-            if ok then applied = true end
+            if ok then
+                local afterSupply = tonumber(med.modeValues and med.modeValues[mode]) or beforeSupply
+                local afterAnalgesia = tonumber(org.analgesiaAdd) or beforeAnalgesia
+                local afterInternalHeal = tonumber(org.internalBleedHeal) or beforeInternalHeal
+                if afterSupply < beforeSupply or afterAnalgesia > beforeAnalgesia
+                    or afterInternalHeal > beforeInternalHeal or mode == 1 or mode == 4 then
+                    applied = true
+                end
+            end
         end
-        if mode == 1 then break end
     end
 
     -- Native medicine sometimes calls owner:SelectWeapon("weapon_hands_sh")
