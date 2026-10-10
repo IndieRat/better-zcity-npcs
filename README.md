@@ -91,6 +91,12 @@ The `default` civilian first tries Z-City's `hg.Appearance.GetRandomAppearance()
 
 Managed NPCs classify native Z-City Combine/civilian NPCs, establish reciprocal entity relationships, and use a shared sensing context to follow visible allies. If a nearby ally or player has recently been attacked, that attacker is promoted to a temporary hostile even if it was normally the same faction, so the NPC can defend the victim. NPCs follow players and other allies when no visible hostile needs attention. This is cooperative AI for the managed NPCs; it cannot take over a real player's controls or guarantee that unrelated native NPC AI will actively follow the scripted NextBot.
 
+## Injury signals and fake-ragdoll compatibility
+
+The injury bridge also uses the public [Z-City NPC Integration (zcnpci)](https://forge.owouw.us/ToasterPanic/zcnpci) addon as a design reference for damage-stage handling and ragdoll compatibility; this addon does not copy its active-ragdoll controller. For managed NextBots, it records available `ScaleNPCDamage` hitgroups and consumes `HomigradDamage` when present, then evaluates Z-City organism state after the damage tick. The incapacity checks include `otrub`, low consciousness, high pain, active stun/light-stun timers, serious leg damage/amputation, fire, and zcnpci-style leg-specific impact thresholds. These are server-side knockdown decisions layered over Z-City's native organism; they do not replace its wound calculation.
+
+The temporary knockdown ragdoll keeps the expected owner links together: `rag.ply`, `owner.FakeRagdoll`, networked `ply`/ `FakeRagdoll`, and the NPC's `GetRagdollEntity()` compatibility accessor. `hg.Fake`, `hg.FakeUp`, `hg.StunPlayer`, and `hg.LightStunPlayer` are adapted only for BZCN-managed actors; calls for real players continue through the installed native/other-addon function. Recovery retries while the temporary ragdoll is held, and the downed copy preserves bodygroups, submaterials, and Citizen-type metadata so appearance-changing addons don't lose their setup. On get-up or death, temporary links are cleared and the death corpse receives its own organism instead of continuing to share the living NPC's.
+
 ## Compatibility approach and limits
 
 NPCs expose Z-City-style fields such as `PlayerClassName`, `Inventory.Weapons/Items/Armor`, `armors`, `armors_health`, `organism`, `GetNetVar`, and `SetNetVar`. Entity-valued netvars and ragdoll ownership links are mirrored for systems that inspect them.
@@ -101,6 +107,8 @@ The actor remains a NextBot, not a Player. Each managed NPC keeps a hidden runti
 
 The server-side medical AI checks Z-City organism wounds, blood loss, internal bleeding, shock, pain, and recent health loss for the NPC and nearby allies. It invokes the real `weapon_medkit_sh:Heal()` / `weapon_bandage_sh:Heal()` methods against the native organism instead of maintaining a second healing implementation. This is a best-effort autonomous treatment bridge: player-targeting animations, inventory UI, and every item-specific Player-only behavior are not guaranteed to run on a NextBot. Ragdoll, crawl, climb, and get-up visuals still depend on model sequences and navigation/obstacle geometry. Static checks do not replace a live Z-City/Garry's Mod runtime test.
 
-## Source reference
+## Source references
 
-Z-City furry class: https://github.com/uzelezz123/Z-City/tree/main/lua/homigrad/playerclass/classes/furry
+- Z-City furry class: https://github.com/uzelezz123/Z-City/tree/main/lua/homigrad/playerclass/classes/furry
+- Z-City NPC Integration (injury/ragdoll design reference): https://forge.owouw.us/ToasterPanic/zcnpci
+- Z-City's organism-backed native NPC conversion: https://github.com/uzelezz123/Z-City/blob/main/lua/homigrad/sv_npcstuff.lua
