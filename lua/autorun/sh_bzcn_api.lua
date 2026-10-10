@@ -277,19 +277,29 @@ function BZCN.InstallAdapter(ent)
     end
     data.KeyPressed = data.KeyDown
     data.KeyReleased = function() return false end
+    data.EyePos = function(self)
+        return self:WorldSpaceCenter() + Vector(0, 0, 6)
+    end
+    data.GetShootPos = function(self) return self:EyePos() end
     data.GetAimVector = function(self)
         local target = self.BZCNCombatTarget
         if IsValid(target) then
-            local origin = self:WorldSpaceCenter()
+            local origin = self:EyePos()
             return (target:WorldSpaceCenter() - origin):GetNormalized()
         end
         return self:GetForward()
     end
+    data.EyeAngles = function(self)
+        local target = self.BZCNCombatTarget
+        if IsValid(target) then return (target:WorldSpaceCenter() - self:EyePos()):Angle() end
+        return self:GetAngles()
+    end
     data.GetEyeTrace = function(self)
-        local origin = self.EyePos and self:EyePos() or self:WorldSpaceCenter()
+        local origin = self:EyePos()
         local aim = self:GetAimVector()
         return util.TraceLine({start = origin, endpos = origin + aim * 8192, filter = self, mask = MASK_SHOT})
     end
+    data.IsBerserk = function() return false end
     data.ViewPunch = function() end
     data.LagCompensation = function() end
     data.GetAmmoCount = function(self, ammoType)
