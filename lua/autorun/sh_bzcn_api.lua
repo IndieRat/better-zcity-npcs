@@ -110,7 +110,10 @@ function BZCN.SetNetVar(ent, key, value)
     local data = ent:GetTable()
     data.BZCN_NetVars = data.BZCN_NetVars or {}
     data.BZCN_NetVars[key] = value
-    if key == "Inventory" then ent.Inventory = value end
+    if key == "Inventory" then
+        ent.Inventory = value
+        ent.inventory = value
+    end
     if key == "Armor" then ent.armors = value end
 
     -- Z-City's original netvar backend carries wounds, accessories, and other
@@ -333,6 +336,7 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     inventory.Armor = inventory.Armor or {}
     ent:SetNetVar("Inventory", inventory)
     ent.Inventory = inventory
+    ent.inventory = inventory
     ent.armors = inventory.Armor
     ent.armors_health = ent.armors_health or {}
     ent.PlayerName = profile.Name or profile.ClassName
