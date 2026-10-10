@@ -273,6 +273,7 @@ local function SyncEntity(ent, state)
                 ent.organism = org
                 ent.BZCN_Organism = org
                 ent.BZCNNPCOwner = owner
+                if BZCN and BZCN.InstallAdapter then BZCN.InstallAdapter(ent) end
             end
             PullZCityOrganism(owner, state)
         end
