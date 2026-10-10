@@ -112,7 +112,14 @@ function BZCN.SetNetVar(ent, key, value)
     data.BZCN_NetVars[key] = value
     if key == "Inventory" then ent.Inventory = value end
     if key == "Armor" then ent.armors = value end
-    SyncNetVar(ent, key, value)
+
+    -- Z-City's original netvar backend carries wounds, accessories, and other
+    -- larger gameplay tables. Mirror only BZCN's compact compatibility fields
+    -- through NW2, avoiding oversized JSON strings and duplicate net traffic.
+    if key == "Inventory" or key == "Armor"
+        or key == "BZCNFaction" or key == "BZCNClassName" then
+        SyncNetVar(ent, key, value)
+    end
     return value
 end
 
