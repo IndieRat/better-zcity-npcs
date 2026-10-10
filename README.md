@@ -73,7 +73,7 @@ The adapter dump shows the actor snapshot, visible targets, hostiles, and fields
 - `BZCN_NPCAdapterCycleComplete(npc, context)` runs after the chain and writeback.
 - `BZCN_NPCWritebackApplied(npc, patch, reason, changedFields)` reports a successful state change.
 
-The normalized actor exposes fields like `PlayerClassName`, `Health`, `MaxHealth`, `Speed`, `Inventory`, `Armor`, `Ammo`, `SelectedWeapon`, and `Organism`. Target records are available as `context.sense.Targets`; player-shaped records are available as `context.players`. Only approved data fields are reflected back onto the NPC.
+The normalized actor exposes fields like `PlayerClassName`, `Health`, `MaxHealth`, `Speed`, `Inventory`, `Armor`, `Ammo`, `SelectedWeapon`, and `Organism`. Target records are available as `context.sense.Targets`; player-shaped records are available as `context.players`. Z-City inventory weapon entries that refer to live SWEP entities become virtual owned-item flags when copied to NPC state, so the NPC never takes ownership of another player's weapon entity. Class writeback is restricted to registered BZCN classes. Only approved data fields are reflected back onto the NPC.
 
 ## Compatibility approach and limits
 
