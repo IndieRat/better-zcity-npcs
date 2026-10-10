@@ -152,7 +152,8 @@ function ENT:GetBZCNMovementSequence(speed, state)
             "crawl_all", "crawl", "crawl_forward", "zombie_crawl", "walk_crouch_all"
         })
         if sequence >= 0 then return sequence end
-        state = "walking"
+        -- Keep the crouch-walk activity as the generic fallback; changing the
+        -- state to "walking" here would undo the visible crawl response.
     elseif state == "climbing" then
         local sequence = GetFirstSequence(self, {"climb_up", "climb_ladder", "ladder_climb", "climb"})
         if sequence >= 0 then return sequence end
@@ -170,6 +171,8 @@ function ENT:GetBZCNMovementSequence(speed, state)
         activity = ACT_MP_RUN
     elseif state == "walking" then
         activity = ACT_MP_WALK
+    elseif state == "crawling" then
+        activity = ACT_MP_CROUCHWALK
     else
         activity = ACT_MP_STAND_IDLE
     end
