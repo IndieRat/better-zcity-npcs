@@ -503,12 +503,27 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
 
     local organism = patch.Organism
     if istable(organism) then
-        -- Keep organism-compatible state out of the server's raw organism field;
-        -- Z-City interprets that field as a marker for player-style damage.
-        npc.BZCN_Organism = SafeCopy(organism) or {}
-        npc.BZCN_Organism.owner = npc
-        npc.BZCN_Organism.entindex = npc:EntIndex()
-        npc.organism = nil
+        local patchedOrganism = SafeCopy(organism) or {}
+        local currentOrganism = istable(npc.organism) and npc.organism or nil
+        if currentOrganism then
+            -- Preserve the real Z-City organism object registered in
+            -- hg.organism.list; merge values rather than replacing its identity.
+            for key, value in pairs(patchedOrganism) do
+                if key ~= "owner" and key ~= "fakePlayer" and key ~= "entindex" then
+                    currentOrganism[key] = SafeCopy(value)
+                end
+            end
+            currentOrganism.owner = npc
+            currentOrganism.fakePlayer = true
+            currentOrganism.entindex = npc:EntIndex()
+            npc.organism = currentOrganism
+            npc.BZCN_Organism = currentOrganism
+        else
+            patchedOrganism.owner = npc
+            patchedOrganism.fakePlayer = true
+            patchedOrganism.entindex = npc:EntIndex()
+            npc.BZCN_Organism = patchedOrganism
+        end
         local state = npc.BZCNNPCOrg
         if istable(state) then
             for _, field in ipairs({
@@ -517,7 +532,7 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
                 "rarm", "lleg", "rleg", "heart", "liver", "intestines", "lungsL",
                 "lungsR", "wounds", "arterialwounds"
             }) do
-                if npc.BZCN_Organism[field] ~= nil then state[field] = SafeCopy(npc.BZCN_Organism[field]) end
+                if patchedOrganism[field] ~= nil then state[field] = SafeCopy(patchedOrganism[field]) end
             end
         end
         changed[#changed + 1] = "Organism"
