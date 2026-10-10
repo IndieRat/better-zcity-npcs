@@ -290,7 +290,8 @@ function BZCN.SenseNPC(observer, radius)
         local candidate = ResolveSensedEntity(raw)
         if not IsValid(candidate) or candidate == observer or seen[candidate] then return end
         seen[candidate] = true
-        if not candidate:IsPlayer() and not IsManagedNPC(candidate) then return end
+        local nativeNPC = candidate:IsNPC()
+        if not candidate:IsPlayer() and not IsManagedNPC(candidate) and not nativeNPC then return end
         if GetHealth(candidate) <= 0 then return end
         local distanceSquared = observer:GetPos():DistToSqr(candidate:GetPos())
         if distanceSquared > radius * radius then return end
@@ -688,6 +689,18 @@ hook.Add("OnEntityCreated", "BZCN_AdapterChain_TrackCreated", function(ent)
 end)
 hook.Add("EntityRemoved", "BZCN_AdapterChain_Untrack", function(ent)
     tracked[ent] = nil
+end)
+
+-- Remember who recently injured each player/NPC so nearby allies can react to
+-- the threat. PostEntityTakeDamage runs after the gamemode's damage pipeline,
+-- whose EntityTakeDamage callback may return a value and stop later hooks.
+hook.Add("PostEntityTakeDamage", "BZCN_AllyThreatMemory", function(victim, damageInfo, tookDamage)
+    if not IsValid(victim) or not damageInfo or damageInfo:GetDamage() <= 0 then return end
+    local attacker = damageInfo:GetAttacker()
+    if not IsValid(attacker) or attacker == victim or attacker:IsWorld() then return end
+    victim.BZCNLastAttacker = attacker
+    victim.BZCNLastDamageTime = CurTime()
+    hook.Run("BZCN_EntityDamaged", victim, attacker, damageInfo, tookDamage == true)
 end)
 hook.Add("InitPostEntity", "BZCN_AdapterChain_TrackExisting", function()
     timer.Simple(0.1, function()
