@@ -188,8 +188,10 @@ local function EnsureZCityOrganism(owner)
         owner.BZCN_Organism = current
         local nativeList = hg.organism and hg.organism.list
         if istable(nativeList) then nativeList[owner] = current end
-        owner.BZCN_ZCityOrgInitialized = true
-        return current, true
+        local nativeAvailable = hg.organism and isfunction(hg.organism.Add)
+            and isfunction(hg.organism.Clear) and true or false
+        owner.BZCN_ZCityOrgInitialized = nativeAvailable
+        return current, nativeAvailable
     end
 
     local seed = owner.BZCN_Organism
