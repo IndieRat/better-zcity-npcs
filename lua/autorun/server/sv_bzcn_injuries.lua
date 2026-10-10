@@ -861,10 +861,76 @@ end
 Support.EnterDownedState = EnterDownedState
 Support.Recover = Recover
 
+local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
+    if not IsValid(rag) then return nil end
+    sourceOrg = istable(sourceOrg) and sourceOrg or {}
+
+    local org
+    if hg.organism and isfunction(hg.organism.Add) then
+        local ok = pcall(hg.organism.Add, rag)
+        if ok and istable(rag.organism) then org = rag.organism end
+    end
+    if not istable(org) then org = {} end
+
+    for key, value in pairs(sourceOrg) do
+        if key ~= "owner" and key ~= "entindex" and key ~= "alive" then
+            org[key] = istable(value) and table.Copy(value) or value
+        end
+    end
+    org.owner = rag
+    org.entindex = rag:EntIndex()
+    org.alive = false
+    org.fakePlayer = true
+    org.downed = false
+    org.otrub = true
+    org.wounds = istable(org.wounds) and org.wounds or {}
+    org.arterialwounds = istable(org.arterialwounds) and org.arterialwounds or {}
+    rag.organism = org
+    rag.BZCN_Organism = org
+    rag.BZCNNPCOrg = nil
+    rag.BZCNNPCOwner = nil
+    rag.Player = nil
+    rag:SetNWEntity("BZCNNPCOwner", NULL)
+    rag:SetNWEntity("RagdollOwner", NULL)
+    if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
+
+    if hg.organism and istable(hg.organism.list) then hg.organism.list[rag] = org end
+    if hg.organism and isfunction(hg.organism.Remove) then
+        rag:CallOnRemove("BZCN_ZCityOrganism_Remove", function(removed)
+            pcall(hg.organism.Remove, removed)
+        end)
+    end
+
+    rag.armors = IsValid(owner) and table.Copy(owner.armors or {}) or (rag.armors or {})
+    if IsValid(owner) then
+        rag.inventory = table.Copy(owner.inventory or owner.Inventory or {Weapons = {}, Items = {}, Armor = {}})
+        rag:SetNWEntity("BZCNNPCDeathOwner", owner)
+    end
+
+    if isfunction(hg.send_bareinfo) then pcall(hg.send_bareinfo, org) end
+    return org
+end
+
+local function DetachLivingRagdoll(owner, rag)
+    if not IsValid(owner) or not IsValid(rag) then return end
+    rag.BZCNNPCOwner = nil
+    rag.BZCNNPCOrg = nil
+    rag.BZCN_Organism = owner.organism or owner.BZCN_Organism
+    rag.organism = nil
+    if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
+    rag:SetNWEntity("BZCNNPCOwner", NULL)
+    rag:SetNWEntity("RagdollOwner", NULL)
+    if owner.ragdoll == rag then owner.ragdoll = nil end
+    owner.BZCNNPCRagdoll = nil
+    owner:SetNWEntity("FakeRagdoll", NULL)
+    owner:SetNWEntity("ragdoll", NULL)
+end
+
 function Support.OnNPCDeath(owner)
-    if not IsValid(owner) then return end
+    if not IsValid(owner) then return nil end
     local state = owner.BZCNNPCOrg
-    if not state then return end
+    if not state then return nil end
+
     if state.recoverTimer then timer.Remove(state.recoverTimer) end
     if state.getUpTimer then timer.Remove(state.getUpTimer) end
     state.recoverTimer = nil
@@ -874,21 +940,41 @@ function Support.OnNPCDeath(owner)
     owner.BZCNNPCDowned = false
     RestoreRagdollWeapon(state)
 
+    local sourceOrg = owner.organism or owner.BZCN_Organism or {}
+    owner.BZCN_DeathOrganismSnapshot = table.Copy(sourceOrg)
+    owner.BZCN_DeathOrganismSnapshot.owner = nil
+    owner.BZCN_DeathOrganismSnapshot.alive = false
+
     local rag = owner.BZCNNPCRagdoll
-    owner.BZCNNPCRagdoll = nil
     if IsValid(rag) then
-        rag.BZCNNPCOwner = nil
-        rag.BZCNNPCOrg = nil
-        rag.BZCN_Organism = nil
-        rag.organism = nil
-        if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
-        rag:SetNWEntity("BZCNNPCOwner", NULL)
-        rag:SetNWEntity("RagdollOwner", NULL)
-        rag:Remove()
+        InstallDeathRagdollOrganism(owner, rag, sourceOrg)
+        DetachLivingRagdoll(owner, rag)
+    else
+        -- The entity's normal BecomeRagdoll path may create its own ragdoll;
+        -- the CreateEntityRagdoll bridge below transfers this saved organism.
+        owner.BZCN_DeathRagdollPending = true
     end
-    owner:SetNWEntity("FakeRagdoll", NULL)
-    owner:SetNWEntity("ragdoll", NULL)
+
+    if hg.organism and isfunction(hg.organism.Remove) then
+        pcall(hg.organism.Remove, owner)
+    end
+    owner.BZCNNPCOrg = nil
+    owner.BZCN_Organism = nil
+    return IsValid(rag) and rag or nil
 end
+
+hook.Add("CreateEntityRagdoll", "BZCNNPCSupport_ZCityDeathRagdoll", function(owner, rag)
+    if not IsValid(owner) or not IsValid(rag) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return end
+    local sourceOrg = owner.BZCN_DeathOrganismSnapshot or owner.organism or owner.BZCN_Organism
+    InstallDeathRagdollOrganism(owner, rag, sourceOrg or {})
+    if isfunction(hg.organism and hg.organism.Remove) and owner.organism then
+        pcall(hg.organism.Remove, owner)
+    end
+    owner.organism = nil
+    owner.BZCN_Organism = nil
+    owner.BZCNNPCOrg = nil
+    owner.BZCN_DeathRagdollPending = nil
+end)
 
 hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", function(ent)
     timer.Simple(0, function()
