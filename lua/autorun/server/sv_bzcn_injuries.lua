@@ -825,6 +825,28 @@ local function EnterDownedState(owner, reason)
         rag:SetBodygroup(i, owner:GetBodygroup(i))
     end
 
+    -- ZCNPCI preserves Citizen Clothing Overhaul/submaterials and Citizen
+    -- variants when it creates an organism-backed ragdoll. Copy those details
+    -- too, or a downed civilian can lose its appearance before getting back up.
+    for i = 0, 31 do
+        local subMaterial = owner:GetSubMaterial(i)
+        if isstring(subMaterial) and subMaterial ~= "" then
+            rag:SetSubMaterial(i, subMaterial)
+        end
+    end
+    rag.class_in_previous_life = owner:GetClass()
+    if owner.GetInternalVariable then
+        local ok, citizenType = pcall(owner.GetInternalVariable, owner, "citizentype")
+        if ok and citizenType ~= nil then
+            rag.citizentype = citizenType
+            if rag.SetNWInt then rag:SetNWInt("citizentype", tonumber(citizenType) or 0) end
+        end
+    end
+    rag.respawn_data = {
+        flags = owner:GetFlags(),
+        spawn_flags = owner:GetSpawnFlags()
+    }
+
     if owner.SetupBones then owner:SetupBones() end
     if rag.SetupBones then rag:SetupBones() end
     for i = 0, (rag:GetPhysicsObjectCount() or 0) - 1 do
@@ -941,7 +963,7 @@ local function InstallZCityFakeUpAdapter()
         if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
             local state = ent.BZCNNPCOrg
-            if state and state.downed then return Recover(ent, ent.BZCNNPCRagdoll, true) end
+            if state and state.downed then return Recover(ent, ent.BZCNNPCRagdoll, false) end
             return false
         end
         return nativeFakeUp(ent, ...)
