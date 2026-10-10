@@ -51,6 +51,6 @@ Create a new scripted entity that inherits `npc_bzcn_base`, then set `ENT.BZCNCl
 ## Limitations
 
 - This is not a full Player replacement. Player-only APIs, player hooks and player ownership still require explicit NPC-aware adapters.
-- Weapon holding is a visual proxy unless a weapon class supplies separate NPC firing logic.
+- Inventory weapons are adapter entries with hand-held model proxies. The Humanity Forces and Traitor profiles use simple NPC raycast shooting, not the weapon SWEP's player-only firing/reload implementation.
 - Get-up/crawl animations depend on each model's available sequences.
 - Live Garry's Mod/ZCity runtime testing is required before considering every model or class fully validated.
