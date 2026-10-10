@@ -908,8 +908,19 @@ local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
     if IsValid(owner) then
         rag.inventory = table.Copy(owner.inventory or owner.Inventory or {Weapons = {}, Items = {}, Armor = {}})
         rag:SetNWEntity("BZCNNPCDeathOwner", owner)
+        -- Match Z-City's own NPC death conversion so Project Homogen and other
+        -- ragdoll extensions receive their usual event and networked metadata.
+        hook.Run("RagdollDeath", owner, rag)
+        if zb and istable(zb.net) and istable(zb.net.list) then
+            local ragNet = zb.net.list[rag]
+            local ownerNet = zb.net.list[owner]
+            if istable(ragNet) and istable(ownerNet) then
+                table.Merge(ragNet, ownerNet)
+            end
+        end
     end
 
+    rag.fullsend = true
     if isfunction(hg.send_bareinfo) then pcall(hg.send_bareinfo, org) end
     return org
 end
@@ -952,31 +963,35 @@ function Support.OnNPCDeath(owner)
     if IsValid(rag) then
         InstallDeathRagdollOrganism(owner, rag, sourceOrg)
         DetachLivingRagdoll(owner, rag)
-    else
-        -- The entity's normal BecomeRagdoll path may create its own ragdoll;
-        -- the CreateEntityRagdoll bridge below transfers this saved organism.
-        owner.BZCN_DeathRagdollPending = true
+
+        if hg.organism and isfunction(hg.organism.Remove) then
+            pcall(hg.organism.Remove, owner)
+        end
+        owner.organism = nil
+        owner.BZCNNPCOrg = nil
+        owner.BZCN_Organism = nil
+        return rag
     end
 
-    if hg.organism and isfunction(hg.organism.Remove) then
-        pcall(hg.organism.Remove, owner)
-    end
-    owner.BZCNNPCOrg = nil
-    owner.BZCN_Organism = nil
-    return IsValid(rag) and rag or nil
+    -- Keep the live organism registered until CreateEntityRagdoll runs. Z-City
+    -- death hooks (including addon hooks) expect owner.organism to still exist
+    -- when they receive RagdollDeath(owner, rag).
+    owner.BZCN_DeathRagdollPending = true
+    return nil
 end
 
 hook.Add("CreateEntityRagdoll", "BZCNNPCSupport_ZCityDeathRagdoll", function(owner, rag)
     if not IsValid(owner) or not IsValid(rag) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return end
     local sourceOrg = owner.BZCN_DeathOrganismSnapshot or owner.organism or owner.BZCN_Organism
     InstallDeathRagdollOrganism(owner, rag, sourceOrg or {})
-    if isfunction(hg.organism and hg.organism.Remove) and owner.organism then
+    if hg.organism and isfunction(hg.organism.Remove) and owner.organism then
         pcall(hg.organism.Remove, owner)
     end
     owner.organism = nil
     owner.BZCN_Organism = nil
     owner.BZCNNPCOrg = nil
     owner.BZCN_DeathRagdollPending = nil
+    owner.BZCN_DeathOrganismSnapshot = nil
 end)
 
 hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", function(ent)
