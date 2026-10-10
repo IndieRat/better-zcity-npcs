@@ -269,6 +269,19 @@ function BZCN.InstallAdapter(ent)
             self.BZCNRuntimeWeaponClass = weapon:GetClass()
         end
     end
+    data.GetWeapons = function(self)
+        local result = {}
+        for _, key in ipairs({"BZCNRuntimeWeapon", "BZCNRuntimeMeleeWeapon", "BZCNRuntimeMedicalWeapon"}) do
+            if IsValid(self[key]) then result[#result + 1] = self[key] end
+        end
+        return result
+    end
+    data.GetWeapon = function(self, weaponClass)
+        for _, weapon in ipairs(self:GetWeapons()) do
+            if IsValid(weapon) and weapon:GetClass() == weaponClass then return weapon end
+        end
+        return nil
+    end
     data.SelectWeapon = function(self, weaponClass)
         return BZCN.SelectWeapon(self, weaponClass)
     end
