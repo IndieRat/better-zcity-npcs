@@ -1018,9 +1018,14 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
         owner = target:GetNW2Entity("BZCNNPCOwner")
     end
 
-    -- The physical ragdoll owns no independent health: relay hits to the
-    -- hidden NPC, which updates the same injury table and applies real damage.
+    -- With native Z-City organism support, allow the ragdoll to go through
+    -- Z-City's damage hook. PostEntityTakeDamage relays its *applied* damage
+    -- to the hidden living NPC, avoiding duplicate organ-hit processing.
     if IsValid(owner) and owner.BZCNNPCDowned then
+        local ownerState = owner.BZCNNPCOrg
+        if ownerState and ownerState.usesZCityOrganism then return end
+
+        -- Non-Z-City fallback: relay through the local damage implementation.
         local amount = math.max(dmg:GetDamage(), 0)
         local relayed = DamageInfo()
         relayed:SetDamage(amount)
@@ -1082,6 +1087,42 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
 end)
 
 hook.Add("PostEntityTakeDamage", "BZCNNPCSupport_ZCityDamageSync", function(target, dmg, tookDamage)
+    if not IsValid(target) or not dmg then return end
+
+    -- A temporary rag shares its living owner's Z-City organism. Let Z-City
+    -- calculate wounds on the rag, then mirror the engine-applied (already
+    -- scaled) damage onto the hidden NextBot without re-running organ tracing.
+    local owner = target.BZCNNPCOwner
+    if not IsValid(owner) and target.GetNW2Entity then
+        owner = target:GetNW2Entity("BZCNNPCOwner")
+    end
+    if IsValid(owner) and owner.BZCNNPCDowned and owner.BZCNNPCOrg
+        and owner.BZCNNPCOrg.usesZCityOrganism and target ~= owner then
+        if tookDamage ~= false then
+            local amount = math.max(tonumber(dmg:GetDamage()) or 0, 0)
+            if amount > 0 and not target.BZCNNPCDamageRelayed then
+                target.BZCNNPCDamageRelayed = true
+                local state = owner.BZCNNPCOrg
+                owner.BZCNNPCForcedPart = GetHitPart(target, dmg:GetDamagePosition())
+                if isfunction(owner.OnInjured) then pcall(owner.OnInjured, owner, dmg) end
+                owner:SetHealth(math.max(owner:Health() - amount, 0))
+                owner.BZCNNPCForcedPart = nil
+                state.health = math.max(owner:Health(), 0)
+                PullZCityOrganism(owner, state)
+                SyncEntity(owner, state)
+
+                if owner:Health() <= 0 and isfunction(owner.OnKilled) then
+                    pcall(owner.OnKilled, owner, dmg)
+                end
+
+                timer.Simple(0, function()
+                    if IsValid(target) then target.BZCNNPCDamageRelayed = nil end
+                end)
+            end
+        end
+        return
+    end
+
     if not IsSupportedNPC(target) or not target.BZCNNPCOrg then return end
     local state = target.BZCNNPCOrg
     if not state.usesZCityOrganism then return end
