@@ -1169,6 +1169,134 @@ hook.Add("CreateEntityRagdoll", "BZCNNPCSupport_ZCityDeathRagdoll", function(own
     owner.BZCN_DeathOrganismSnapshot = nil
 end)
 
+local function GetConVarFloatOr(name, fallback)
+    local convar = GetConVar and GetConVar(name)
+    return convar and convar:GetFloat() or fallback
+end
+
+local function HasActiveZCityTimer(org, key)
+    local value = istable(org) and tonumber(org[key]) or nil
+    return value ~= nil and value > CurTime()
+end
+
+local function IsZCityPhysiologicallyIncapacitated(owner, state)
+    if not IsValid(owner) then return false, nil end
+    local org = owner.organism or owner.BZCN_Organism or {}
+    local consciousness = tonumber(org.consciousness)
+    local pain = tonumber(org.pain) or tonumber(state and state.pain) or 0
+    local legFailure = org.llegamputated == true or org.rlegamputated == true
+        or (tonumber(org.lleg) or 0) >= 1 and (tonumber(org.rleg) or 0) >= 1
+        or (state and (state.lleg >= 85 and state.rleg >= 85))
+    local onFire = owner.IsOnFire and owner:IsOnFire() or false
+
+    if org.otrub == true or (consciousness ~= nil and consciousness <= 0.3) then
+        return true, "unconscious"
+    end
+    if pain > 90 then return true, "pain" end
+    if HasActiveZCityTimer(org, "stun") then return true, "stun" end
+    if HasActiveZCityTimer(org, "lightstun") then return true, "lightstun" end
+    if legFailure then return true, "legs" end
+    if onFire or owner.neednpcfake then return true, onFire and "fire" or "impact" end
+    return false, nil
+end
+
+local function QueueZCityDowned(owner, reason, forceFromDamage)
+    if not IsAlive(owner) then return false end
+    local state = owner.BZCNNPCOrg or Support.Attach(owner)
+    if not state or state.downed or state.knockdownQueued then return false end
+
+    state.knockdownQueued = true
+    timer.Simple(0, function()
+        if not IsAlive(owner) then
+            if owner.BZCNNPCOrg then owner.BZCNNPCOrg.knockdownQueued = false end
+            return
+        end
+
+        local current = owner.BZCNNPCOrg
+        if not current or current.downed then
+            if current then current.knockdownQueued = false end
+            return
+        end
+        if current.usesZCityOrganism then PullZCityOrganism(owner, current) end
+
+        local physiologicallyDown, physiologicalReason = IsZCityPhysiologicallyIncapacitated(owner, current)
+        current.knockdownQueued = false
+        if forceFromDamage or physiologicallyDown then
+            EnterDownedState(owner, physiologicalReason or reason or "impact")
+        end
+    end)
+    return true
+end
+
+local function GetZCityKnockdownDamageReason(owner, damageInfo)
+    if not IsValid(owner) or not damageInfo then return nil end
+    local amount = math.max(tonumber(damageInfo:GetDamage()) or 0, 0)
+    if amount <= 0 then return nil end
+
+    local damageType = damageInfo:GetDamageType() or 0
+    local bulletMask = bit.bor(DMG_BULLET, DMG_BUCKSHOT, DMG_BLAST)
+    local meleeMask = bit.bor(DMG_SLASH, DMG_CLUB, DMG_GENERIC)
+    local isBullet = bit.band(damageType, bulletMask) ~= 0
+    local isMelee = bit.band(damageType, meleeMask) ~= 0
+    if not isBullet and not isMelee then return nil end
+
+    local hitgroup = owner.BZCNNPCLastHitgroup
+    local hitgroupFresh = CurTime() - (tonumber(owner.BZCNNPCLastHitgroupAt) or 0) <= 0.25
+    if not hitgroupFresh then hitgroup = nil end
+    local isLeg = hitgroup == HITGROUP_LEFTLEG or hitgroup == HITGROUP_RIGHTLEG
+
+    -- ScaleNPCDamage is not consistently fired for scripted NextBots. Fall back
+    -- to our bone/hit-position mapper while retaining hitgroup when the engine
+    -- provided one, matching zcnpci's leg-specific thresholds.
+    if not isLeg and isfunction(damageInfo.GetDamagePosition) then
+        local ok, part = pcall(GetHitPart, owner, damageInfo:GetDamagePosition())
+        if ok and (part == "leftleg" or part == "rightleg") then isLeg = true end
+    end
+
+    local threshold
+    if isBullet then
+        threshold = GetConVarFloatOr(isLeg and "zcnpci_bullet_damage_threshold_legs"
+            or "zcnpci_bullet_damage_threshold", isLeg and 0.75 or 3)
+    else
+        threshold = GetConVarFloatOr(isLeg and "zcnpci_melee_damage_threshold_legs"
+            or "zcnpci_melee_damage_threshold", isLeg and 5 or 7)
+    end
+    if amount > threshold then return isLeg and "legs" or "impact" end
+    return nil
+end
+
+-- Z-City exposes the hitgroup before damage processing and a HomigradDamage
+-- hook during organism damage. Keep the impact context and evaluate incapacitation
+-- after the current damage tick, instead of guessing from raw Engine damage alone.
+hook.Add("ScaleNPCDamage", "BZCNNPCSupport_ZCityHitgroup", function(ent, hitgroup, damageInfo)
+    if not IsSupportedNPC(ent) then return end
+    ent.BZCNNPCLastHitgroup = hitgroup
+    ent.BZCNNPCLastHitgroupAt = CurTime()
+    if damageInfo then
+        ent.BZCNNPCLastDamagePosition = damageInfo:GetDamagePosition()
+        ent.BZCNNPCLastAttacker = damageInfo:GetAttacker()
+    end
+end)
+
+hook.Add("HomigradDamage", "BZCNNPCSupport_ZCityIncapacity", function(ent, damageInfo)
+    if not IsSupportedNPC(ent) or not damageInfo then return end
+    local state = Support.Attach(ent)
+    if not state or not state.usesZCityOrganism or state.downed then return end
+
+    ent.BZCNNPCLastDamagePosition = damageInfo:GetDamagePosition()
+    ent.BZCNNPCLastAttacker = damageInfo:GetAttacker()
+    ent.BZCNNPCLastDamageType = damageInfo:GetDamageType()
+    ent.BZCNNPCLastDamageAmount = damageInfo:GetDamage()
+
+    local hitReason = GetZCityKnockdownDamageReason(ent, damageInfo)
+    local downReason = hitReason
+    if not downReason then
+        local incapacitated, physiologicalReason = IsZCityPhysiologicallyIncapacitated(ent, state)
+        if incapacitated then downReason = physiologicalReason end
+    end
+    if downReason then QueueZCityDowned(ent, downReason, hitReason ~= nil) end
+end)
+
 hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", function(ent)
     timer.Simple(0, function()
         if IsSupportedNPC(ent) then Support.Attach(ent) end
