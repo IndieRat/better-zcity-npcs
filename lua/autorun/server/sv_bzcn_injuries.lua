@@ -843,6 +843,9 @@ local function EnterDownedState(owner, reason)
     owner:SetNWEntity("FakeRagdoll", rag)
     owner:SetNWEntity("ragdoll", rag)
     rag:SetNWEntity("ply", owner)
+    -- This is the normal Z-City fake-ragdoll integration point used by other
+    -- addons; callers see a living body's temporary rag and shared organism.
+    hook.Run("Ragdoll_Create", owner, rag)
     SyncEntity(rag, state)
 
     rag:CallOnRemove("BZCNNPCSupport_ExternalRemoval", function(removed)
@@ -949,19 +952,20 @@ local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
 
     local org
     if hg.organism and isfunction(hg.organism.Add) then
-        local ok = pcall(hg.organism.Add, rag)
-        if ok and istable(rag.organism) then org = rag.organism end
+        local ok, result = pcall(hg.organism.Add, rag)
+        if ok and istable(result) then org = result end
     end
-    if not istable(org) then org = {} end
+    if not istable(org) then org = istable(rag.organism) and rag.organism or {} end
 
+    -- Mirror Z-City's npcdeath/CreateEntityRagdoll ordering: during
+    -- RagdollDeath callbacks the new organism still carries the source owner,
+    -- then it becomes a corpse-owned organism after addon hooks have run.
     for key, value in pairs(sourceOrg) do
-        if key ~= "owner" and key ~= "entindex" and key ~= "alive" then
-            org[key] = istable(value) and table.Copy(value) or value
-        end
+        org[key] = istable(value) and table.Copy(value) or value
     end
-    org.owner = rag
-    org.entindex = rag:EntIndex()
-    org.alive = false
+    org.owner = IsValid(sourceOrg.owner) and sourceOrg.owner or owner
+    org.entindex = IsValid(org.owner) and org.owner:EntIndex() or rag:EntIndex()
+    org.alive = true
     org.fakePlayer = true
     org.downed = false
     org.otrub = true
@@ -994,18 +998,23 @@ local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
             pcall(rag.SetNetVar, rag, "Armor", rag.armors)
         end
         rag:SetNWEntity("BZCNNPCDeathOwner", owner)
-        -- Match Z-City's own NPC death conversion so Project Homogen and other
-        -- ragdoll extensions receive their usual event and networked metadata.
+
+        -- This event is used by Z-City ragdoll integrations. Fire it while the
+        -- source owner is still in organism.owner, just like sv_npcstuff.lua.
         hook.Run("RagdollDeath", owner, rag)
         if zb and istable(zb.net) and istable(zb.net.list) then
             local ragNet = zb.net.list[rag]
             local ownerNet = zb.net.list[owner]
-            if istable(ragNet) and istable(ownerNet) then
-                table.Merge(ragNet, ownerNet)
-            end
+            if istable(ragNet) and istable(ownerNet) then table.Merge(ragNet, ownerNet) end
         end
     end
 
+    org.alive = false
+    org.owner = rag
+    org.entindex = rag:EntIndex()
+    org.fakePlayer = true
+    rag.organism = org
+    rag.BZCN_Organism = org
     rag.fullsend = true
     if isfunction(hg.send_bareinfo) then pcall(hg.send_bareinfo, org) end
     return org
