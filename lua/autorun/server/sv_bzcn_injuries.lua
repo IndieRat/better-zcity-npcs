@@ -915,8 +915,8 @@ local function DetachLivingRagdoll(owner, rag)
     if not IsValid(owner) or not IsValid(rag) then return end
     rag.BZCNNPCOwner = nil
     rag.BZCNNPCOrg = nil
-    rag.BZCN_Organism = owner.organism or owner.BZCN_Organism
-    rag.organism = nil
+    -- InstallDeathRagdollOrganism already gave this corpse its own registered
+    -- Z-City table; never replace it with the removed living owner's table.
     if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", NULL) end
     rag:SetNWEntity("BZCNNPCOwner", NULL)
     rag:SetNWEntity("RagdollOwner", NULL)
