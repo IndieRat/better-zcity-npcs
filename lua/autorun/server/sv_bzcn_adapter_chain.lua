@@ -77,7 +77,10 @@ local function GetMaxHealth(ent, health, profile)
 end
 
 local function GetInventory(ent, profile)
-    local inventory = ReadNetVar(ent, "Inventory")
+    -- Z-City stores the live inventory as ent.inventory and mirrors it through
+    -- the Inventory netvar. Prefer the live table if the server has it.
+    local inventory = ent.inventory
+    if not istable(inventory) then inventory = ReadNetVar(ent, "Inventory") end
     if not istable(inventory) then inventory = ent.Inventory end
     if not istable(inventory) and profile then inventory = profile.Inventory end
     if not istable(inventory) then inventory = {Weapons = {}, Items = {}, Armor = {}} end
@@ -85,12 +88,30 @@ local function GetInventory(ent, profile)
     inventory = SafeCopy(inventory) or {}
     inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
     inventory.Items = istable(inventory.Items) and inventory.Items or {}
-    inventory.Armor = istable(inventory.Armor) and inventory.Armor or {}
+    local armor = ReadNetVar(ent, "Armor") or ent.armors or inventory.Armor
+    if not istable(inventory.Armor) or next(inventory.Armor) == nil then
+        inventory.Armor = istable(armor) and (SafeCopy(armor) or {}) or {}
+    else
+        inventory.Armor = istable(inventory.Armor) and inventory.Armor or {}
+    end
     return inventory
 end
 
 local function GetAmmo(ent)
-    local ammo = SafeCopy(ent.BZCN_Ammo or {}) or {}
+    local ammo = SafeCopy((ent.inventory and ent.inventory.Ammo) or {}) or {}
+    local netInventory = ReadNetVar(ent, "Inventory")
+    if istable(netInventory) and istable(netInventory.Ammo) then
+        for key, amount in pairs(netInventory.Ammo) do
+            if ammo[key] == nil then ammo[key] = amount end
+        end
+    end
+    for key, amount in pairs(SafeCopy(ent.BZCN_Ammo or {}) or {}) do ammo[key] = amount end
+    local engineAmmo = SafeCall(ent, "GetAmmo")
+    if istable(engineAmmo) then
+        for key, amount in pairs(engineAmmo) do
+            if ammo[key] == nil then ammo[key] = amount end
+        end
+    end
     if ent:IsPlayer() and game and game.GetAmmoTypes then
         local ok, ammoTypes = pcall(game.GetAmmoTypes)
         if ok and istable(ammoTypes) then
@@ -118,9 +139,18 @@ function BZCN.CapturePlayerData(source)
 
     local className = GetClassName(source)
     local profile = source.BZCNClassProfile or BZCN.GetClass(className) or {}
+    local classData
+    if source:IsPlayer() then
+        classData = SafeCall(source, "GetPlayerClass")
+        if not istable(classData) and player and istable(player.classList) then
+            classData = player.classList[className]
+        end
+    end
     local health = GetHealth(source)
     local maxHealth = GetMaxHealth(source, health, profile)
     local inventory = GetInventory(source, profile)
+    local armorData = ReadNetVar(source, "Armor") or source.armors or inventory.Armor
+    if istable(armorData) then inventory.Armor = SafeCopy(armorData) or {} end
     local selectedWeapon = source.BZCN_SelectedWeapon
     if not isstring(selectedWeapon) or selectedWeapon == "" then
         local activeWeapon = SafeCall(source, "GetActiveWeapon")
@@ -169,6 +199,7 @@ function BZCN.CapturePlayerData(source)
         Class = source:GetClass(),
         ClassName = className,
         PlayerClassName = className,
+        ClassData = SafeCopy(classData),
         Name = displayName,
         Model = model,
         Health = health,
@@ -180,7 +211,7 @@ function BZCN.CapturePlayerData(source)
         Speed = speed,
         WalkSpeed = walkSpeed,
         Inventory = inventory,
-        Armor = SafeCopy(inventory.Armor) or {},
+        Armor = SafeCopy(armorData or inventory.Armor) or {},
         ArmorHealth = armorHealth,
         Ammo = GetAmmo(source),
         SelectedWeapon = selectedWeapon,
