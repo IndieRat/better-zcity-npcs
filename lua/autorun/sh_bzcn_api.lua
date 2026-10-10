@@ -280,7 +280,10 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.BZCN_SelectedWeapon = selectedWeapon
     if SERVER then ent:SetNW2String("BZCNWeaponClass", selectedWeapon or "") end
 
-    ent.organism = ent.organism or {
+    ent.organism = nil
+    ent.BZCN_Organism = ent.BZCN_Organism or {
+        owner = ent, alive = ent:Health() > 0, entindex = ent:EntIndex(),
+        health = ent:Health(), maxHealth = profile.Health or 100,
         blood = 5000, maxBlood = 5000, bloodtype = "unknown", pain = 0, shock = 0,
         wounds = {}, arterialwounds = {}, larm = 0, rarm = 0, lleg = 0, rleg = 0,
         chest = 0, pelvis = 0, spine1 = 0, spine2 = 0, spine3 = 0, skull = 0,
