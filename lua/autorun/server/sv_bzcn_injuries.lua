@@ -188,7 +188,8 @@ local function EnsureZCityOrganism(owner)
         owner.BZCN_Organism = current
         local nativeList = hg.organism and hg.organism.list
         if istable(nativeList) then nativeList[owner] = current end
-        return current, owner.BZCN_ZCityOrgInitialized == true
+        owner.BZCN_ZCityOrgInitialized = true
+        return current, true
     end
 
     local seed = owner.BZCN_Organism
@@ -1135,10 +1136,30 @@ timer.Create("BZCNNPCSupport_StateSync", 0.25, 0, function()
             tracked[ent] = nil
         else
             state.health = math.max(ent:Health(), 0)
-            state.maxHealth = math.max(state.maxHealth or 1, 1)
-            state.crawling =
-                state.lleg >= 55 or state.rleg >= 55 or
-                (state.lleg >= 35 and state.rleg >= 35)
+            state.maxHealth = math.max(tonumber(ent:GetMaxHealth()) or state.maxHealth or 1, 1)
+
+            if state.usesZCityOrganism then
+                PullZCityOrganism(ent, state)
+                local organismDown = ent.organism and ent.organism.otrub == true
+                local legFailure = state.lleg >= 65 or state.rleg >= 65
+                    or (state.lleg >= 45 and state.rleg >= 45)
+                if (organismDown or legFailure) and IsAlive(ent)
+                    and not state.downed and not state.knockdownQueued then
+                    state.knockdownQueued = true
+                    local reason = legFailure and "legs" or "impact"
+                    timer.Simple(0, function()
+                        if not IsValid(ent) then return end
+                        local current = ent.BZCNNPCOrg
+                        if not current then return end
+                        current.knockdownQueued = false
+                        if IsAlive(ent) and not current.downed then EnterDownedState(ent, reason) end
+                    end)
+                end
+            else
+                state.crawling =
+                    state.lleg >= 55 or state.rleg >= 55 or
+                    (state.lleg >= 35 and state.rleg >= 35)
+            end
 
             SyncEntity(ent, state)
             if IsValid(ent.BZCNNPCRagdoll) then
