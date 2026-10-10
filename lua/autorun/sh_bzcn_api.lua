@@ -638,7 +638,14 @@ if SERVER then
             "PlayerClassName: " .. tostring(target.PlayerClassName) .. " | IsPlayer(): " .. tostring(target:IsPlayer()),
             "Name: " .. tostring(target:Nick()) .. " | Health: " .. target:Health() .. "/" .. (target.BZCNClassProfile and target.BZCNClassProfile.Health or 0),
             "Inventory.Weapons: " .. (#weaponsFound > 0 and table.concat(weaponsFound, ", ") or "(empty)"),
-            "Selected fake weapon: " .. tostring(target.BZCN_SelectedWeapon or target:GetNW2String("BZCNWeaponClass", "(none)")),
+            "Selected weapon: " .. tostring(target.BZCN_SelectedWeapon or target:GetNW2String("BZCNWeaponClass", "(none)")),
+            "Runtime SWEP: " .. tostring(IsValid(target.BZCNRuntimeWeapon) and target.BZCNRuntimeWeapon:GetClass() or "(none)"),
+            "Runtime melee/medical: " .. tostring(IsValid(target.BZCNRuntimeMeleeWeapon) and target.BZCNRuntimeMeleeWeapon:GetClass() or "(none)")
+                .. " / " .. tostring(IsValid(target.BZCNRuntimeMedicalWeapon) and target.BZCNRuntimeMedicalWeapon:GetClass() or "(none)"),
+            "IX animation class: " .. tostring(isfunction(target.GetBZCNAnimationClass) and target:GetBZCNAnimationClass() or "(pending)"),
+            "Movement state: " .. tostring(target.BZCNMovementState or target:GetNW2String("BZCNMovementState", "(pending)")),
+            "Medical inventory: " .. tostring(istable(inventory.Weapons) and inventory.Weapons.weapon_medkit_sh == true)
+                .. " / " .. tostring(istable(inventory.Weapons) and inventory.Weapons.weapon_bandage_sh == true),
             "Netvars + Inventory bridge: " .. tostring(isfunction(target.GetNetVar) and isfunction(target.SetNetVar)),
             "Organism-compatible table: " .. tostring(istable(target.BZCN_Organism)) .. " | shared injury table: " .. tostring(istable(state))
         }
