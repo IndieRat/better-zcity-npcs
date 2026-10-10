@@ -77,6 +77,11 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     weapon:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
     weapon.BZCNRuntimeOwner = owner
     owner:DeleteOnRemove(weapon)
+    if class == "weapon_hands_sh" and isfunction(weapon.SetFists) then
+        -- Keep the Z-City hands SWEP in its attack-ready state instead of
+        -- spending the first melee turn only drawing the fists.
+        pcall(weapon.SetFists, weapon, true)
+    end
 
     if weapon.SetClip1 and not MEDICAL_WEAPONS[class] then
         local clip = weapon.GetMaxClip1 and weapon:GetMaxClip1() or 0
@@ -216,6 +221,47 @@ function BZCN.FireRuntimeWeapon(ent, target)
     ent.BZCNCombatTarget = nil
     if fired then hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon) end
     return fired
+end
+
+function BZCN.AttackRuntimeMelee(ent, target)
+    if not IsValid(ent) or not IsValid(target) or not BZCN.IsManaged(ent) then return false end
+    local distance = ent:GetPos():Distance(target:GetPos())
+    local weapon
+    if IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon:GetClass() == "weapon_hands_sh" then
+        weapon = ent.BZCNRuntimeWeapon
+    else
+        weapon = ConfigureWeaponEntity(ent, "weapon_hands_sh", "BZCNRuntimeMeleeWeapon")
+    end
+    if not IsValid(weapon) or not isfunction(weapon.PrimaryAttack) then return false end
+    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
+
+    local reach = tonumber(weapon.ReachDistance) or 40
+    -- Don't invoke the native fists attack outside its configured reach; let
+    -- the addon use its existing melee fallback for profiles with a longer hit
+    -- radius, instead of reporting a native attack that couldn't connect.
+    if distance > reach + 14 then return false end
+
+    local now = CurTime()
+    local nextFire = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
+    if nextFire > now then return true end
+
+    ent.BZCNCombatTarget = target
+    ent.BZCN_SimulatedButtons = IN_ATTACK
+    local beforeNext = nextFire
+    local beforeHealth = target:Health()
+    local ok = pcall(weapon.PrimaryAttack, weapon)
+    local afterNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
+    local afterHealth = IsValid(target) and target:Health() or beforeHealth
+
+    ent.BZCN_SimulatedButtons = 0
+    ent.BZCNCombatTarget = nil
+
+    if not ok or (afterNext <= beforeNext and afterHealth >= beforeHealth) then return false end
+    if weapon.SetNextPrimaryFire and afterNext <= now then
+        weapon:SetNextPrimaryFire(now + math.max(tonumber(ent.BZCNClassProfile and ent.BZCNClassProfile.AttackDelay) or 0.45, 0.08))
+    end
+    hook.Run("BZCN_NPCMeleeWeaponAttack", ent, target, weapon)
+    return true
 end
 
 local function WoundCount(wounds)
