@@ -833,6 +833,72 @@ end)
 -- Give NPCs that have crawl sequences a lightweight crawl locomotion
 -- fallback. NPCs without a crawl sequence still move slower and keep their
 -- weapon entity attached, rather than receiving a brittle custom AI schedule.
+-- Deterministic test command for the three starter classes and injury states.
+concommand.Add("bzcn_npc_test", function(ply, _, args)
+    if IsValid(ply) and not ply:IsAdmin() then return end
+
+    local index = tonumber(args[1])
+    local target = index and Entity(math.floor(index)) or nil
+    local action = string.lower(args[2] or "")
+    if not IsValid(target) and IsValid(ply) then
+        local trace = ply:GetEyeTrace()
+        target = IsValid(trace.Entity) and trace.Entity or nil
+    end
+
+    if not IsValid(target) or not IsSupportedNPC(target) then
+        local message = "Usage: bzcn_npc_test <entity-index> <down|crawl|reset>"
+        if IsValid(ply) then ply:ChatPrint(message) else print(message) end
+        return
+    end
+
+    local state = Support.Attach(target)
+    if not state then return end
+
+    if action == "down" then
+        EnterDownedState(target, "impact")
+    elseif action == "crawl" then
+        state.lleg = math.max(state.lleg or 0, 65)
+        state.partDamage.leftleg = math.max(state.partDamage.leftleg or 0, 65)
+        state.crawling = true
+        SyncEntity(target, state)
+    elseif action == "reset" then
+        state.skull = 0
+        state.brain = 0
+        state.chest = 0
+        state.pelvis = 0
+        state.stomach = 0
+        state.spine1 = 0
+        state.spine2 = 0
+        state.spine3 = 0
+        state.larm = 0
+        state.rarm = 0
+        state.lleg = 0
+        state.rleg = 0
+        state.heart = 0
+        state.liver = 0
+        state.intestines = 0
+        state.lungsL = {0, 0}
+        state.lungsR = {0, 0}
+        state.pain = 0
+        state.shock = 0
+        state.blood = state.maxBlood or 5000
+        state.partDamage = {head = 0, chest = 0, abdomen = 0, pelvis = 0, leftarm = 0, rightarm = 0, leftleg = 0, rightleg = 0}
+        state.crawling = false
+        if istable(state.wounds) then table.Empty(state.wounds) end
+        if istable(state.arterialwounds) then table.Empty(state.arterialwounds) end
+        SyncEntity(target, state)
+        if state.downed then Recover(target, target.GooberNPCRagdoll) end
+    else
+        local message = "Usage: bzcn_npc_test <entity-index> <down|crawl|reset>"
+        if IsValid(ply) then ply:ChatPrint(message) else print(message) end
+        return
+    end
+
+    local message = "[BZCN] Test action '" .. action .. "' applied to #" .. target:EntIndex()
+    print(message)
+    if IsValid(ply) then ply:ChatPrint(message) end
+end)
+
 timer.Create("GooberNPCSupport_CrawlVisual", 0.12, 0, function()
     for ent, state in pairs(tracked) do
         if not IsValid(ent) or state.downed or state.gettingUp or not state.crawling then continue end
