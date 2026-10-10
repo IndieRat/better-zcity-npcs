@@ -324,10 +324,12 @@ function BZCN.ChangeClass(ent, className, heal)
     local profile = BZCN.GetClass(className)
     BZCN.HideHeldWeapon(ent)
     if isstring(profile.Model) and util.IsValidModel(profile.Model) then ent:SetModel(profile.Model) end
+    ent.MaxHealthLimit = profile.Health or 100
+    if ent.SetMaxHealth then ent:SetMaxHealth(profile.Health or 100) end
     if heal ~= false then
         ent:SetHealth(profile.Health or 100)
-        ent.MaxHealthLimit = profile.Health or 100
-        if ent.SetMaxHealth then ent:SetMaxHealth(profile.Health or 100) end
+    elseif ent:Health() > (profile.Health or 100) then
+        ent:SetHealth(profile.Health or 100)
     end
     local success = BZCN.ApplyClass(ent, className, true)
     if success then
