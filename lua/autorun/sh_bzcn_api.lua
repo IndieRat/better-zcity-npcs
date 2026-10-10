@@ -42,9 +42,9 @@ BZCN.RegisterClass("default", {
     Model = "models/player/group03/male_07.mdl", Health = 100, Speed = 175,
     Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"Combine"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1200, HelpMemory = 10,
-    Ranged = true, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
-    WeaponClass = "weapon_pistol", WeaponModel = "models/weapons/w_pistol.mdl",
-    Inventory = {Weapons = {weapon_pistol = true}, Items = {}, Armor = {}}
+    AnimationClass = nil, Ranged = true, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
+    MedicalRange = 320, WeaponClass = "weapon_glock17", WeaponModel = "models/weapons/w_pist_glock18.mdl",
+    Inventory = {Weapons = {weapon_glock17 = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
 BZCN.RegisterClass("Combine", {
@@ -52,9 +52,9 @@ BZCN.RegisterClass("Combine", {
     Model = "models/player/combine_soldier.mdl", Health = 140, Speed = 180,
     Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
-    Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
-    WeaponClass = "weapon_ar2", WeaponModel = "models/weapons/w_irifle.mdl",
-    Inventory = {Weapons = {weapon_ar2 = true}, Items = {}, Armor = {head = "combine_helmet"}}
+    AnimationClass = "overwatch", Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
+    MedicalRange = 300, WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
+    Inventory = {Weapons = {weapon_mp7 = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "combine_helmet"}}
 })
 
 BZCN.RegisterClass("Rebel", {
@@ -62,9 +62,9 @@ BZCN.RegisterClass("Rebel", {
     Model = "models/player/group03/male_04.mdl", Health = 115, Speed = 185,
     Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
-    Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
-    WeaponClass = "weapon_smg1", WeaponModel = "models/weapons/w_smg1.mdl",
-    Inventory = {Weapons = {weapon_smg1 = true}, Items = {}, Armor = {}}
+    AnimationClass = "citizen_male", Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
+    MedicalRange = 320, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
+    Inventory = {Weapons = {weapon_ak74 = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
 -- Model and claw model checked against Z-City's own furry class. Its player-only
@@ -75,10 +75,10 @@ BZCN.RegisterClass("furry", {
     Faction = "furry", EnemyPlayers = false, EnemyFactions = {"Combine", "default", "Rebel"},
     FollowAllies = true, FollowRange = 800, FollowDistance = 125, HelpRange = 1000, HelpMemory = 8,
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
-    WeaponClass = "weapon_hands_sh",
+    AnimationClass = "player", WeaponClass = "weapon_hands_sh",
     WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
-    FurryStyle = true, Skin = 4, BloodType = "c-",
-    Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {head = "protovisor"}}
+    MedicalRange = 250, FurryStyle = true, Skin = 4, BloodType = "c-",
+    Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
 })
 
 local function NetworkKey(key, kind)
@@ -258,6 +258,40 @@ function BZCN.InstallAdapter(ent)
     data.GetActiveWeaponClass = function(self)
         return self.BZCN_SelectedWeapon or self:GetNW2String("BZCNWeaponClass", "")
     end
+    -- NextBots do not participate in PlayerSwitchWeapon/PlayerSpawn hooks; give
+    -- Z-City SWEP code the minimum Player-shaped API it probes during attacks.
+    data.GetActiveWeapon = function(self)
+        return IsValid(self.BZCNRuntimeWeapon) and self.BZCNRuntimeWeapon or nil
+    end
+    data.SetActiveWeapon = function(self, weapon)
+        if IsValid(weapon) then
+            self.BZCNRuntimeWeapon = weapon
+            self.BZCNRuntimeWeaponClass = weapon:GetClass()
+        end
+    end
+    data.SelectWeapon = function(self, weaponClass)
+        return BZCN.SelectWeapon(self, weaponClass)
+    end
+    data.KeyDown = function(self, key)
+        return bit.band(tonumber(self.BZCN_SimulatedButtons) or 0, tonumber(key) or 0) ~= 0
+    end
+    data.KeyPressed = data.KeyDown
+    data.KeyReleased = function() return false end
+    data.GetAimVector = function(self)
+        local target = self.BZCNCombatTarget
+        if IsValid(target) then
+            local origin = self:WorldSpaceCenter()
+            return (target:WorldSpaceCenter() - origin):GetNormalized()
+        end
+        return self:GetForward()
+    end
+    data.GetEyeTrace = function(self)
+        local origin = self.EyePos and self:EyePos() or self:WorldSpaceCenter()
+        local aim = self:GetAimVector()
+        return util.TraceLine({start = origin, endpos = origin + aim * 8192, filter = self, mask = MASK_SHOT})
+    end
+    data.ViewPunch = function() end
+    data.LagCompensation = function() end
     data.GetAmmoCount = function(self, ammoType)
         self.BZCN_Ammo = self.BZCN_Ammo or {}
         return self.BZCN_Ammo[ammoType] or 0
@@ -476,6 +510,7 @@ function BZCN.SelectWeapon(ent, weaponClass)
     ent.BZCN_SelectedWeapon = weaponClass
     if SERVER then ent:SetNW2String("BZCNWeaponClass", weaponClass) end
     BZCN.ShowHeldWeapon(ent)
+    if SERVER and BZCN.EquipRuntimeWeapon then BZCN.EquipRuntimeWeapon(ent, weaponClass) end
     return true
 end
 
