@@ -54,18 +54,23 @@ function ENT:Initialize()
 
     if className == "default" then
         local appearance
+        local appearanceApplied = false
         if hg and hg.Appearance and isfunction(hg.Appearance.GetRandomAppearance)
             and isfunction(hg.Appearance.ForceApplyAppearance) then
             local ok, result = pcall(hg.Appearance.GetRandomAppearance)
             if ok and istable(result) then
                 appearance = result
-                -- This is the same appearance entry point Z-City uses for
-                -- its converted NPCs; it applies their model/clothes/bodygroups.
-                pcall(hg.Appearance.ForceApplyAppearance, self, appearance)
+                -- Match Z-City's own NPC conversion appearance pipeline.
+                local applied, applyResult = pcall(hg.Appearance.ForceApplyAppearance, self, appearance)
+                appearanceApplied = applied and util.IsValidModel(self:GetModel())
+                if not applied then
+                    ErrorNoHalt("[BZCN] Z-City appearance application failed: "
+                        .. tostring(applyResult) .. "\n")
+                end
             end
         end
 
-        if not util.IsValidModel(self:GetModel()) or self:GetModel() == profile.Model then
+        if not appearanceApplied then
             local civilianModels = {
                 "models/player/group03/male_01.mdl", "models/player/group03/male_02.mdl",
                 "models/player/group03/male_03.mdl", "models/player/group03/male_04.mdl",
@@ -81,9 +86,10 @@ function ENT:Initialize()
             self:SetSkin(math.random(0, math.max(self:SkinCount() - 1, 0)))
         end
 
-        if appearance then self.CurAppearance = table.Copy(appearance) end
+        if appearanceApplied and appearance then self.CurAppearance = table.Copy(appearance) end
         self.BZCNClassProfile.Model = self:GetModel()
-        local displayName = appearance and appearance.AName or "Civilian"
+        local displayName = (appearanceApplied and appearance and appearance.AName)
+            or "Civilian"
         self.BZCNDisplayName = displayName
         self.PlayerName = displayName
         self:SetNW2String("BZCNDisplayName", displayName)
