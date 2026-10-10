@@ -360,6 +360,7 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
             npc:SetMaxHealth(maxHealth)
             npc.MaxHealthLimit = maxHealth
             if npc:Health() > maxHealth then npc:SetHealth(maxHealth) end
+            if istable(npc.BZCNNPCOrg) then npc.BZCNNPCOrg.maxHealth = maxHealth end
             changed[#changed + 1] = "MaxHealth"
         end
     end
@@ -397,6 +398,7 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
         health = math.Clamp(health, 1, math.max(npc:GetMaxHealth(), 1))
         if npc:Health() ~= health then
             npc:SetHealth(health)
+            if istable(npc.BZCNNPCOrg) then npc.BZCNNPCOrg.health = health end
             changed[#changed + 1] = "Health"
         end
     end
