@@ -1100,8 +1100,7 @@ hook.Add("PostEntityTakeDamage", "BZCNNPCSupport_ZCityDamageSync", function(targ
         and owner.BZCNNPCOrg.usesZCityOrganism and target ~= owner then
         if tookDamage ~= false then
             local amount = math.max(tonumber(dmg:GetDamage()) or 0, 0)
-            if amount > 0 and not target.BZCNNPCDamageRelayed then
-                target.BZCNNPCDamageRelayed = true
+            if amount > 0 then
                 local state = owner.BZCNNPCOrg
                 owner.BZCNNPCForcedPart = GetHitPart(target, dmg:GetDamagePosition())
                 if isfunction(owner.OnInjured) then pcall(owner.OnInjured, owner, dmg) end
@@ -1115,9 +1114,6 @@ hook.Add("PostEntityTakeDamage", "BZCNNPCSupport_ZCityDamageSync", function(targ
                     pcall(owner.OnKilled, owner, dmg)
                 end
 
-                timer.Simple(0, function()
-                    if IsValid(target) then target.BZCNNPCDamageRelayed = nil end
-                end)
             end
         end
         return
