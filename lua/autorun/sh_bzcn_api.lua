@@ -140,6 +140,20 @@ function BZCN.InstallAdapter(ent)
     -- Instance-local methods only: do not mutate the global Entity metatable.
     data.GetNetVar = function(self, key, default) return BZCN.GetNetVar(self, key, default) end
     data.SetNetVar = function(self, key, value) return BZCN.SetNetVar(self, key, value) end
+
+    -- Z-City's damage hook has a separate NPC branch and suppresses engine
+    -- damage for organism-backed entities whose IsNPC() returns false. Keep
+    -- the true Player/NextBot identity intact while giving Z-City its expected
+    -- NPC predicate for managed adapters.
+    local nativeIsNPC = ent.IsNPC
+    data.IsNPC = function(self)
+        if BZCN.IsManaged and BZCN.IsManaged(self) then return true end
+        if isfunction(nativeIsNPC) then
+            local ok, result = pcall(nativeIsNPC, self)
+            if ok then return result end
+        end
+        return false
+    end
     data.GetInventory = function(self) return self:GetNetVar("Inventory", {Weapons = {}, Items = {}, Armor = {}}) end
     data.SetInventory = function(self, inventory)
         return self:SetNetVar("Inventory", istable(inventory) and inventory or {Weapons = {}, Items = {}, Armor = {}})
@@ -283,16 +297,22 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.BZCN_SelectedWeapon = selectedWeapon
     if SERVER then ent:SetNW2String("BZCNWeaponClass", selectedWeapon or "") end
 
-    ent.organism = nil
-    ent.BZCN_Organism = ent.BZCN_Organism or {
-        owner = ent, alive = ent:Health() > 0, entindex = ent:EntIndex(),
-        health = ent:Health(), maxHealth = profile.Health or 100,
-        blood = 5000, maxBlood = 5000, bloodtype = "unknown", pain = 0, shock = 0,
-        wounds = {}, arterialwounds = {}, larm = 0, rarm = 0, lleg = 0, rleg = 0,
-        chest = 0, pelvis = 0, spine1 = 0, spine2 = 0, spine3 = 0, skull = 0,
-        brain = 0, liver = 0, intestines = 0, heart = 0, stomach = 0,
-        lungsL = {0, 0}, lungsR = {0, 0}
-    }
+    -- Keep the seed separate until the server-side support module calls
+    -- hg.organism.Add/Clear and installs the official Z-City organism table.
+    if not (istable(ent.organism) and ent.organism.owner == ent and ent.organism.fakePlayer) then
+        ent.BZCN_Organism = ent.BZCN_Organism or {
+            owner = ent, alive = ent:Health() > 0, entindex = ent:EntIndex(),
+            health = ent:Health(), maxHealth = profile.Health or 100,
+            blood = 5000, maxBlood = 5000, bloodtype = profile.BloodType or "unknown",
+            pain = 0, shock = 0, wounds = {}, arterialwounds = {},
+            larm = 0, rarm = 0, lleg = 0, rleg = 0, chest = 0, pelvis = 0,
+            spine1 = 0, spine2 = 0, spine3 = 0, skull = 0, brain = 0,
+            liver = 0, intestines = 0, heart = 0, stomach = 0,
+            lungsL = {0, 0}, lungsR = {0, 0}
+        }
+    else
+        ent.BZCN_Organism = ent.organism
+    end
     hook.Run("BZCN_NPCClassApplied", ent, profile.ClassName, profile)
     return true
 end
