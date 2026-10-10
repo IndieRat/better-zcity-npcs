@@ -185,7 +185,7 @@ function BZCN.CapturePlayerData(source)
         or tonumber(profile.Speed) or 175
     local walkSpeed = tonumber(SafeCall(source, "GetWalkSpeed"))
         or tonumber(source.BZCNWalkSpeed) or speed * 0.55
-    local organism = SafeCopy(source.organism or {})
+    local organism = SafeCopy(source.BZCN_Organism or source.organism or {})
     local healthState = source.BZCNNPCOrg
     if istable(healthState) then
         organism = organism or {}
@@ -503,7 +503,12 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
 
     local organism = patch.Organism
     if istable(organism) then
-        npc.organism = SafeCopy(organism) or {}
+        -- Keep organism-compatible state out of the server's raw organism field;
+        -- Z-City interprets that field as a marker for player-style damage.
+        npc.BZCN_Organism = SafeCopy(organism) or {}
+        npc.BZCN_Organism.owner = npc
+        npc.BZCN_Organism.entindex = npc:EntIndex()
+        npc.organism = nil
         local state = npc.BZCNNPCOrg
         if istable(state) then
             for _, field in ipairs({
@@ -512,7 +517,7 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
                 "rarm", "lleg", "rleg", "heart", "liver", "intestines", "lungsL",
                 "lungsR", "wounds", "arterialwounds"
             }) do
-                if npc.organism[field] ~= nil then state[field] = SafeCopy(npc.organism[field]) end
+                if npc.BZCN_Organism[field] ~= nil then state[field] = SafeCopy(npc.BZCN_Organism[field]) end
             end
         end
         changed[#changed + 1] = "Organism"
