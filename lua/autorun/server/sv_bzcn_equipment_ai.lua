@@ -177,32 +177,45 @@ function BZCN.FireRuntimeWeapon(ent, target)
     if not IsValid(weapon) then return FireStatBasedShot(ent, target, nil) end
 
     local now = CurTime()
-    if weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() > now then return true end
+    local beforeNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
+    if beforeNext > now then return true end
+    local beforeClip = weapon.Clip1 and weapon:Clip1() or -1
     local source = ent:WorldSpaceCenter() + Vector(0, 0, 8)
     local destination = target:WorldSpaceCenter()
     local direction = (destination - source):GetNormalized()
 
     ent.BZCNCombatTarget = target
-    ent.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, 0)
-    if weapon.SetNextPrimaryFire then
-        weapon:SetNextPrimaryFire(now + math.max(tonumber(profile.AttackDelay) or 0.35, 0.08))
+    ent.BZCN_SimulatedButtons = IN_ATTACK
+
+    local attemptedNative = HasZCityNPCAttack(class) and isfunction(weapon.NPCShoot_Primary)
+    local ok = false
+    if attemptedNative then
+        ok = pcall(weapon.NPCShoot_Primary, weapon, source, direction)
     end
 
-    local fired = false
-    if HasZCityNPCAttack(class) and isfunction(weapon.NPCShoot_Primary) then
-        local ok = pcall(weapon.NPCShoot_Primary, weapon, source, direction)
-        fired = ok
+    local afterNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
+    local afterClip = weapon.Clip1 and weapon:Clip1() or -1
+    local fired = attemptedNative and ok and (afterNext > beforeNext or
+        (beforeClip >= 0 and afterClip >= 0 and afterClip < beforeClip))
+
+    -- Don't pre-set NextPrimaryFire: native PrimaryAttack implementations
+    -- often call CanPrimaryAttack(), which rejects a weapon whose cooldown is
+    -- already in the future. Let the actual SWEP run first, then enforce a
+    -- fallback cooldown only if its own attack method didn't do so.
+    if not fired then
+        fired = FireStatBasedShot(ent, target, weapon)
+    end
+    if fired and weapon.SetNextPrimaryFire then
+        local currentNext = weapon:GetNextPrimaryFire()
+        if currentNext <= now then
+            weapon:SetNextPrimaryFire(now + math.max(tonumber(profile.AttackDelay) or 0.35, 0.08))
+        end
     end
 
     ent.BZCN_SimulatedButtons = 0
     ent.BZCNCombatTarget = nil
-
-    -- Homigrad weapons use NPCShoot_Primary/PrimaryAttack directly. If a SWEP
-    -- rejects the NextBot-only owner methods, fall back to its own damage,
-    -- sound, and spread values rather than silently reverting to a stock gun.
-    if not fired then return FireStatBasedShot(ent, target, weapon) end
-    hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon)
-    return true
+    if fired then hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon) end
+    return fired
 end
 
 local function WoundCount(wounds)
