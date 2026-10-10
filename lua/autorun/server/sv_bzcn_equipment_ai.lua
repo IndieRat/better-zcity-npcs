@@ -79,7 +79,7 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     owner:DeleteOnRemove(weapon)
 
     if weapon.SetClip1 and not MEDICAL_WEAPONS[class] then
-        local clip = weapon:GetMaxClip1 and weapon:GetMaxClip1() or 0
+        local clip = weapon.GetMaxClip1 and weapon:GetMaxClip1() or 0
         local primary = istable(weapon.Primary) and weapon.Primary or {}
         clip = clip > 0 and clip or tonumber(primary.DefaultClip) or tonumber(primary.ClipSize) or 0
         if clip > 0 and weapon:Clip1() < 1 then weapon:SetClip1(clip) end
@@ -112,10 +112,10 @@ function BZCN.EquipRuntimeWeapon(ent, class)
     return true
 end
 
-local function GetDamageFromWeapon(weapon, profile)
-    local primary = IsValid(weapon) and istable(weapon.Primary) and weapon.Primary or {}
-    local stored = IsValid(weapon) and GetStored(weapon:GetClass()) or nil
-    primary = istable(primary) and primary or (stored and stored.Primary) or {}
+local function GetDamageFromWeapon(weapon, profile, weaponClass)
+    local stored = IsValid(weapon) and GetStored(weapon:GetClass()) or GetStored(weaponClass)
+    local primary = IsValid(weapon) and istable(weapon.Primary) and weapon.Primary
+        or (stored and stored.Primary) or {}
     local damage = tonumber(primary.Damage) or tonumber(primary.BaseDamage)
         or tonumber(profile and profile.WeaponDamage) or 9
     return math.Clamp(damage, 1, 250), primary
@@ -124,7 +124,7 @@ end
 local function FireStatBasedShot(ent, target, weapon)
     if not IsValid(ent) or not IsValid(target) then return false end
     local profile = ent.BZCNClassProfile or {}
-    local damage, primary = GetDamageFromWeapon(weapon, profile)
+    local damage, primary = GetDamageFromWeapon(weapon, profile, ent.BZCN_SelectedWeapon or profile.WeaponClass)
     local source = ent:WorldSpaceCenter() + Vector(0, 0, 8)
     local destination = target:WorldSpaceCenter()
     local direction = (destination - source):GetNormalized()
