@@ -224,6 +224,16 @@ function BZCN.InstallAdapter(ent)
         local classes = player and player.classList
         return classes and classes[self.PlayerClassName or ""] or self.BZCNClassProfile
     end
+    -- Keep the same query shape used by Player-focused Z-City ragdoll addons,
+    -- but return only this NextBot's temporary knockdown ragdoll. Engine
+    -- IsPlayer() and player enumeration remain untouched.
+    data.GetRagdollEntity = function(self)
+        local rag = self.BZCNNPCRagdoll or self.FakeRagdoll
+        if not IsValid(rag) and self.GetNWEntity then
+            rag = self:GetNWEntity("FakeRagdoll")
+        end
+        return IsValid(rag) and rag or NULL
+    end
     data.SetPlayerClass = function(self, className, data)
         return BZCN.ChangeClass(self, className, true)
     end
