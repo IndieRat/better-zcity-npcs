@@ -117,36 +117,102 @@ function ENT:GetBZCNProfile()
     return self.BZCNClassProfile or GetProfile(self)
 end
 
+local nativeNPCFaction = {
+    npc_combine_s = "Combine", npc_metropolice = "Combine", npc_combine = "Combine",
+    npc_combinegunship = "Combine", npc_hunter = "Combine", npc_stalker = "Combine",
+    npc_strider = "Combine", npc_turret_floor = "Combine", npc_combine_camera = "Combine",
+    npc_manhack = "Combine", npc_cscanner = "Combine", npc_clawscanner = "Combine",
+    npc_citizen = "default", npc_barney = "default", npc_eli = "default",
+    npc_kleiner = "default", npc_magnusson = "default", npc_mossman = "default",
+    npc_odessa = "default", npc_alyx = "Rebel", npc_vortigaunt = "Rebel",
+    npc_rollermine_hacked = "Rebel"
+}
+
+function ENT:GetBZCNEntityFaction(target)
+    if not IsValid(target) then return nil end
+    if target:IsPlayer() then
+        local targetClass = target.PlayerClassName
+            or (target.GetNW2String and target:GetNW2String("PlayerClassName", ""))
+        if isstring(targetClass) and targetClass ~= "" then return targetClass end
+        return "default"
+    end
+    if BZCN.IsManaged(target) then
+        local targetProfile = target.BZCNClassProfile or BZCN.GetClass(target.BZCNClass or target.PlayerClassName)
+        return targetProfile and (targetProfile.Faction or targetProfile.ClassName) or target.BZCN_Faction
+    end
+    return nativeNPCFaction[target:GetClass()]
+end
+
 function ENT:IsBZCNEnemy(target)
     if not IsValid(target) or target == self or target:Health() <= 0 then return false end
     local profile = self:GetBZCNProfile()
 
     if target:IsPlayer() then
         if not target:Alive() then return false end
-        local targetClass = target.PlayerClassName
-            or (target.GetNW2String and target:GetNW2String("PlayerClassName", ""))
-        if targetClass and targetClass ~= "" then
-            if targetClass == self.PlayerClassName then return false end
-            for _, enemyClass in ipairs(profile.EnemyFactions or {}) do
-                if enemyClass == targetClass then return true end
-            end
-            return false
+        local targetClass = self:GetBZCNEntityFaction(target)
+        if targetClass == self.BZCN_Faction or targetClass == self.PlayerClassName then return false end
+        for _, enemyClass in ipairs(profile.EnemyFactions or {}) do
+            if enemyClass == targetClass then return true end
         end
-        return profile.EnemyPlayers ~= false
+        return profile.EnemyPlayers == true and (not targetClass or targetClass == "")
     end
 
-    if not BZCN.IsManaged(target) then return false end
-    local targetProfile = target.BZCNClassProfile or BZCN.GetClass(target.BZCNClass or target.PlayerClassName)
-    if not targetProfile then return false end
-    local targetFaction = targetProfile.Faction or target.BZCN_Faction or targetProfile.ClassName
-    local ownFaction = profile.Faction or self.BZCN_Faction
-    if targetFaction == ownFaction then return false end
+    if BZCN.IsManaged(target) then
+        local targetProfile = target.BZCNClassProfile or BZCN.GetClass(target.BZCNClass or target.PlayerClassName)
+        if not targetProfile then return false end
+        local targetFaction = targetProfile.Faction or target.BZCN_Faction or targetProfile.ClassName
+        local ownFaction = profile.Faction or self.BZCN_Faction
+        if targetFaction == ownFaction then return false end
+        for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
+            if enemyFaction == targetFaction or enemyFaction == targetProfile.ClassName
+                or enemyFaction == target.PlayerClassName then return true end
+        end
+        return false
+    end
 
-    for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
-        if enemyFaction == targetFaction or enemyFaction == targetProfile.ClassName
-            or enemyFaction == target.PlayerClassName then return true end
+    -- Vanilla Z-City citizens/Combine remain valid friends or threats as well;
+    -- this lets scripted NextBots coordinate with the gamemode's native NPCs.
+    if target:IsNPC() then
+        local faction = nativeNPCFaction[target:GetClass()]
+        if not faction or faction == profile.Faction then return false end
+        for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
+            if enemyFaction == faction then return true end
+        end
     end
     return false
+end
+
+function ENT:IsBZCNAlly(target)
+    if not IsValid(target) or target == self or target:Health() <= 0 then return false end
+    if target:IsPlayer() and not target:Alive() then return false end
+    if not (target:IsPlayer() or target:IsNPC() or BZCN.IsManaged(target)) then return false end
+    return not self:IsBZCNEnemy(target)
+end
+
+function ENT:ApplyBZCNRelationships()
+    if not SERVER then return end
+    local ownFaction = self.BZCN_Faction or "civilian"
+    local friends = {"npc_citizen", "npc_barney", "npc_alyx", "npc_eli", "npc_kleiner",
+        "npc_magnusson", "npc_mossman", "npc_odessa", "npc_vortigaunt", "npc_rollermine_hacked"}
+    local combines = {"npc_combine_s", "npc_metropolice", "npc_combine", "npc_combinegunship",
+        "npc_hunter", "npc_stalker", "npc_strider", "npc_turret_floor", "npc_combine_camera",
+        "npc_manhack", "npc_cscanner", "npc_clawscanner"}
+    for _, other in ipairs(ents.FindByClass("npc_*")) do
+        if not IsValid(other) or other == self or not isfunction(other.AddEntityRelationship) then continue end
+        local otherFaction = nativeNPCFaction[other:GetClass()]
+        if not otherFaction then continue end
+        local disposition
+        if otherFaction == ownFaction then
+            disposition = D_LI
+        elseif otherFaction == "Combine" and (ownFaction == "Rebel" or ownFaction == "default" or ownFaction == "furry") then
+            disposition = D_HT
+        elseif ownFaction == "Combine" and (otherFaction == "Rebel" or otherFaction == "default") then
+            disposition = D_HT
+        end
+        if disposition ~= nil then
+            pcall(other.AddEntityRelationship, other, self, disposition, disposition == D_HT and 99 or 90)
+        end
+    end
 end
 
 function ENT:FindEnemy()
