@@ -47,12 +47,30 @@ end
 function ENT:GetBZCNAnimationClass()
     local profile = self.BZCNClassProfile or {}
     local preferred = profile.AnimationClass
-    if isstring(preferred) and hg and hg.IXAnims and istable(hg.IXAnims[preferred]) then
-        self.ixAnimModelClass = preferred
-        return preferred
+    local model = self:GetModel() or ""
+    local modelLower = string.lower(model)
+
+    local function RegisterModelClass(class)
+        if not isstring(class) or not (hg and hg.IXAnims and istable(hg.IXAnims[class])) then
+            return class
+        end
+        self.ixAnimModelClass = class
+        -- SetModelClass writes Z-City's real model->animation-class registry.
+        -- Cache it per model so we aren't mutating the resolver every BodyUpdate.
+        if self.BZCNRegisteredAnimModel ~= modelLower or self.BZCNRegisteredAnimClass ~= class then
+            if isfunction(hg.IXAnims.SetModelClass) then
+                pcall(hg.IXAnims.SetModelClass, model, class)
+            end
+            self.BZCNRegisteredAnimModel = modelLower
+            self.BZCNRegisteredAnimClass = class
+        end
+        return class
     end
 
-    local model = string.lower(self:GetModel() or "")
+    if isstring(preferred) and hg and hg.IXAnims and istable(hg.IXAnims[preferred]) then
+        return RegisterModelClass(preferred)
+    end
+
     local class
     -- Z-City's generic resolver returns "player" for nearly every
     -- models/player/... path before it reaches the citizen fallback. The
@@ -78,8 +96,7 @@ function ENT:GetBZCNAnimationClass()
     if not class or not (hg and hg.IXAnims and istable(hg.IXAnims[class])) then
         class = "citizen_male"
     end
-    self.ixAnimModelClass = class
-    return class
+    return RegisterModelClass(class)
 end
 
 function ENT:UpdateBZCNMovementState(speed)
@@ -211,7 +228,10 @@ function ENT:TryBZCNClimb()
     self.BZCNClimbUntil = CurTime() + 0.65
     self.loco:Jump()
     self:SetVelocity(forward * 80 + Vector(0, 0, 135))
-    hook.Run("BZCN_NPCMovementStateChanged", self, self.BZCNMovementState, "climbing")
+    local previous = self.BZCNMovementState
+    self.BZCNMovementState = "climbing"
+    if self.SetNW2String then self:SetNW2String("BZCNMovementState", "climbing") end
+    hook.Run("BZCN_NPCMovementStateChanged", self, previous, "climbing")
     return true
 end
 
