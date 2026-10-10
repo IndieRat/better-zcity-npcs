@@ -7,6 +7,19 @@ local function GetProfile(self)
         or {Name = "ZCity NPC", Health = 100, Speed = 175, Faction = "civilian", Ranged = false}
 end
 
+local function HasSenseRecord(self, target, requireHostile)
+    if not BZCN or not BZCN.GetLastAdapterContext then return true end
+    local context = BZCN.GetLastAdapterContext(self)
+    local sense = context and context.sense
+    if not sense then return false end
+    for _, record in ipairs(sense.Targets or {}) do
+        if record.Entity == target then
+            return not requireHostile or record.Hostile == true
+        end
+    end
+    return false
+end
+
 function ENT:Initialize()
     local className = self.BZCNClass or "default"
     local profile = BZCN.GetClass(className) or GetProfile(self)
@@ -19,7 +32,7 @@ function ENT:Initialize()
     self:SetHealth(profile.Health or 100)
     if self.SetMaxHealth then self:SetMaxHealth(profile.Health or 100) end
     self.MaxHealthLimit = profile.Health or 100
-    self.LoseTargetDist = profile.WeaponRange or 1400
+    self.LoseTargetDist = profile.SenseRange or profile.WeaponRange or 1400
     self.LastAttack = 0
     self.BZCNCurrentSequence = -1
     self:SetCollisionGroup(COLLISION_GROUP_NPC)
@@ -34,7 +47,9 @@ function ENT:Initialize()
     end
 
     BZCN.ApplyClass(self, className, true)
-    self.BZCNClassProfile = profile
+    -- ApplyClass creates per-entity runtime profile data. Do not replace it
+    -- with the shared class template here.
+    self.BZCNClassProfile = self.BZCNClassProfile or profile
     self.BZCN_Faction = profile.Faction or className
     if profile.FurryStyle and self:GetModel() == profile.Model then
         self:SetSkin(profile.Skin or 4)
@@ -56,7 +71,7 @@ function ENT:Initialize()
             hg.BZCNNPCSupport.Attach(self)
         end
     end)
-    hook.Run("BZCN_NPCSpawned", self, className, profile)
+    hook.Run("BZCN_NPCSpawned", self, className, self.BZCNClassProfile)
 end
 
 function ENT:GetBZCNProfile()
@@ -96,24 +111,39 @@ function ENT:IsBZCNEnemy(target)
 end
 
 function ENT:FindEnemy()
+    -- Enemy selection consumes the adapter chain's sight records instead of
+    -- independently scanning players/NPCs with different perception rules.
+    local context = BZCN.AdapterCycle and BZCN.AdapterCycle(self, false)
+    if not context and BZCN.GetLastAdapterContext then
+        context = BZCN.GetLastAdapterContext(self)
+    end
+
+    local sense = context and context.sense
+    local hostiles = sense and sense.Hostiles or {}
+    local radius = self.LoseTargetDist or 1400
+    local preferred = context and context.intent and context.intent.Target
     local best, bestDistance
-    local candidates = {}
-    for _, ply in ipairs(player.GetAll()) do candidates[#candidates + 1] = ply end
-    for _, className in ipairs({"npc_bzcn_default", "npc_bzcn_combine", "npc_bzcn_rebel", "npc_bzcn_furry"}) do
-        for _, other in ipairs(ents.FindByClass(className)) do
-            if other ~= self then candidates[#candidates + 1] = other end
+
+    if IsValid(preferred) then
+        for _, record in ipairs(hostiles) do
+            if record.Entity == preferred and record.Visible and self:IsBZCNEnemy(preferred) then
+                best = preferred
+                bestDistance = self:GetPos():DistToSqr(preferred:GetPos())
+                break
+            end
         end
     end
 
-    local radius = self.LoseTargetDist or 1400
-    for _, target in ipairs(candidates) do
-        if self:IsBZCNEnemy(target) then
+    for _, record in ipairs(hostiles) do
+        local target = record.Entity
+        if IsValid(target) and record.Visible and self:IsBZCNEnemy(target) then
             local distance = self:GetPos():DistToSqr(target:GetPos())
             if distance <= radius * radius and (not bestDistance or distance < bestDistance) then
                 best, bestDistance = target, distance
             end
         end
     end
+
     self.BZCNEnemy = best
     return best
 end
@@ -124,7 +154,7 @@ function ENT:PlayBZCNAttackAnimation()
 end
 
 function ENT:AttackTarget(target)
-    if not self:IsBZCNEnemy(target) then return end
+    if not self:IsBZCNEnemy(target) or not HasSenseRecord(self, target, true) then return end
     local profile = self:GetBZCNProfile()
     local distance = self:GetPos():Distance(target:GetPos())
     local now = CurTime()
@@ -171,6 +201,7 @@ end
 
 function ENT:HaveEnemy()
     if self:IsBZCNEnemy(self.BZCNEnemy)
+        and HasSenseRecord(self, self.BZCNEnemy, true)
         and self:GetPos():DistToSqr(self.BZCNEnemy:GetPos()) <= (self.LoseTargetDist or 1400)^2 then
         return self.BZCNEnemy
     end
@@ -185,7 +216,7 @@ function ENT:ChaseEnemy(target)
     path:Compute(self, target:GetPos())
     if not path:IsValid() then return end
 
-    while path:IsValid() and self:IsBZCNEnemy(target) do
+    while path:IsValid() and self:IsBZCNEnemy(target) and HasSenseRecord(self, target, true) do
         local downed = self:GetNW2Bool("BZCNNPCDowned", false)
         local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
             and hg.BZCNNPCSupport.IsGettingUp(self)
@@ -199,7 +230,7 @@ function ENT:ChaseEnemy(target)
         local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
             and hg.BZCNNPCSupport.ShouldCrawl(self)
         local profile = self:GetBZCNProfile()
-        self.loco:SetDesiredSpeed((profile.Speed or self.MoveSpeed or 175) * (crawling and 0.42 or 1))
+        self.loco:SetDesiredSpeed((self:GetRunSpeed() or profile.Speed or self.MoveSpeed or 175) * (crawling and 0.42 or 1))
         path:Update(self)
         if self:GetPos():DistToSqr(target:GetPos()) < (profile.WeaponRange or 900)^2 then
             self:AttackTarget(target)
@@ -220,7 +251,8 @@ function ENT:Wander()
     if not destination then destination = self:GetPos() + Vector(math.Rand(-1, 1), math.Rand(-1, 1), 0) * 350 end
     local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
         and hg.BZCNNPCSupport.ShouldCrawl(self)
-    self.loco:SetDesiredSpeed((self:GetBZCNProfile().Speed or 175) * (crawling and 0.42 or 0.68))
+    local profile = self:GetBZCNProfile()
+    self.loco:SetDesiredSpeed((self:GetRunSpeed() or profile.Speed or 175) * (crawling and 0.42 or 0.68))
     self:MoveToPos(destination, {tolerance = 60})
     coroutine.wait(0.35)
 end
