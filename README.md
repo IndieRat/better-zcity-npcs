@@ -85,7 +85,7 @@ The client HUD bridge mirrors health, blood, pain, shock and body-part state for
 
 ## Animation, civilian appearance, and ally AI
 
-Movement asks `hg.IXAnims.GetModelClass(model)` and uses the corresponding `hg.IXAnims` activity table for idle, walk, run, crouch-walk and weapon hold type. Attacks consult the same table's attack activity before falling back to available model sequences. This lets supported Z-City animation classes work without running Player-only `CalcMainActivity`/Player animation callbacks on a NextBot.
+Managed NPCs now explicitly register each resolved model through `hg.IXAnims.SetModelClass(model, class)`; this works around Z-City's resolver returning the generic `player` class early for most `models/player/...` paths. The addon's model mapper selects `citizen_male`, `citizen_female`, `overwatch`, `metrocop`, or `player` as appropriate, including explicit per-class overrides and hold types for the selected Z-City loadout. The movement state machine publishes `BZCNMovementState` and transitions between `standing`, `walking`, `running`, `crawling`, `climbing`, `airborne`, `downed`, and `getting_up`. Crawling tries available crawl sequences before falling back to crouch-walk. Climbing is a bounded small-ledge clamber/jump assist when the upper hull has clearance; it is not unrestricted ladder or wall climbing. Attacks consult the IX animation attack activity without invoking Player-only animation callbacks.
 
 The `default` civilian first tries Z-City's `hg.Appearance.GetRandomAppearance()` and `hg.Appearance.ForceApplyAppearance()` path, which supplies its civilian model/clothing/bodygroups. If that API is unavailable or fails, it falls back to a random standard Group03 male/female civilian model and skin.
 
@@ -97,7 +97,9 @@ NPCs expose Z-City-style fields such as `PlayerClassName`, `Inventory.Weapons/It
 
 Garry's Mod does not permit an NPC to become a real `Player` userdata: `IsPlayer()`, player enumeration, client ownership, and Player-only engine functions remain unchanged. The adapter passes normalized player-shaped data and a sense context to hooks; it does not blindly invoke Player-only callbacks on a NextBot.
 
-Inventory entries and held models are fake weapon proxies. Combine, Rebel, and civilian shooting uses a lightweight NPC trace/damage implementation, not the original SWEP firing/reload implementation. Ragdoll, crawl, and get-up animations still depend on the model's available sequences. Static checks do not replace a live Z-City/Garry's Mod runtime test.
+The actor remains a NextBot, not a Player. Each managed NPC keeps a hidden runtime entity for its selected Z-City SWEP while the lightweight hand proxy displays that SWEP's world model. Ranged attacks first call the SWEP's native `NPCShoot_Primary` path for supported Homigrad weapons, then use the actual SWEP's damage/spread/sound fields for a controlled fallback when Player-only assumptions prevent native firing. Civilian/Rebel loadouts use `weapon_glock17` / `weapon_ak74`; Combine uses `weapon_mp7`; the inventory also includes `weapon_hands_sh`, `weapon_medkit_sh`, and `weapon_bandage_sh`. Hands-equipped profiles call the real Z-City fists SWEP for close attacks.
+
+The server-side medical AI checks Z-City organism wounds, blood loss, internal bleeding, shock, pain, and recent health loss for the NPC and nearby allies. It invokes the real `weapon_medkit_sh:Heal()` / `weapon_bandage_sh:Heal()` methods against the native organism instead of maintaining a second healing implementation. This is a best-effort autonomous treatment bridge: player-targeting animations, inventory UI, and every item-specific Player-only behavior are not guaranteed to run on a NextBot. Ragdoll, crawl, climb, and get-up visuals still depend on model sequences and navigation/obstacle geometry. Static checks do not replace a live Z-City/Garry's Mod runtime test.
 
 ## Source reference
 
