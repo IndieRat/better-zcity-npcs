@@ -150,9 +150,53 @@ function ENT:GetBZCNEntityFaction(target)
     return nativeNPCFaction[target:GetClass()]
 end
 
+function ENT:HasRecentAllyThreat(target)
+    if not IsValid(target) then return false end
+    local context = self.BZCNLastAdapterContext
+    local sense = context and context.sense
+    if not sense then return false end
+
+    local profile = self:GetBZCNProfile()
+    local helpMemory = tonumber(profile.HelpMemory) or 10
+    local helpRange = tonumber(profile.HelpRange) or (self.LoseTargetDist or 1400)
+    local ownFaction = profile.Faction or self.BZCN_Faction or self.PlayerClassName
+    local enemyFactions = {}
+    for _, faction in ipairs(profile.EnemyFactions or {}) do enemyFactions[faction] = true end
+
+    local function IsAllyByFaction(candidate)
+        if not IsValid(candidate) or candidate == self or candidate == target then return false end
+        if candidate:Health() <= 0 or (candidate:IsPlayer() and not candidate:Alive()) then return false end
+        local faction = self:GetBZCNEntityFaction(candidate)
+        if not faction then return false end
+        if faction == ownFaction or faction == self.PlayerClassName then return true end
+        return not enemyFactions[faction]
+    end
+
+    local maxDistance = helpRange * helpRange
+    for _, record in ipairs(sense.Targets or {}) do
+        local ally = record.Entity
+        if IsValid(ally) and record.Visible and record.DistanceSquared <= maxDistance
+            and IsAllyByFaction(ally) then
+            local damageRecent = CurTime() - (tonumber(ally.BZCNLastDamageTime) or 0) <= helpMemory
+            if damageRecent and ally.BZCNLastAttacker == target then return true end
+
+            if isfunction(ally.GetEnemy) then
+                local ok, allyEnemy = pcall(ally.GetEnemy, ally)
+                if ok and allyEnemy == target then
+                    for _, targetRecord in ipairs(sense.Targets or {}) do
+                        if targetRecord.Entity == target and targetRecord.Visible then return true end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
 function ENT:IsBZCNEnemy(target)
     if not IsValid(target) or target == self or target:Health() <= 0 then return false end
     local profile = self:GetBZCNProfile()
+    if self:HasRecentAllyThreat(target) then return true end
 
     if target:IsPlayer() then
         if not target:Alive() then return false end
