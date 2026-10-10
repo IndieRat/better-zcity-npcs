@@ -40,7 +40,8 @@ end
 BZCN.RegisterClass("default", {
     Name = "Civilian", PlayerClassName = "default",
     Model = "models/player/group03/male_07.mdl", Health = 100, Speed = 175,
-    Faction = "civilian", EnemyPlayers = true, EnemyFactions = {"Combine"},
+    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"Combine"},
+    FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1200, HelpMemory = 10,
     Ranged = true, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
     WeaponClass = "weapon_pistol", WeaponModel = "models/weapons/w_pistol.mdl",
     Inventory = {Weapons = {weapon_pistol = true}, Items = {}, Armor = {}}
@@ -50,6 +51,7 @@ BZCN.RegisterClass("Combine", {
     Name = "Combine Soldier", PlayerClassName = "Combine",
     Model = "models/player/combine_soldier.mdl", Health = 140, Speed = 180,
     Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
+    FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
     Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
     WeaponClass = "weapon_ar2", WeaponModel = "models/weapons/w_irifle.mdl",
     Inventory = {Weapons = {weapon_ar2 = true}, Items = {}, Armor = {head = "combine_helmet"}}
@@ -58,7 +60,8 @@ BZCN.RegisterClass("Combine", {
 BZCN.RegisterClass("Rebel", {
     Name = "Resistance Fighter", PlayerClassName = "Rebel",
     Model = "models/player/group03/male_04.mdl", Health = 115, Speed = 185,
-    Faction = "Rebel", EnemyPlayers = true, EnemyFactions = {"Combine", "furry"},
+    Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry"},
+    FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
     Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
     WeaponClass = "weapon_smg1", WeaponModel = "models/weapons/w_smg1.mdl",
     Inventory = {Weapons = {weapon_smg1 = true}, Items = {}, Armor = {}}
@@ -69,7 +72,8 @@ BZCN.RegisterClass("Rebel", {
 BZCN.RegisterClass("furry", {
     Name = "Furry Specimen", PlayerClassName = "furry",
     Model = "models/eradium/protogen_player.mdl", Health = 125, Speed = 190,
-    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
+    Faction = "furry", EnemyPlayers = false, EnemyFactions = {"Combine", "default", "Rebel"},
+    FollowAllies = true, FollowRange = 800, FollowDistance = 125, HelpRange = 1000, HelpMemory = 8,
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
     WeaponClass = "weapon_hands_sh",
     WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
