@@ -845,7 +845,11 @@ local function EnterDownedState(owner, reason)
     rag:SetNWEntity("ply", owner)
     -- This is the normal Z-City fake-ragdoll integration point used by other
     -- addons; callers see a living body's temporary rag and shared organism.
-    hook.Run("Ragdoll_Create", owner, rag)
+    local hookOK, hookError = pcall(hook.Run, "Ragdoll_Create", owner, rag)
+    if not hookOK then
+        ErrorNoHalt("[BZCN] Ragdoll_Create hook failed for NPC #"
+            .. tostring(owner:EntIndex()) .. ": " .. tostring(hookError) .. "\n")
+    end
     SyncEntity(rag, state)
 
     rag:CallOnRemove("BZCNNPCSupport_ExternalRemoval", function(removed)
@@ -1001,7 +1005,11 @@ local function InstallDeathRagdollOrganism(owner, rag, sourceOrg)
 
         -- This event is used by Z-City ragdoll integrations. Fire it while the
         -- source owner is still in organism.owner, just like sv_npcstuff.lua.
-        hook.Run("RagdollDeath", owner, rag)
+        local hookOK, hookError = pcall(hook.Run, "RagdollDeath", owner, rag)
+        if not hookOK then
+            ErrorNoHalt("[BZCN] RagdollDeath hook failed for NPC #"
+                .. tostring(owner:EntIndex()) .. ": " .. tostring(hookError) .. "\n")
+        end
         if zb and istable(zb.net) and istable(zb.net.list) then
             local ragNet = zb.net.list[rag]
             local ownerNet = zb.net.list[owner]
