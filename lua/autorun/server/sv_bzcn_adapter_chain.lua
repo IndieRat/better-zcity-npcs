@@ -88,6 +88,16 @@ local function GetInventory(ent, profile)
     inventory = SafeCopy(inventory) or {}
     inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
     inventory.Items = istable(inventory.Items) and inventory.Items or {}
+
+    -- Z-City player inventories store live SWEP entities as values. The NPC
+    -- facade must not retain another player's weapon entity, so translate
+    -- ownership to a virtual item flag while preserving the weapon class key.
+    for weaponClass, weaponValue in pairs(inventory.Weapons) do
+        if isentity(weaponValue) then
+            inventory.Weapons[weaponClass] = true
+        end
+    end
+
     local armor = ReadNetVar(ent, "Armor") or ent.armors or inventory.Armor
     if not istable(inventory.Armor) or next(inventory.Armor) == nil then
         inventory.Armor = istable(armor) and (SafeCopy(armor) or {}) or {}
@@ -412,6 +422,9 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
         normalized.Weapons = istable(normalized.Weapons) and normalized.Weapons or {}
         normalized.Items = istable(normalized.Items) and normalized.Items or {}
         normalized.Armor = istable(normalized.Armor) and normalized.Armor or {}
+        for weaponClass, weaponValue in pairs(normalized.Weapons) do
+            if isentity(weaponValue) then normalized.Weapons[weaponClass] = true end
+        end
         BZCN.SetNetVar(npc, "Inventory", normalized)
         BZCN.SetNetVar(npc, "Armor", normalized.Armor)
         npc.Inventory = normalized
@@ -553,7 +566,7 @@ function BZCN.RetranslateSense(npc, actor, sense)
     local ok, applied = BZCN.ApplyPlayerWriteback(npc, actorChanges, "sense-bounceback")
     context.writebackApplied = ok == true and applied or {}
     context.writebackFields = table.GetKeys and table.GetKeys(actorChanges) or {}
-    context.sense.players = visiblePlayers
+    context.sense.PlayerViews = visiblePlayers
     return context
 end
 
