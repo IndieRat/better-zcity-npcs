@@ -412,6 +412,12 @@ function ENT:FollowAlly(target)
         if self:GetNW2Bool("BZCNNPCDowned", false)
             or (hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
                 and hg.BZCNNPCSupport.IsGettingUp(self)) then return end
+        if CurTime() < (self.BZCNMedicalUntil or 0) then
+            self.loco:SetDesiredSpeed(0)
+            if IsValid(self.BZCNMedicalTarget) then self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos()) end
+            coroutine.wait(0.1)
+            continue
+        end
 
         if IsValid(self:FindEnemy()) then return end
         local distanceSquared = self:GetPos():DistToSqr(target:GetPos())
@@ -505,7 +511,8 @@ function ENT:PlayBZCNAttackAnimation()
 end
 
 function ENT:AttackTarget(target)
-    if not self:IsBZCNEnemy(target) or not HasSenseRecord(self, target, true) then return end
+    if not self:IsBZCNEnemy(target) or not HasSenseRecord(self, target, true)
+        or CurTime() < (self.BZCNMedicalUntil or 0) then return end
     local profile = self:GetBZCNProfile()
     local distance = self:GetPos():Distance(target:GetPos())
     local now = CurTime()
@@ -593,6 +600,12 @@ function ENT:ChaseEnemy(target)
             coroutine.wait(0.1)
             return
         end
+        if CurTime() < (self.BZCNMedicalUntil or 0) then
+            self.loco:SetDesiredSpeed(0)
+            if IsValid(self.BZCNMedicalTarget) then self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos()) end
+            coroutine.wait(0.1)
+            continue
+        end
 
         if path:GetAge() > 0.4 then path:Compute(self, target:GetPos()) end
         local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
@@ -614,6 +627,11 @@ end
 
 function ENT:Wander()
     if not self.loco then coroutine.wait(1) return end
+    if CurTime() < (self.BZCNMedicalUntil or 0) then
+        self.loco:SetDesiredSpeed(0)
+        coroutine.wait(0.1)
+        return
+    end
     local areas = navmesh.GetAllNavAreas()
     local destination
     if #areas > 0 then
@@ -636,6 +654,12 @@ function ENT:RunBehaviour()
             and hg.BZCNNPCSupport.IsGettingUp(self)
         if downed or gettingUp then
             if self.loco then self.loco:SetDesiredSpeed(0) end
+            coroutine.wait(0.1)
+        elseif CurTime() < (self.BZCNMedicalUntil or 0) then
+            if self.loco then
+                self.loco:SetDesiredSpeed(0)
+                if IsValid(self.BZCNMedicalTarget) then self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos()) end
+            end
             coroutine.wait(0.1)
         else
             local enemy = self:HaveEnemy()
