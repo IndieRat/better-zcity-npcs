@@ -113,6 +113,9 @@ function ENT:Initialize()
     timer.Simple(0.1, function()
         if not IsValid(self) then return end
         BZCN.ShowHeldWeapon(self)
+        if BZCN.EquipRuntimeWeapon then
+            BZCN.EquipRuntimeWeapon(self, self.BZCN_SelectedWeapon)
+        end
         if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.Attach then
             hg.BZCNNPCSupport.Attach(self)
         end
@@ -438,9 +441,8 @@ end
 function ENT:PlayBZCNAttackAnimation()
     local sequence = -1
     local profile = self:GetBZCNProfile()
-    local modelClass = hg and hg.IXAnims and isfunction(hg.IXAnims.GetModelClass)
-        and hg.IXAnims.GetModelClass(self:GetModel())
-    local animationClass = modelClass and hg.IXAnims[modelClass]
+    local modelClass = self.GetBZCNAnimationClass and self:GetBZCNAnimationClass()
+    local animationClass = modelClass and hg and hg.IXAnims and hg.IXAnims[modelClass]
     if istable(animationClass) then
         local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass
         local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
@@ -510,6 +512,18 @@ function ENT:AttackTarget(target)
         and distance > (profile.MeleeRange or 78) * 1.25
     if ranged then
         self.LastAttack = now + (profile.AttackDelay or 0.3)
+        self:PlayBZCNAttackAnimation()
+
+        -- Prefer a real Z-City/Homigrad SWEP. Its own NPCShoot_Primary path
+        -- preserves the weapon's timing, ammo, sound, spread and damage code.
+        -- The equipment adapter falls back to that SWEP's stat fields if a
+        -- Player-only method prevents native firing on a NextBot owner.
+        if BZCN and isfunction(BZCN.FireRuntimeWeapon)
+            and BZCN.FireRuntimeWeapon(self, target) then
+            hook.Run("BZCN_NPCFiredFakeWeapon", self, target, nil)
+            return
+        end
+
         local source = self:WorldSpaceCenter() + Vector(0, 0, 8)
         local destination = target:WorldSpaceCenter()
         local trace = util.TraceLine({start = source, endpos = destination, filter = {self}, mask = MASK_SHOT})
@@ -581,7 +595,11 @@ function ENT:ChaseEnemy(target)
         if self:GetPos():DistToSqr(target:GetPos()) < (profile.WeaponRange or 900)^2 then
             self:AttackTarget(target)
         end
-        if self.loco:IsStuck() then self.loco:ClearStuck(); self.loco:Jump(); return end
+        if self.loco:IsStuck() then
+            self.loco:ClearStuck()
+            if not (self.TryBZCNClimb and self:TryBZCNClimb()) then self.loco:Jump() end
+            return
+        end
         coroutine.yield()
     end
 end
