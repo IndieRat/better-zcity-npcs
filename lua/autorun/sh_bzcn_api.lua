@@ -6,7 +6,7 @@ if SERVER then AddCSLuaFile() end
 
 BZCN = BZCN or {}
 BZCN.Classes = BZCN.Classes or {}
-BZCN.Version = "0.1.0"
+BZCN.Version = "0.2.0"
 
 local function CopyTable(value)
     if not istable(value) then return value end
@@ -168,11 +168,13 @@ function BZCN.InstallAdapter(ent)
     end
     data.SetRunSpeed = function(self, speed)
         speed = math.max(tonumber(speed) or 175, 1)
+        -- Speed is per-NPC runtime state; never mutate the shared class template.
         self.BZCNRunSpeed = speed
-        if self.BZCNClassProfile then self.BZCNClassProfile.Speed = speed end
         if self.loco then self.loco:SetDesiredSpeed(speed) end
     end
-    data.GetWalkSpeed = function(self) return self:GetRunSpeed() * 0.55 end
+    data.GetWalkSpeed = function(self)
+        return self.BZCNWalkSpeed or self:GetRunSpeed() * 0.55
+    end
     data.SetWalkSpeed = function(self, speed)
         self.BZCNWalkSpeed = math.max(tonumber(speed) or 95, 1)
     end
@@ -228,13 +230,18 @@ end
 
 function BZCN.ApplyClass(ent, className, resetInventory)
     if not IsValid(ent) or ent:IsPlayer() then return false end
-    local profile = BZCN.GetClass(className)
-    if not profile then return false end
+    -- Keep runtime profile state isolated so one NPC's speed/status edits never
+    -- leak into every entity spawned from the same class definition.
+    local definition = BZCN.GetClass(className)
+    if not definition then return false end
+    local profile = CopyTable(definition)
     BZCN.InstallAdapter(ent)
 
     ent.BZCNManaged = true
     ent.BZCNClass = profile.ClassName
     ent.BZCNClassProfile = profile
+    ent.BZCNRunSpeed = tonumber(profile.Speed) or 175
+    ent.BZCNWalkSpeed = tonumber(profile.WalkSpeed) or ent.BZCNRunSpeed * 0.55
     ent.PlayerClassName = profile.PlayerClassName
     ent.IsFurry = profile.ClassName == "furry"
     ent.IsOrganism = true
@@ -317,7 +324,6 @@ function BZCN.ChangeClass(ent, className, heal)
     local profile = BZCN.GetClass(className)
     BZCN.HideHeldWeapon(ent)
     if isstring(profile.Model) and util.IsValidModel(profile.Model) then ent:SetModel(profile.Model) end
-    ent.BZCNClassProfile = profile
     if heal ~= false then
         ent:SetHealth(profile.Health or 100)
         ent.MaxHealthLimit = profile.Health or 100
@@ -358,7 +364,7 @@ function BZCN.ChangeClass(ent, className, heal)
             end
         end
         BZCN.ShowHeldWeapon(ent)
-        hook.Run("BZCN_NPCClassChanged", ent, className, profile)
+        hook.Run("BZCN_NPCClassChanged", ent, className, ent.BZCNClassProfile)
     end
     return success
 end
