@@ -36,7 +36,7 @@ function ENT:Initialize()
     BZCN.ApplyClass(self, className, true)
     self.BZCNClassProfile = profile
     self.BZCN_Faction = profile.Faction or className
-    self:CapabilitiesAdd(CAP_MOVE_GROUND)
+    if self.CapabilitiesAdd then self:CapabilitiesAdd(CAP_MOVE_GROUND) end
 
     timer.Simple(0.1, function()
         if not IsValid(self) then return end

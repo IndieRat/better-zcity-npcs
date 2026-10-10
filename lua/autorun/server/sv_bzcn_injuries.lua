@@ -136,6 +136,39 @@ end
 local function SyncEntity(ent, state)
     if not IsValid(ent) then return end
 
+    -- The injury table is authoritative; mirror it into ZCity-style organism
+    -- fields and reference the same organism table from the proxy ragdoll.
+    local owner = state.owner
+    if IsValid(owner) then
+        local org = owner.organism or {}
+        org.blood = state.blood
+        org.maxBlood = state.maxBlood
+        org.bloodtype = org.bloodtype or "unknown"
+        org.pain = state.pain
+        org.shock = state.shock
+        org.skull = state.skull
+        org.brain = state.brain
+        org.chest = state.chest
+        org.pelvis = state.pelvis
+        org.stomach = state.stomach
+        org.spine1 = state.spine1
+        org.spine2 = state.spine2
+        org.spine3 = state.spine3
+        org.larm = state.larm
+        org.rarm = state.rarm
+        org.lleg = state.lleg
+        org.rleg = state.rleg
+        org.heart = state.heart
+        org.liver = state.liver
+        org.intestines = state.intestines
+        org.lungsL = {state.lungsL[1], state.lungsL[2]}
+        org.lungsR = {state.lungsR[1], state.lungsR[2]}
+        org.wounds = state.wounds
+        org.arterialwounds = state.arterialwounds
+        owner.organism = org
+        ent.organism = org
+    end
+
     SetNWFloat(ent, "GooberNPCHealth", state.health)
     SetNWFloat(ent, "GooberNPCMaxHealth", state.maxHealth)
     SetNWFloat(ent, "GooberNPCBlood", state.blood)
@@ -464,7 +497,13 @@ local function ClearDownedState(owner, restoreEntity)
 
     if IsValid(rag) then
         rag.GooberNPCOwner = nil
+        rag.Player = nil
         if rag.SetNW2Entity then rag:SetNW2Entity("GooberNPCOwner", NULL) end
+        rag:SetNWEntity("GooberNPCOwner", NULL)
+        rag:SetNWEntity("RagdollOwner", NULL)
+        if owner.ragdoll == rag then owner.ragdoll = nil end
+        owner:SetNWEntity("FakeRagdoll", NULL)
+        owner:SetNWEntity("ragdoll", NULL)
         rag:Remove()
     end
 
@@ -552,7 +591,13 @@ local function Recover(owner, rag, removedExternally)
 
     if IsValid(rag) then
         rag.GooberNPCOwner = nil
+        rag.Player = nil
         if rag.SetNW2Entity then rag:SetNW2Entity("GooberNPCOwner", NULL) end
+        rag:SetNWEntity("GooberNPCOwner", NULL)
+        rag:SetNWEntity("RagdollOwner", NULL)
+        if owner.ragdoll == rag then owner.ragdoll = nil end
+        owner:SetNWEntity("FakeRagdoll", NULL)
+        owner:SetNWEntity("ragdoll", NULL)
         rag:Remove()
     end
 
@@ -603,9 +648,15 @@ local function EnterDownedState(owner, reason)
     owner.GooberNPCDowned = true
     owner.GooberNPCRagdoll = rag
     rag.GooberNPCOwner = owner
+    rag.Player = owner
     rag.GooberNPCOrg = state
+    rag.organism = owner.organism
     rag:SetNWEntity("GooberNPCOwner", owner)
+    rag:SetNWEntity("RagdollOwner", owner)
     if rag.SetNW2Entity then rag:SetNW2Entity("GooberNPCOwner", owner) end
+    owner.ragdoll = rag
+    owner:SetNWEntity("FakeRagdoll", rag)
+    owner:SetNWEntity("ragdoll", rag)
     SyncEntity(rag, state)
 
     rag:CallOnRemove("GooberNPCSupport_ExternalRemoval", function(removed)

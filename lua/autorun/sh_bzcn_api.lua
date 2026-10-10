@@ -87,6 +87,8 @@ function BZCN.SetNetVar(ent, key, value)
     local data = ent:GetTable()
     data.BZCN_NetVars = data.BZCN_NetVars or {}
     data.BZCN_NetVars[key] = value
+    if key == "Inventory" then ent.Inventory = value end
+    if key == "Armor" then ent.armors = value end
     SyncNetVar(ent, key, value)
     return value
 end
@@ -181,6 +183,7 @@ function BZCN.ApplyClass(ent, className, resetInventory)
         ent:SetNW2String("BZCNClass", profile.ClassName)
         ent:SetNW2String("PlayerClassName", profile.PlayerClassName)
         ent:SetNW2String("BZCNDisplayName", profile.Name or profile.ClassName)
+        if ent.SetNWString then ent:SetNWString("PlayerName", profile.Name or profile.ClassName) end
     end
 
     local inventory = ent:GetNetVar("Inventory")
@@ -189,9 +192,23 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     inventory.Items = inventory.Items or {}
     inventory.Armor = inventory.Armor or {}
     ent:SetNetVar("Inventory", inventory)
+    ent.Inventory = inventory
+    ent.armors = inventory.Armor
+    ent.armors_health = ent.armors_health or {}
+    ent.PlayerName = profile.Name or profile.ClassName
     ent:SetNetVar("Armor", inventory.Armor)
     ent:SetNetVar("BZCNFaction", ent.BZCN_Faction)
     ent:SetNetVar("BZCNClassName", profile.ClassName)
+
+    local selectedWeapon = profile.WeaponClass
+    if not isstring(selectedWeapon) or selectedWeapon == "" or inventory.Weapons[selectedWeapon] == nil then
+        selectedWeapon = nil
+        for weaponClass, owned in pairs(inventory.Weapons) do
+            if owned then selectedWeapon = weaponClass break end
+        end
+    end
+    ent.BZCN_SelectedWeapon = selectedWeapon
+    if SERVER then ent:SetNW2String("BZCNWeaponClass", selectedWeapon or "") end
 
     ent.organism = ent.organism or {
         blood = 5000, maxBlood = 5000, bloodtype = "unknown", pain = 0, shock = 0,
@@ -207,15 +224,16 @@ end
 function BZCN.GetWeaponModel(ent, weaponClass)
     if not IsValid(ent) then return nil end
     weaponClass = weaponClass or ent.BZCN_SelectedWeapon
-    if not isstring(weaponClass) then
+    if not isstring(weaponClass) or weaponClass == "" then
         local inventory = BZCN.GetNetVar(ent, "Inventory", {})
+        weaponClass = nil
         if istable(inventory.Weapons) then
             for key, value in pairs(inventory.Weapons) do
                 if value then weaponClass = key break end
             end
         end
     end
-    if not isstring(weaponClass) then return nil end
+    if not isstring(weaponClass) or weaponClass == "" then return nil end
     local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
     local model = istable(stored) and stored.WorldModel or nil
     if istable(stored) and isfunction(stored.GetWeaponWorldModel) then
@@ -225,6 +243,26 @@ function BZCN.GetWeaponModel(ent, weaponClass)
     if isstring(model) and model ~= "" and string.EndsWith(string.lower(model), ".mdl") then return model end
     local profile = ent.BZCNClassProfile or BZCN.GetClass(ent.BZCNClass or ent.PlayerClassName)
     return profile and profile.WeaponModel or nil
+end
+
+function BZCN.ChangeClass(ent, className, heal)
+    if not IsValid(ent) or not isstring(className) or not BZCN.Classes[className] then return false end
+    local profile = BZCN.GetClass(className)
+    BZCN.HideHeldWeapon(ent)
+    if isstring(profile.Model) and util.IsValidModel(profile.Model) then ent:SetModel(profile.Model) end
+    ent.BZCNClassProfile = profile
+    if heal ~= false then
+        ent:SetHealth(profile.Health or 100)
+        ent.MaxHealthLimit = profile.Health or 100
+        if ent.SetMaxHealth then ent:SetMaxHealth(profile.Health or 100) end
+    end
+    local success = BZCN.ApplyClass(ent, className, true)
+    if success then
+        if ent.loco then ent.loco:SetDesiredSpeed(profile.Speed or 175) end
+        BZCN.ShowHeldWeapon(ent)
+        hook.Run("BZCN_NPCClassChanged", ent, className, profile)
+    end
+    return success
 end
 
 function BZCN.GiveWeapon(ent, weaponClass)
@@ -308,6 +346,26 @@ hook.Add("OnEntityCreated", "BZCN_InstallPlayerAdapter", function(ent)
 end)
 
 if SERVER then
+    concommand.Add("bzcn_npc_set_class", function(ply, _, args)
+        if IsValid(ply) and not ply:IsAdmin() then return end
+        local index = tonumber(args[1])
+        local target = index and Entity(math.floor(index)) or nil
+        local className = args[2]
+        if not IsValid(target) and IsValid(ply) then
+            local trace = ply:GetEyeTrace()
+            target = IsValid(trace.Entity) and trace.Entity or nil
+        end
+        if not IsValid(target) or not BZCN.IsManaged(target) or not BZCN.Classes[className or ""] then
+            local message = "Usage: bzcn_npc_set_class <entity-index> <goober|humanityForces|traitor>"
+            if IsValid(ply) then ply:ChatPrint(message) else print(message) end
+            return
+        end
+        BZCN.ChangeClass(target, className, true)
+        local message = "[BZCN] Changed #" .. target:EntIndex() .. " to " .. className
+        print(message)
+        if IsValid(ply) then ply:ChatPrint(message) end
+    end)
+
     concommand.Add("bzcn_npc_dump", function(ply, _, args)
         if IsValid(ply) and not ply:IsAdmin() then return end
         local index = tonumber(args[1])

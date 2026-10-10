@@ -31,7 +31,7 @@ Aim at an NPC or its temporary ragdoll and run:
 bzcn_npc_health
 ```
 
-Use `bzcn_npc_health <entity-index>` from server console when needed. Check that the NPC reports one health/injury state through both its standing entity and ragdoll, recovers without spawning a duplicate, and resumes AI. Strong hits and severe leg injuries trigger downed/crawl states; model animation names vary, so a model without a crawl sequence uses slowed locomotion instead.
+Use `bzcn_npc_health <entity-index>` from server console when needed. To swap an existing NPC between the three class profiles, run `bzcn_npc_set_class <entity-index> <goober|humanityForces|traitor>`. Check that the NPC reports one health/injury state through both its standing entity and ragdoll, recovers without spawning a duplicate, and resumes AI. Strong hits and severe leg injuries trigger downed/crawl states; model animation names vary, so a model without a crawl sequence uses slowed locomotion instead.
 
 For compatibility checks from the server console:
 
