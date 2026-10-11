@@ -155,6 +155,31 @@ local function DecodeNetworkTable(value, depth, seen)
     return out
 end
 
+local function NormalizeInventoryWeaponValues(inventory)
+    if not istable(inventory) or not istable(inventory.Weapons) then return inventory end
+    for class, value in pairs(inventory.Weapons) do
+        -- In Z-City's loot transfer routine, a truthy weapon value is passed
+        -- to SWEP:SetInfo(). Use the SWEP's own default info table instead of
+        -- boolean true for real weapons; reserve true for genuine virtual items.
+        if value == true and isstring(class) and weapons and weapons.GetStored then
+            local definition = weapons.GetStored(class)
+            if istable(definition) then
+                local info
+                if isfunction(definition.GetInfo) then
+                    local ok, result = pcall(definition.GetInfo, definition)
+                    if ok and istable(result) then info = result end
+                end
+                if info then
+                    inventory.Weapons[class] = info
+                elseif isfunction(definition.SetInfo) then
+                    inventory.Weapons[class] = {}
+                end
+            end
+        end
+    end
+    return inventory
+end
+
 local function SyncNetVar(ent, key, value)
     if not SERVER or not IsValid(ent) or not ent.SetNW2String then return end
     local kind = type(value)
@@ -177,6 +202,9 @@ end
 
 function BZCN.SetNetVar(ent, key, value)
     if not IsValid(ent) or not isstring(key) then return end
+    if key == "Inventory" and istable(value) then
+        NormalizeInventoryWeaponValues(value)
+    end
     local data = ent:GetTable()
     data.BZCN_NetVars = data.BZCN_NetVars or {}
     data.BZCN_NetVars[key] = value
