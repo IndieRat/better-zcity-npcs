@@ -329,6 +329,11 @@ function BZCN.InstallAdapter(ent)
         return BZCN.GetNetVar(self, key, default)
     end
     data.SetNetVar = function(self, key, value)
+        -- Normalize before Z-City's delta-netvar writer as well as the BZCN
+        -- cache. Otherwise the client UI receives 'true' before the real info.
+        if key == "Inventory" and istable(value) then
+            NormalizeInventoryWeaponValues(value)
+        end
         if isfunction(nativeSetNetVar) then
             pcall(nativeSetNetVar, self, key, value)
         end
