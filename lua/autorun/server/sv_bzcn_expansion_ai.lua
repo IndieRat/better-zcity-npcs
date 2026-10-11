@@ -134,6 +134,13 @@ Companion.GetOwner = GetCompanionOwner
 
 local function SetOrder(ent, order, position)
     if not Managed(ent) or not Profile(ent).Companion then return false end
+    if order ~= "fetch" and istable(ent.BZCNCompanionCarry) then
+        local carry = ent.BZCNCompanionCarry
+        if IsValid(carry.weapon) and isfunction(carry.weapon.SetCarrying) then
+            pcall(carry.weapon.SetCarrying, carry.weapon)
+        end
+        ent.BZCNCompanionCarry = nil
+    end
     ent.BZCNCompanionOrder = order
     ent.BZCNCompanionOrderUntil = CurTime() + 45
     ent.BZCNCompanionOrderPos = isvector(position) and position or nil
@@ -273,8 +280,10 @@ hook.Add("PlayerSay", "BZCN_CompanionTextOrders", function(ply, text)
     if not isstring(text) then return end
     local command = string.lower(string.Trim(text))
     local order = string.match(command, "^/?companion%s+(%a+)$")
-    if not order or not table.HasValue({"follow", "hold", "cover", "guard", "sit"}, order) then return end
+    if not order or not table.HasValue({"follow", "hold", "cover", "guard", "sit", "carry", "fetch", "drop"}, order) then return end
     if order == "guard" then order = "cover" end
+    if order == "carry" then order = "fetch" end
+    if order == "drop" then order = "follow" end
     for _, ent in ipairs(ents.FindInSphere(ply:GetPos(), 1800)) do
         if GetCompanionOwner(ent) == ply then SetOrder(ent, order) end
     end
@@ -395,6 +404,78 @@ function Companion.RunIdleTask(ent)
         coroutine.wait(0.3)
         return true
     end
+    if order == "fetch" then
+        local state = ent.BZCNCompanionCarry
+        if not istable(state) or not IsValid(state.object) or not IsValid(state.weapon) then
+            ent.BZCNCompanionCarry = nil
+            local function CanCarryObject(object)
+                if not IsValid(object) or object:IsPlayer() or object:IsNPC()
+                    or (object.IsNextBot and object:IsNextBot()) then return false end
+                local class = string.lower(object:GetClass() or "")
+                if class == "prop_ragdoll" or string.find(class, "weapon_", 1, true)
+                    or object.dontPickup or (object.IsPlayerHolding and object:IsPlayerHolding()) then return false end
+                if not table.HasValue({"prop_physics", "prop_physics_multiplayer", "prop_physics_override", "func_physbox"}, class)
+                    and not (isfunction(object.GetPhysicsObject) and IsValid(object:GetPhysicsObject())) then return false end
+                local phys = isfunction(object.GetPhysicsObject) and object:GetPhysicsObject() or nil
+                return IsValid(phys) and phys:GetMass() <= 45
+            end
+            local candidate, bestDistance
+            local searchRoots = {owner:GetPos(), ent:GetPos()}
+            for _, root in ipairs(searchRoots) do
+                for _, object in ipairs(ents.FindInSphere(root, 310)) do
+                    if object == ent or object == owner or not CanCarryObject(object) then continue end
+                    if object.GetOwner and IsValid(object:GetOwner()) then continue end
+                    local phys = object:GetPhysicsObject()
+                    if not IsValid(phys) then continue end
+                    local distance = ent:GetPos():DistToSqr(object:GetPos())
+                    if not bestDistance or distance < bestDistance then candidate, bestDistance = object, distance end
+                end
+                if IsValid(candidate) then break end
+            end
+            if IsValid(candidate) and BZCN.GetRuntimeMeleeWeapon then
+                local weapon = BZCN.GetRuntimeMeleeWeapon(ent)
+                local phys = IsValid(candidate) and candidate:GetPhysicsObject() or nil
+                if IsValid(weapon) and IsValid(phys) then
+                    local distance = math.Clamp(ent:EyePos():Distance(phys:GetPos()), 24, 56)
+                    local ok = pcall(weapon.SetCarrying, weapon, candidate, 0, phys:GetPos(), distance)
+                    if ok then
+                        state = {object = candidate, weapon = weapon, bone = 0}
+                        ent.BZCNCompanionCarry = state
+                        hook.Run("BZCN_CompanionPickedUpObject", ent, candidate)
+                    end
+                end
+            end
+        end
+
+        state = ent.BZCNCompanionCarry
+        if istable(state) and IsValid(state.object) then
+            if ent:GetPos():DistToSqr(owner:GetPos()) > 145 * 145 then
+                local away = ent:GetPos() - owner:GetPos()
+                away.z = 0
+                if away:LengthSqr() < 1 then away = owner:GetForward() * -1 end
+                away:Normalize()
+                local point = owner:GetPos() + away * 95
+                local path = Path("Follow")
+                path:SetMinLookAheadDistance(95)
+                path:SetGoalTolerance(55)
+                path:Compute(ent, point)
+                if path:IsValid() then
+                    ent.loco:SetDesiredSpeed((tonumber(p.Speed) or 175) * 0.58)
+                    path:Update(ent)
+                elseif ent.TryBZCNClimb then
+                    ent:TryBZCNClimb()
+                end
+            else
+                ent.loco:SetDesiredSpeed(0)
+                ent.loco:FaceTowards(owner:GetPos())
+            end
+        else
+            ent.loco:SetDesiredSpeed(0)
+        end
+        coroutine.wait(0.2)
+        return true
+    end
+
     if order == "cover" then
         local away = ent:GetPos() - owner:GetPos()
         away.z = 0
