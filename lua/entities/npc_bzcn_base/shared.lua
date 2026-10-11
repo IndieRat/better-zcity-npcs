@@ -391,10 +391,14 @@ function ENT:BodyUpdate()
 
     if state == "combat_prone" then
         if self.loco then self.loco:SetDesiredSpeed(0) end
-        local sequence = GetFirstSequence(self, {
-            "prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle",
-            "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"
-        })
+        local sequence = tonumber(self.BZCNCombatProneSequence) or -1
+        if sequence < 0 then
+            sequence = GetFirstSequence(self, {
+                "prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle",
+                "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"
+            })
+            self.BZCNCombatProneSequence = sequence
+        end
         if sequence >= 0 and self:GetSequence() ~= sequence then
             self:ResetSequence(sequence)
             self:SetCycle(0)
