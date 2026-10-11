@@ -277,6 +277,7 @@ hook.Add("PlayerSay", "BZCN_CompanionTextOrders", function(ply, text)
     for _, ent in ipairs(ents.FindInSphere(ply:GetPos(), 1800)) do
         if GetCompanionOwner(ent) == ply then SetOrder(ent, order) end
     end
+    return ""
 end)
 
 function Companion.RunSquadTask(ent)
@@ -467,7 +468,11 @@ hook.Add("BZCN_PlayerYellForHelp", "BZCN_PlayerRescueResponse", function(ply)
     for _, helper in ipairs(ents.FindInSphere(ply:GetPos(), 1050)) do
         if not Managed(helper) then continue end
         local kind, p = LineKind(helper), Profile(helper)
-        if not p.Companion and kind ~= "rebel" and not (kind == "metrocop" and helper.BZCNCopMood == "good") then continue end
+        local friendly = isfunction(helper.IsBZCNAlly) and helper:IsBZCNAlly(ply)
+        local willingArmed = IsArmed(helper) and friendly
+        if not p.Companion and kind ~= "rebel"
+            and not (kind == "metrocop" and helper.BZCNCopMood == "good")
+            and not willingArmed then continue end
         helper.BZCNHelpTarget = ply
         helper.BZCNHelpUntil = CurTime() + 18
         if helper.SetNW2Entity then helper:SetNW2Entity("BZCNHelpTarget", ply) end
@@ -477,9 +482,14 @@ end)
 
 hook.Add("BZCN_PlayerPhrase", "BZCN_HeardPlayerHelp", function(ply, signal)
     signal = string.lower(tostring(signal or ""))
-    if string.find(signal, "help", 1, true) then hook.Run("BZCN_PlayerYellForHelp", ply) end
+    if string.find(signal, "help", 1, true) or string.find(signal, "medic", 1, true)
+        or string.find(signal, "backup", 1, true) or string.find(signal, "assist", 1, true) then
+        hook.Run("BZCN_PlayerYellForHelp", ply)
+    end
     if string.find(signal, "help", 1, true) or string.find(signal, "panic", 1, true)
-        or string.find(signal, "yell", 1, true) or string.find(signal, "runforyourlife", 1, true) then
+        or string.find(signal, "yell", 1, true) or string.find(signal, "pain", 1, true)
+        or string.find(signal, "scream", 1, true) or string.find(signal, "startle", 1, true)
+        or string.find(signal, "runforyourlife", 1, true) then
         for _, ent in ipairs(ents.FindInSphere(ply:GetPos(), 600)) do
             if Managed(ent) and (LineKind(ent) == "civilian" or IsFurry(ent)) then
                 BeginPanic(ent, ply, math.Rand(3, 5))
