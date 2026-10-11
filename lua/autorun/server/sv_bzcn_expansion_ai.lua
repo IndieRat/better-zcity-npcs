@@ -68,6 +68,7 @@ local LINES = {
 local function LineKind(ent)
     local cls = ClassName(ent)
     local faction = string.lower(Faction(ent))
+    if ent.BZCNGoodCopDefected then return "rebel" end
     if cls == "headcrab" then return "headcrab" end
     if cls == "headcrab_zombie" or faction == "zombie" then return "zombie" end
     if cls == "metrocop" or cls == "police" then return "metrocop" end
