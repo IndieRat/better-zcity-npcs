@@ -1312,6 +1312,13 @@ function ENT:ChaseEnemy(target)
                     if pounceTarget.loco then
                         pcall(pounceTarget.loco.SetVelocity, pounceTarget.loco, direction * 170 + Vector(0, 0, 90))
                     end
+                    -- The attacker commits to the tackle too: transition into
+                    -- Z-City's fake-ragdoll/downed lifecycle on impact rather
+                    -- than remaining upright and skating through the victim.
+                    if isfunction(support and support.EnterDownedState)
+                        and not self:GetNW2Bool("BZCNNPCDowned", false) then
+                        pcall(support.EnterDownedState, self, "furry_pounce")
+                    end
                     hook.Run("BZCN_FurryPounceImpact", self, pounceTarget, impactPos)
                     self.BZCNNPCPounce = nil
                     self.BZCNNextPounceAt = now + 2.8
@@ -1372,15 +1379,59 @@ function ENT:ChaseEnemy(target)
         end
 
         if self.BZCNFurryGrab then
-            local grabbedTarget = self.BZCNFurryGrab.target
+            local grabState = self.BZCNFurryGrab
+            local grabbedTarget = grabState.target
             local stillHolding = IsValid(grabbedTarget) and BZCN
                 and isfunction(BZCN.TryFurryAssimilation)
                 and BZCN.TryFurryAssimilation(self, grabbedTarget)
-            self.loco:SetDesiredSpeed(0)
-            if IsValid(grabbedTarget) then self.loco:FaceTowards(grabbedTarget:GetPos()) end
             if stillHolding then
+                local now = CurTime()
+                if not isvector(grabState.deliveryPos) or now >= (grabState.nextDeliverySearch or 0) then
+                    grabState.nextDeliverySearch = now + 2
+                    local center, count, nearestDistance = Vector(0, 0, 0), 0, math.huge
+                    for _, other in ipairs(ents.FindInSphere(self:GetPos(), 1100)) do
+                        if other == self or not IsValid(other) or other:Health() <= 0 then continue end
+                        local isFurry = other:IsPlayer()
+                            and string.lower(tostring(other.PlayerClassName
+                                or (other.GetNW2String and other:GetNW2String("PlayerClassName", "")) or "")) == "furry"
+                        if BZCN.IsManaged(other) then
+                            local otherProfile = other.BZCNClassProfile or {}
+                            isFurry = isFurry or otherProfile.FurryStyle == true
+                                or string.lower(tostring(other.BZCNClass or "")) == "furry"
+                                or string.lower(tostring(other.BZCN_Faction or "")) == "furry"
+                        end
+                        if not isFurry then continue end
+                        local distance = self:GetPos():DistToSqr(other:GetPos())
+                        if distance < nearestDistance then nearestDistance = distance end
+                        center = center + other:GetPos()
+                        count = count + 1
+                    end
+                    if count > 0 then
+                        center = center / count
+                        local away = self:GetPos() - center
+                        away.z = 0
+                        if away:LengthSqr() < 1 then away = self:GetForward() end
+                        away:Normalize()
+                        grabState.deliveryPos = center + away * 105
+                    else
+                        grabState.deliveryPos = nil
+                    end
+                end
+
+                local destination = grabState.deliveryPos
+                if isvector(destination) and self:GetPos():DistToSqr(destination) > 90 * 90 then
+                    self.loco:SetDesiredSpeed(math.min(tonumber(self.BZCNClassProfile and self.BZCNClassProfile.Speed) or 175, 105))
+                    self.loco:Approach(destination, 0.45)
+                    self.loco:FaceTowards(destination)
+                else
+                    self.loco:SetDesiredSpeed(0)
+                    if IsValid(grabbedTarget) then self.loco:FaceTowards(grabbedTarget:GetPos()) end
+                end
                 coroutine.wait(0.1)
                 continue
+            end
+            if self.BZCNFurryGrab and BZCN and isfunction(BZCN.StopFurryAssimilation) then
+                BZCN.StopFurryAssimilation(self)
             end
         end
 
@@ -1658,9 +1709,6 @@ function ENT:RunBehaviour()
         if downed or gettingUp then
             if self.loco then self.loco:SetDesiredSpeed(0) end
             coroutine.wait(0.1)
-        elseif CurTime() < (self.BZCNSittingUntil or 0) then
-            if self.loco then self.loco:SetDesiredSpeed(0) end
-            coroutine.wait(0.1)
         elseif swimming then
             local enemy = self:HaveEnemy()
             local targetPoint
@@ -1702,7 +1750,14 @@ function ENT:RunBehaviour()
                 if IsValid(self.BZCNMedicalTarget) then self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos()) end
             end
             coroutine.wait(0.1)
-        elseif IsValid(self.BZCNFleeThreat) and (self.BZCNFleeUntil or 0) > CurTime() then
+        elseif IsValid(self.BZCNFleeThreat) and (self.BZCNFleeUntil or 0) > CurTime()
+            and not (self:GetBZCNProfile().Faction == "civilian"
+                and (self:GetBZCNProfile().Ranged == true
+                    or (isstring(self.BZCN_SelectedWeapon) and self.BZCN_SelectedWeapon ~= ""
+                        and self.BZCN_SelectedWeapon ~= "weapon_hands_sh"
+                        and self.BZCN_SelectedWeapon ~= "weapon_medkit_sh"
+                        and self.BZCN_SelectedWeapon ~= "weapon_bandage_sh"
+                        and self.BZCN_SelectedWeapon ~= "weapon_bigbandage_sh"))) then
             local threat = self.BZCNFleeThreat
             if self.loco and IsValid(threat) then
                 local away = self:GetPos() - threat:GetPos()
