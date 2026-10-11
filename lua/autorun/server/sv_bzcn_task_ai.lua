@@ -151,6 +151,7 @@ local function NavPoint(ent, desired, radius)
 end
 
 local function TryOpenTaskDoor(ent, destination)
+    if BZCN.RuleEnabled and not BZCN.RuleEnabled("door_interaction") then return false end
     if not IsValid(ent) or not isvector(destination) then return false end
     local startPos = ent:WorldSpaceCenter()
     local trace = util.TraceHull({
