@@ -1250,7 +1250,8 @@ function ENT:ChaseEnemy(target)
         if istable(self.BZCNNPCPounce) then
             local pounce = self.BZCNNPCPounce
             if IsValid(pounce.target) and now <= (pounce.expires or 0) then
-                self.loco:SetDesiredSpeed(0)
+                -- Leave locomotion speed untouched: the launch velocity is
+                -- physics-driven, and setting speed to zero would brake pounces.
                 coroutine.wait(0.05)
                 continue
             end
