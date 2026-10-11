@@ -1763,48 +1763,18 @@ hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", function(ent)
     end)
 end)
 
+local InstallPhysicsShockCallback
+
 hook.Add("InitPostEntity", "BZCNNPCSupport_Existing", function()
     timer.Simple(0.1, function()
         for _, ent in ipairs(ents.GetAll()) do
             if IsSupportedNPC(ent) then Support.Attach(ent) end
-            if IsValid(ent) then
-                local class = ent:GetClass()
-                if class == "prop_physics" or class == "prop_physics_override"
-                    or class == "prop_physics_multiplayer" or class == "prop_physics_respawnable" then
-                    timer.Simple(0.05, function()
-                        if not IsValid(ent) or ent.BZCNNPCPhysicsShockInstalled then return end
-                        local phys = ent:GetPhysicsObject()
-                        if not IsValid(phys) then return end
-                        ent.BZCNNPCPhysicsShockInstalled = true
-                        ent:AddCallback("PhysicsCollide", function(prop, data)
-                            if not IsValid(prop) or not istable(data) or not IsValid(data.HitEntity) then return end
-                            if isfunction(prop.IsPlayerHolding) and prop:IsPlayerHolding() then return end
-                            if data.HitEntity:GetClass() == "prop_ragdoll"
-                                and not ResolveNPC(data.HitEntity) then return end
-                            local physics = prop:GetPhysicsObject()
-                            if not IsValid(physics) then return end
-                            local mass = physics:GetMass()
-                            local velocity = physics:GetVelocity()
-                            local speed = tonumber(data.Speed) or velocity:Length()
-                            if mass <= 20 or speed <= math.max(700 - mass, 200)
-                                or velocity:Length() <= 50 then return end
-                            local victim = ResolvePhysicalVictim(data.HitEntity)
-                            if not IsSupportedNPC(victim) or not IsAlive(victim) then return end
-                            local direction = velocity:GetNormalized()
-                            local impulse = math.Clamp(speed * mass * 0.8, 2200, 18000)
-                            Support.ApplyPhysicalImpact(victim, prop,
-                                isvector(data.HitPos) and data.HitPos or victim:WorldSpaceCenter(),
-                                direction, impulse, "physics_shock", 2.1)
-                            hook.Run("BZCNNPC_PhysicsShock", prop, victim, data)
-                        end)
-                    end)
-                end
-            end
+            if IsValid(ent) then InstallPhysicsShockCallback(ent) end
         end
     end)
 end)
 
-local function InstallPhysicsShockCallback(ent)
+InstallPhysicsShockCallback = function(ent)
     if not IsValid(ent) or ent.BZCNNPCPhysicsShockInstalled then return end
     local class = ent:GetClass()
     if class ~= "prop_physics" and class ~= "prop_physics_override"
@@ -1834,6 +1804,14 @@ local function InstallPhysicsShockCallback(ent)
     end)
 end
 
+hook.Add("InitPostEntity", "BZCNNPCSupport_ExistingPhysicsShockProps", function()
+    timer.Simple(0.15, function()
+        for _, ent in ipairs(ents.GetAll()) do
+            InstallPhysicsShockCallback(ent)
+        end
+    end)
+end)
+
 hook.Add("OnEntityCreated", "BZCNNPCSupport_PhysicsShockProps", function(ent)
     timer.Simple(0.05, function() InstallPhysicsShockCallback(ent) end)
 end)
@@ -1846,7 +1824,7 @@ hook.Add("Think", "BZCNNPCSupport_PlayerLegKickBridge", function()
         local previous = tonumber(kickEnds[ply]) or 0
         if endTime > CurTime() and endTime > previous + 0.05 then
             kickEnds[ply] = endTime
-            timer.Simple(0.29, function()
+            timer.Simple(0.32, function()
                 if not IsValid(ply) or not ply:Alive()
                     or not ply.GetNWFloat or ply:GetNWFloat("InLegKick", 0) <= CurTime() then return end
                 local angle = ply:EyeAngles()
