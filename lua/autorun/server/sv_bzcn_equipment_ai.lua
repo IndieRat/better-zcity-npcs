@@ -96,7 +96,22 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     weapon:SetMoveType(MOVETYPE_NONE)
     weapon:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
     weapon.BZCNRuntimeOwner = owner
-    owner:DeleteOnRemove(weapon)
+    owner.BZCNRuntimeWeapons = owner.BZCNRuntimeWeapons or setmetatable({}, {__mode = "k"})
+    owner.BZCNRuntimeWeapons[weapon] = true
+    if not owner.BZCNRuntimeCleanupInstalled and isfunction(owner.CallOnRemove) then
+        owner.BZCNRuntimeCleanupInstalled = true
+        owner:CallOnRemove("BZCN_RuntimeWeaponCleanup", function(removedOwner)
+            for runtimeWeapon in pairs(removedOwner.BZCNRuntimeWeapons or {}) do
+                if not IsValid(runtimeWeapon) then continue end
+                local runtimeOwner = runtimeWeapon:GetOwner()
+                -- A pickpocket can take this exact entity. Do not delete a gun
+                -- now owned by a player just because its former NPC was removed.
+                if not IsValid(runtimeOwner) or runtimeOwner == removedOwner then
+                    runtimeWeapon:Remove()
+                end
+            end
+        end)
+    end
 
     if not MEDICAL_WEAPONS[class] then
         -- The actor invokes fire on its own cadence. Do not run a Player input
