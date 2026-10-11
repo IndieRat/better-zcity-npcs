@@ -607,7 +607,42 @@ function BZCN.ChangeClass(ent, className, heal)
     if ent.GetNW2Bool and ent:GetNW2Bool("BZCNNPCDowned", false) then return false end
     local profile = BZCN.GetClass(className)
     BZCN.HideHeldWeapon(ent)
-    if isstring(profile.Model) and util.IsValidModel(profile.Model) then ent:SetModel(profile.Model) end
+
+    local oldModel = ent:GetModel()
+    if isstring(profile.Model) and util.IsValidModel(profile.Model) then
+        ent:SetModel(profile.Model)
+    end
+    local modelChanged = oldModel ~= ent:GetModel()
+    local resetAppearance = modelChanged or profile.FurryStyle == true
+
+    if resetAppearance then
+        -- Changing class reuses the same entity, so clear per-entity overrides
+        -- from the previous model before applying the new model's own appearance.
+        if ent.SetMaterial then ent:SetMaterial("") end
+        if ent.SetColor then ent:SetColor(Color(255, 255, 255, 255)) end
+        if ent.SetBodygroup and ent.GetBodyGroups then
+            for _, group in ipairs(ent:GetBodyGroups() or {}) do
+                if isnumber(group.id) then ent:SetBodygroup(group.id, 0) end
+            end
+        end
+        if ent.SetSubMaterial then
+            for index = 0, 31 do pcall(ent.SetSubMaterial, ent, index, nil) end
+        end
+    end
+
+    local skinCount = isfunction(ent.SkinCount) and tonumber(ent:SkinCount()) or 1
+    local requestedSkin = math.floor(tonumber(profile.Skin) or 0)
+    ent:SetSkin(math.Clamp(requestedSkin, 0, math.max(skinCount - 1, 0)))
+    if profile.FurryStyle and ent.GetBodyGroups and ent.SetBodygroup then
+        for _, group in ipairs(ent:GetBodyGroups() or {}) do
+            if group.id == 1 and (tonumber(group.num) or 0) > 1 then
+                local selected = math.random(0, group.num - 1)
+                if selected == 1 then selected = 0 end
+                ent:SetBodygroup(1, selected)
+            end
+        end
+    end
+
     ent.MaxHealthLimit = profile.Health or 100
     if ent.SetMaxHealth then ent:SetMaxHealth(profile.Health or 100) end
     if heal ~= false then
@@ -649,12 +684,18 @@ function BZCN.ChangeClass(ent, className, heal)
                 if healthState.arterialwounds then table.Empty(healthState.arterialwounds) end
             end
         end
+        if istable(ent.organism) then
+            ent.organism.bloodtype = profile.BloodType or ent.organism.bloodtype
+            ent.organism.otrub = false
+            ent.organism.needotrub = false
+            ent.organism.fake = false
+            ent.organism.needfake = false
+        end
         BZCN.ShowHeldWeapon(ent)
         hook.Run("BZCN_NPCClassChanged", ent, className, ent.BZCNClassProfile)
     end
     return success
 end
-
 function BZCN.GiveWeapon(ent, weaponClass)
     if not IsValid(ent) or not isstring(weaponClass) or weaponClass == "" then return false end
     local inventory = ent:GetNetVar("Inventory", {Weapons = {}, Items = {}, Armor = {}})

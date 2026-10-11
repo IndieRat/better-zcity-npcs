@@ -16,6 +16,7 @@ local function IsSupportedNPC(ent)
 end
 
 local tracked = setmetatable({}, {__mode = "k"})
+local InstallManagedTakeDamageInfoGuard
 
 local function SetNWFloat(ent, key, value)
     if not IsValid(ent) or not ent.SetNW2Float then return end
@@ -70,6 +71,64 @@ if not SERVER then return end
 
 local function IsAlive(ent)
     return IsValid(ent) and ent:Health() > 0
+end
+
+local function FinalizeManagedNPCDeath(owner, sourceDamage)
+    if not IsValid(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner))
+        or owner:Health() > 0 or owner.BZCNDeathHandled then
+        return false
+    end
+
+    local fatalInfo = DamageInfo()
+    fatalInfo:SetDamage(math.max(tonumber(sourceDamage and sourceDamage:GetDamage()) or 0, 0))
+    fatalInfo:SetDamageType(sourceDamage and sourceDamage:GetDamageType() or DMG_GENERIC)
+    if sourceDamage then
+        fatalInfo:SetDamagePosition(sourceDamage:GetDamagePosition())
+        fatalInfo:SetDamageForce(sourceDamage:GetDamageForce())
+    end
+    local attacker = sourceDamage and sourceDamage:GetAttacker() or nil
+    local inflictor = sourceDamage and sourceDamage:GetInflictor() or nil
+    fatalInfo:SetAttacker(IsValid(attacker) and attacker or game.GetWorld())
+    fatalInfo:SetInflictor(IsValid(inflictor) and inflictor or game.GetWorld())
+
+    if isfunction(owner.OnKilled) then
+        local ok = pcall(owner.OnKilled, owner, fatalInfo)
+        if ok then return true end
+    end
+    owner:SetHealth(0)
+    owner:Remove()
+    return true
+end
+
+local function QueueManagedNPCDeathCheck(ent, sourceDamage)
+    local owner = ResolveNPC(ent)
+    if not IsValid(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner))
+        or owner.BZCNDeathHandled or owner.BZCNNPCDeathCheckQueued then
+        return
+    end
+
+    owner.BZCNNPCDeathCheckQueued = true
+    local amount = sourceDamage and tonumber(sourceDamage:GetDamage()) or 0
+    local damageType = sourceDamage and sourceDamage:GetDamageType() or DMG_GENERIC
+    local hitPos = sourceDamage and sourceDamage:GetDamagePosition() or owner:WorldSpaceCenter()
+    local hitForce = sourceDamage and sourceDamage:GetDamageForce() or vector_origin
+    local attacker = sourceDamage and sourceDamage:GetAttacker() or nil
+    local inflictor = sourceDamage and sourceDamage:GetInflictor() or nil
+
+    timer.Simple(0, function()
+        if not IsValid(owner) then return end
+        owner.BZCNNPCDeathCheckQueued = nil
+        if owner:Health() > 0 or owner.BZCNDeathHandled then return end
+
+        local snapshot = DamageInfo()
+        snapshot:SetDamage(math.max(tonumber(amount) or 0, 0))
+        snapshot:SetDamageType(damageType or DMG_GENERIC)
+        snapshot:SetDamagePosition(hitPos)
+        snapshot:SetDamageForce(hitForce)
+        snapshot:SetAttacker(IsValid(attacker) and attacker or game.GetWorld())
+        snapshot:SetInflictor(IsValid(inflictor) and inflictor or game.GetWorld())
+        FinalizeManagedNPCDeath(owner, snapshot)
+    end)
 end
 
 local function NewHealthTable(ent)
@@ -381,6 +440,7 @@ function Support.Attach(ent)
         state.usesZCityOrganism = nativeReady == true
         PullZCityOrganism(ent, state)
     end
+    if InstallManagedTakeDamageInfoGuard then InstallManagedTakeDamageInfoGuard(ent) end
 
     tracked[ent] = state
     SyncEntity(ent, state)
@@ -686,6 +746,31 @@ local function ClearDownedState(owner, restoreEntity)
     SyncEntity(owner, state)
 end
 
+local function CanRecoverFromZCityOrganism(owner, state)
+    if not IsValid(owner) or not state or not state.usesZCityOrganism then return true end
+    local org = owner.organism
+    if not istable(org) then return true end
+
+    -- Match Z-City's own fake-up restrictions. If physiology still says the
+    -- body is unconscious, unable to move, critically blood-depleted, or fake-
+    -- ragdolled, keep it down rather than looping up/down every tick.
+    if org.otrub or org.needotrub or org.fake or org.needfake then return false end
+    local thresholds = hg and hg.organism or {}
+    if (tonumber(org.spine1) or 0) >= (tonumber(thresholds.fake_spine1) or math.huge)
+        or (tonumber(org.spine2) or 0) >= (tonumber(thresholds.fake_spine2) or math.huge)
+        or (tonumber(org.spine3) or 0) >= (tonumber(thresholds.fake_spine3) or math.huge) then
+        return false
+    end
+    if (tonumber(org.stun) or 0) > CurTime() then return false end
+    if (tonumber(org.blood) or 5000) < 2900 then return false end
+    if org.consciousness ~= nil and (tonumber(org.consciousness) or 0) <= 0.4 then return false end
+    if (tonumber(org.lleg) or 0) >= 1 and (tonumber(org.rleg) or 0) >= 1
+        and (tonumber(org.berserk) or 0) <= 0.3 then
+        return false
+    end
+    return true
+end
+
 local function Recover(owner, rag, removedExternally)
     if not IsAlive(owner) then return end
     local state = owner.BZCNNPCOrg
@@ -709,6 +794,16 @@ local function Recover(owner, rag, removedExternally)
         end
     end
 
+    if not removedExternally and not CanRecoverFromZCityOrganism(owner, state) then
+        local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
+        state.recoverTimer = timerName
+        timer.Create(timerName, 0.75, 1, function()
+            if not IsAlive(owner) or owner.BZCNNPCOrg ~= state or not state.downed then return end
+            Recover(owner, owner.BZCNNPCRagdoll, false)
+        end)
+        return false
+    end
+
     local position, angles
     if IsValid(rag) then
         position, angles = FindStandPosition(owner, rag)
@@ -722,6 +817,14 @@ local function Recover(owner, rag, removedExternally)
     owner.BZCNNPCDowned = false
     owner.BZCNNPCRagdoll = nil
     RestoreRagdollWeapon(state)
+
+    if state.usesZCityOrganism and istable(owner.organism) then
+        owner.organism.otrub = false
+        owner.organism.needotrub = false
+        owner.organism.fake = false
+        owner.organism.needfake = false
+        owner.organism.alive = owner:Health() > 0
+    end
 
     owner:SetPos(position)
     owner:SetAngles(Angle(0, angles.y, 0))
@@ -930,6 +1033,44 @@ end
 
 Support.EnterDownedState = EnterDownedState
 Support.Recover = Recover
+
+InstallManagedTakeDamageInfoGuard = function(owner)
+    if not IsValid(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return false end
+    local data = owner:GetTable()
+    if data.BZCNNPCTakeDamageInfoGuardInstalled then return true end
+    local nativeTakeDamageInfo = owner.TakeDamageInfo
+    if not isfunction(nativeTakeDamageInfo) then return false end
+
+    data.BZCNNPCTakeDamageInfoGuardInstalled = true
+    data.BZCNNPCNativeTakeDamageInfo = nativeTakeDamageInfo
+    data.TakeDamageInfo = function(self, damageInfo)
+        if IsValid(self) and BZCN and BZCN.IsManaged and BZCN.IsManaged(self)
+            and istable(self.organism) and self.organism.fakePlayer == true
+            and damageInfo and isfunction(damageInfo.GetDamage) then
+            local attacker = damageInfo:GetAttacker()
+            local amount = tonumber(damageInfo:GetDamage()) or 0
+            if attacker == self and amount >= 1000 and not self.BZCNDeathHandled then
+                -- Z-City issues a 10,000-damage self-hit for NPCs when it wants
+                -- them to fake-ragdoll. Our NextBots use their own ragdoll bridge;
+                -- allowing that synthetic hit through can make health go negative
+                -- without reliably dispatching OnKilled.
+                timer.Simple(0, function()
+                    if not IsAlive(self) or self.BZCNDeathHandled then return end
+                    local state = Support.Attach(self)
+                    if state and not state.downed then EnterDownedState(self, "shock") end
+                end)
+                return
+            end
+        end
+        return nativeTakeDamageInfo(self, damageInfo)
+    end
+    return true
+end
+
+hook.Add("HomigradDamage", "BZCNNPCSupport_DeathFinalizer", function(ent, damageInfo)
+    if not IsValid(ent) or not damageInfo then return end
+    QueueManagedNPCDeathCheck(ent, damageInfo)
+end)
 
 -- Z-City's shock/knockout path calls hg.Fake(org.owner). Its implementation
 -- is Player-specific, so route only managed NextBots into our organism-aware
@@ -1524,6 +1665,9 @@ end)
 timer.Create("BZCNNPCSupport_StateSync", 0.25, 0, function()
     for ent, state in pairs(tracked) do
         if not IsValid(ent) then
+            tracked[ent] = nil
+        elseif ent:Health() <= 0 then
+            FinalizeManagedNPCDeath(ent, nil)
             tracked[ent] = nil
         else
             state.health = math.max(ent:Health(), 0)
