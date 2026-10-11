@@ -376,7 +376,50 @@ if SERVER then
     end)
 end
 
+function ENT:FindBZCNImpulsePrey()
+    local profile = self:GetBZCNProfile()
+    if not profile or profile.FurryStyle ~= true then return nil end
+
+    local now = CurTime()
+    if now < (self.BZCNNextImpulseScan or 0) then
+        local remembered = self.BZCNImpulseScanTarget
+        if IsValid(remembered) and self:IsBZCNEnemy(remembered) then return remembered end
+    end
+
+    -- The furry's visor scans in recurring impulses. This scan intentionally
+    -- tracks positions even without line of sight; the normal visibility test
+    -- still governs whether it can immediately attack a target.
+    self.BZCNNextImpulseScan = now + 0.4
+    local best, bestDistance
+    for _, candidate in ipairs(ents.GetAll()) do
+        if not IsValid(candidate) or candidate == self or candidate:Health() <= 0 then continue end
+        if candidate:IsPlayer() and not candidate:Alive() then continue end
+        if not (candidate:IsPlayer() or candidate:IsNPC()
+            or (BZCN.IsManaged and BZCN.IsManaged(candidate))) then continue end
+        if not self:IsBZCNEnemy(candidate) then continue end
+
+        local distance = self:GetPos():DistToSqr(candidate:GetPos())
+        if not bestDistance or distance < bestDistance then
+            best, bestDistance = candidate, distance
+        end
+    end
+
+    self.BZCNImpulseScanTarget = best
+    self.BZCNImpulseScanPosition = IsValid(best) and best:GetPos() or nil
+    self.BZCNImpulseScanAt = now
+    return best
+end
+
 function ENT:FindEnemy()
+    local profile = self:GetBZCNProfile()
+    if profile and profile.FurryStyle == true then
+        local scannedTarget = self:FindBZCNImpulsePrey()
+        if IsValid(scannedTarget) then
+            self.BZCNEnemy = scannedTarget
+            return scannedTarget
+        end
+    end
+
     -- Enemy selection consumes the adapter chain's sense records. Before
     -- taking the nearest hostile, look for a threat that recently hurt an ally.
     local context = BZCN.AdapterCycle and BZCN.AdapterCycle(self, false)
@@ -747,11 +790,12 @@ function ENT:ChaseEnemy(target)
         or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
     local hasRangedWeapon = profile.Ranged == true and not meleeOnlyWeapon
         and profile.FurryStyle ~= true
+    local impulseTracking = profile.FurryStyle == true
 
     while IsValid(target) and self:IsBZCNEnemy(target) do
         local now = CurTime()
         local visible = HasSenseRecord(self, target, true)
-        if visible then
+        if visible or impulseTracking then
             lastSeenPos = target:GetPos()
             lastSeenAt = now
             self.BZCNEnemyMemory = {
@@ -770,7 +814,7 @@ function ENT:ChaseEnemy(target)
             end
         end
 
-        local goalPos = visible and target:GetPos() or lastSeenPos
+        local goalPos = (visible or impulseTracking) and target:GetPos() or lastSeenPos
         local loseDistance = tonumber(self.LoseTargetDist) or 1400
         if self:GetPos():DistToSqr(goalPos) > loseDistance * loseDistance then return end
         if not visible and self:GetPos():DistToSqr(goalPos) <= 64 * 64 then return end
