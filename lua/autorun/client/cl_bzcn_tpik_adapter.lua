@@ -139,7 +139,8 @@ local function ApplyFallbackHandTargets(ent, weapon, definition)
     local aim = ent:EyeAngles()
     local spine = ent:LookupBone("ValveBiped.Bip01_Spine4")
     local matrix = spine and ent:GetBoneMatrix(spine)
-    local origin = IsValid(matrix) and matrix:GetTranslation() or ent:WorldSpaceCenter()
+    local origin = matrix and matrix.GetTranslation and matrix:GetTranslation()
+        or ent:WorldSpaceCenter()
     local forward, right, up = aim:Forward(), aim:Right(), aim:Up()
 
     -- A stable two-hand aiming stance used only when a weapon's own SetHandPos
@@ -177,20 +178,32 @@ local function ApplyTPIK(ent)
     if not IsValid(weapon) then return end
     InstallClientAimAdapter(ent)
 
-    -- Runtime SWEP instances are not active Player weapons, so Homigrad never
-    -- initializes their player-only hand target state for NextBots. Run the
-    -- weapon-specific setup with temporary compatibility flags, then provide
-    -- a generic two-hand target only when that setup could not create one.
-    local hasNativeTargets = TryPlayerStyleHandSetup(ent, weapon, definition)
-
     -- This is the state the native TPIK solver reads from GetActiveWeapon().
-    -- Set on the client-side SWEP instance; these are not networked SWEP vars.
+    -- Set it before SetHandPos: weapon-specific implementations inspect these
+    -- flags while building their hand targets.
     weapon.rhandik = not (definition and (definition.setrhik == false or definition.setrh == false))
     weapon.lhandik = not (definition and (definition.setlhik == false or definition.setlh == false))
     weapon.setrhik = weapon.rhandik
     weapon.setlhik = weapon.lhandik
 
-    if not hasNativeTargets then ApplyFallbackHandTargets(ent, weapon, definition) end
+    -- Runtime SWEP instances are not active Player weapons, so Homigrad never
+    -- initializes their player-only hand target state for NextBots. Run the
+    -- weapon-specific setup with temporary compatibility flags, then provide
+    -- a generic two-hand target only when a required target is missing.
+    TryPlayerStyleHandSetup(ent, weapon, definition)
+
+    -- A one-handed weapon may intentionally disable the left hand; preserve
+    -- its native choice but never leave the right-hand target stale or absent.
+    if not ent.rhold or (weapon.lhandik and not ent.lhold) then
+        ApplyFallbackHandTargets(ent, weapon, definition)
+    end
+
+    -- Reinstate the NPC adapter's replicated support flags after the weapon's
+    -- own SetHandPos may have adjusted them for a Player-specific edge case.
+    weapon.rhandik = not (definition and (definition.setrhik == false or definition.setrh == false))
+    weapon.lhandik = not (definition and (definition.setlhik == false or definition.setlh == false))
+    weapon.setrhik = weapon.rhandik
+    weapon.setlhik = weapon.lhandik
 
     if not isfunction(ent.IsSuperAdmin) then
         ent.IsSuperAdmin = function() return false end
