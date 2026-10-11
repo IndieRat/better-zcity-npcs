@@ -185,8 +185,21 @@ function ENT:Initialize()
     -- exist in the mounted Z-City weapon registry.
     local runtimeProfile = self.BZCNClassProfile
     local choices = runtimeProfile and runtimeProfile.WeaponChoices
-    local inventory = isfunction(self.GetNetVar) and self:GetNetVar("Inventory", {}) or {}
-    local owned = istable(inventory) and inventory.Weapons or {}
+    -- Homigrad's inventory UI indexes Inventory directly when a player
+    -- opens a downed entity's inventory. Managed NextBots do not pass through
+    -- the player spawn inventory hook, so give them the same minimum schema.
+    local inventory = isfunction(self.GetNetVar) and self:GetNetVar("Inventory") or nil
+    if not istable(inventory) then inventory = {} end
+    inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+    inventory.Armor = istable(inventory.Armor) and inventory.Armor or {}
+    inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
+    if isfunction(self.SetNetVar) then
+        self.inventory = inventory
+        self:SetNetVar("Inventory", inventory)
+        if not istable(self:GetNetVar("Armor")) then self:SetNetVar("Armor", {}) end
+    end
+    local owned = inventory.Weapons
     local available = {}
     for _, weaponClass in ipairs(istable(choices) and choices or {}) do
         if owned[weaponClass] and weapons and weapons.GetStored
