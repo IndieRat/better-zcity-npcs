@@ -42,7 +42,9 @@ end
 BZCN.RegisterClass("default", {
     Name = "Civilian", PlayerClassName = "default",
     Model = "models/player/group03/male_07.mdl", Health = 100, Speed = 175,
-    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"Combine"},
+    -- Ordinary civilians are not automatically Resistance combatants. They
+    -- remain neutral to Combine unless an incident creates a real grievance.
+    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1200, HelpMemory = 10,
     CivilianStyle = true, MoodSystem = true, RareGunChance = 0.12,
     AnimationClass = nil, AnimationHoldType = "normal", Ranged = false, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
@@ -103,7 +105,9 @@ BZCN.RegisterClass("furry", {
 BZCN.RegisterClass("civilian_companion", {
     Name = "Civilian Companion", PlayerClassName = "default",
     Model = "models/player/group03/male_04.mdl", Health = 110, Speed = 180,
-    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"Combine"},
+    -- Companions also begin neutral; threat-memory and rescue hooks can still
+    -- make them intervene when someone nearby is actually attacked.
+    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {},
     Companion = true, CivilianStyle = true, MoodSystem = true, RareGunChance = 0.08,
     FollowAllies = true, FollowRange = 2400, FollowDistance = 130, HelpRange = 1800, HelpMemory = 15,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", Ranged = false,
