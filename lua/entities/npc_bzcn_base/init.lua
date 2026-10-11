@@ -1507,6 +1507,9 @@ function ENT:RunBehaviour()
                         self:FollowAlly(helpTarget)
                         coroutine.wait(0.1)
                     end
+                elseif BZCNCompanionAI and isfunction(BZCNCompanionAI.RunSquadTask)
+                    and BZCNCompanionAI.RunSquadTask(self) then
+                    -- Tactical squad commands consumed by the expansion AI.
                 elseif profile.Companion == true and BZCNCompanionAI
                     and isfunction(BZCNCompanionAI.RunIdleTask) then
                     local taskHandled = BZCNCompanionAI.RunIdleTask(self)
