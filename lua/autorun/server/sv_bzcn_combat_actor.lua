@@ -162,30 +162,33 @@ end
 
 function Actor.GetWeaponHoldType(owner, weapon, weaponClass)
     local profile = IsValidEntity(owner) and (owner.BZCNClassProfile or {}) or {}
-    if isstring(profile.AnimationHoldType) and profile.AnimationHoldType ~= "" then
-        return string.lower(profile.AnimationHoldType)
-    end
-
     weaponClass = weaponClass or (IsValidEntity(weapon) and weapon:GetClass())
         or (IsValidEntity(owner) and owner.BZCN_SelectedWeapon) or ""
-    local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local hold = IsValidEntity(weapon) and (weapon.HoldType or weapon.holdtype)
-        or (istable(stored) and (stored.HoldType or stored.holdtype)) or "normal"
-    hold = string.lower(tostring(hold))
 
-    -- Homigrad's AK-family weapons use "rpg" as a model grip hint, not as a
-    -- request for the grenade/rpg animation pool.
+    -- Prefer the selected weapon's own pool, not the NPC class's default gun.
+    -- The AK-family Homigrad SWEPs use "rpg" as a grip hint despite being rifles.
+    if weaponClass == "weapon_glock17" then return "pistol" end
     if weaponClass == "weapon_ak74" or weaponClass == "weapon_ak74u"
-        or weaponClass == "weapon_akm" or weaponClass == "weapon_ak47" then
+        or weaponClass == "weapon_akm" or weaponClass == "weapon_ak47"
+        or weaponClass == "weapon_mp7" then
         return "smg"
     end
+
+    local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
+    local hold = IsValidEntity(weapon) and (weapon.HoldType or weapon.holdtype)
+        or (istable(stored) and (stored.HoldType or stored.holdtype)) or nil
+    hold = isstring(hold) and string.lower(hold) or nil
     local translator = {
         revolver = "pistol", duel = "pistol",
         physgun = "smg", ar2 = "smg", slam = "smg",
         crossbow = "shotgun", rpg = "grenade",
         fist = "normal", melee2 = "melee", knife = "melee"
     }
-    return translator[hold] or hold
+    if hold and hold ~= "" then return translator[hold] or hold end
+    if isstring(profile.AnimationHoldType) and profile.AnimationHoldType ~= "" then
+        return string.lower(profile.AnimationHoldType)
+    end
+    return "normal"
 end
 
 function Actor.ApplyWeaponAnimationPool(owner, weapon, weaponClass)
@@ -254,6 +257,7 @@ function Actor.UpdateAim(attacker, target, weapon)
     -- Face the actual visible body, and expose sensible aim pose parameters for
     -- Homigrad's NPC branch and the model animation layer.
     attacker:SetAngles(Angle(0, aimAngle.y, 0))
+    if attacker.SetEyeAngles then pcall(attacker.SetEyeAngles, attacker, Angle(aimAngle.p, aimAngle.y, 0)) end
     if attacker.SetEyeTarget then pcall(attacker.SetEyeTarget, attacker, predicted) end
     if attacker.SetPoseParameter then
         pcall(attacker.SetPoseParameter, attacker, "aim_yaw", 0.5)
