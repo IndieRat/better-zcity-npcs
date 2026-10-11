@@ -39,7 +39,7 @@ end
 local HOLDTYPE_TRANSLATOR = {
     physgun = "smg", ar2 = "smg", crossbow = "shotgun", camera = "melee",
     rpg = "grenade", slam = "smg", fist = "normal", melee2 = "melee",
-    passive = "passive", knife = "melee", duel = "pistol", revolver = "smg"
+    passive = "passive", knife = "melee", duel = "pistol", revolver = "pistol"
 }
 
 local function GetWeaponHoldType(self)
@@ -169,10 +169,11 @@ function ENT:GetBZCNMovementSequence(speed, state)
 
     local weaponClass = self.BZCN_SelectedWeapon or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local holdType = profile.AnimationHoldType
+    local holdType = profile.AnimationHoldType or self.BZCNCombatHoldType
         or (istable(stored) and (stored.HoldType or stored.holdtype)) or "normal"
     holdType = isstring(holdType) and string.lower(holdType) or "normal"
-    self.ixAnimHoldType = profile.AnimationHoldType or HOLDTYPE_TRANSLATOR[holdType] or holdType
+    self.ixAnimHoldType = profile.AnimationHoldType or self.BZCNCombatHoldType
+        or HOLDTYPE_TRANSLATOR[holdType] or holdType
     local animationSet = animClass[self.ixAnimHoldType] or animClass.normal or animClass
     if not istable(animationSet) then return -1 end
 
