@@ -1,4 +1,5 @@
 -- Server-authoritative toggles for Better ZCity NPC gameplay rules.
+if SERVER then AddCSLuaFile() end
 BZCN = BZCN or {}
 
 local RULES = {
