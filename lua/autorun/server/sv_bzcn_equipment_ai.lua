@@ -491,6 +491,12 @@ end
 local function TransformFurryTarget(attacker, target, state)
     BZCN.StopFurryAssimilation(attacker, false)
     if not IsValid(target) then return false end
+    -- Player-held assimilation and NPC-driven assimilation can reach the
+    -- threshold during the same frame. Avoid applying the class/model reset twice.
+    if IsFurryTarget(target) then
+        hook.Run("BZCN_NPCFurryAssimilationComplete", attacker, target, true)
+        return true
+    end
 
     if target:IsPlayer() then
         local converted = false
