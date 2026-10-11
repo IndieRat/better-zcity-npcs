@@ -474,6 +474,10 @@ function BZCN.InstallAdapter(ent)
             local aim = solution.point - origin
             if aim:LengthSqr() > 0 then return aim:GetNormalized() end
         end
+        if self.GetNW2Float and self.GetNW2Angle
+            and self:GetNW2Float("BZCNCombatAimUntil", 0) > CurTime() then
+            return self:GetNW2Angle("BZCNCombatAimAngle", self:GetAngles()):Forward()
+        end
 
         local target = self.BZCNCombatTarget
         if IsValid(target) then
@@ -491,6 +495,10 @@ function BZCN.InstallAdapter(ent)
     data.EyeAngles = function(self)
         local solution = self.BZCNCombatAimSolution
         if istable(solution) and isangle(solution.angle) then return solution.angle end
+        if self.GetNW2Float and self.GetNW2Angle
+            and self:GetNW2Float("BZCNCombatAimUntil", 0) > CurTime() then
+            return self:GetNW2Angle("BZCNCombatAimAngle", self:GetAngles())
+        end
         local target = self.BZCNCombatTarget
         if IsValid(target) then
             local point
