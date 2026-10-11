@@ -309,6 +309,288 @@ function BZCN.AttackRuntimeMelee(ent, target)
     return true
 end
 
+
+local function GetFurryClass(target)
+    if not IsValid(target) then return "" end
+    local className = target.PlayerClassName
+        or (target.GetNW2String and target:GetNW2String("PlayerClassName", ""))
+        or target.BZCNClass
+    return isstring(className) and string.lower(className) or ""
+end
+
+local function IsFurryTarget(target)
+    if not IsValid(target) then return false end
+    return GetFurryClass(target) == "furry"
+        or target.IsFurry == true
+        or (target.BZCNClassProfile and target.BZCNClassProfile.FurryStyle == true)
+end
+
+local function GetCurrentFurryRagdoll(target)
+    if not IsValid(target) then return nil end
+    local rag = target.BZCNNPCRagdoll or target.FakeRagdoll
+    if not IsValid(rag) and target.GetNWEntity then
+        rag = target:GetNWEntity("FakeRagdoll")
+    end
+    if not IsValid(rag) and hg and isfunction(hg.GetCurrentCharacter) then
+        local ok, result = pcall(hg.GetCurrentCharacter, target)
+        if ok then rag = result end
+    end
+    if not IsValid(rag) or rag == target then return nil end
+    local className = rag:GetClass()
+    if className ~= "prop_ragdoll" and not (rag.IsRagdoll and rag:IsRagdoll()) then return nil end
+    return rag
+end
+
+local function RestoreFurryRagdollOrganism(state)
+    if not istable(state) or not state.ragOrganismOverridden then return end
+    local rag = state.rag
+    if IsValid(rag) and rag.organism == state.organism then
+        rag.organism = state.originalRagOrganism
+    end
+    state.ragOrganismOverridden = false
+    state.originalRagOrganism = nil
+end
+
+function BZCN.StopFurryAssimilation(owner)
+    if not IsValid(owner) then return end
+    local state = owner.BZCNFurryGrab
+    if not istable(state) then
+        owner.BZCN_SimulatedButtons = 0
+        return
+    end
+
+    local weapon = state.weapon
+    if IsValid(weapon) and isfunction(weapon.SetCarrying) then
+        pcall(weapon.SetCarrying, weapon)
+    end
+    RestoreFurryRagdollOrganism(state)
+
+    if IsValid(weapon) and isfunction(weapon.SetFists) then
+        -- Paws must return to the lowered state after the interaction.
+        pcall(weapon.SetFists, weapon, false)
+    end
+    owner.BZCNFurryGrab = nil
+    owner.BZCNFurryGrabTarget = nil
+    owner.BZCN_SimulatedButtons = 0
+end
+
+local function AttachFurryRagdoll(attacker, state, rag)
+    if not IsValid(attacker) or not istable(state) or not IsValid(rag) then return false end
+    local target = state.target
+    if not IsValid(target) or rag == target then return false end
+
+    local organ = target.organism or target.BZCN_Organism or rag.organism
+    if not istable(organ) then return false end
+    organ.assimilated = math.Clamp(tonumber(organ.assimilated) or 0, 0, 1)
+    if not IsValid(organ.owner) then organ.owner = target end
+
+    local weapon = state.weapon
+    if not IsValid(weapon) then return false end
+    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, false) end
+
+    local bone = rag:LookupBone("ValveBiped.Bip01_Spine2")
+        or rag:LookupBone("ValveBiped.Bip01_Spine1")
+        or rag:LookupBone("ValveBiped.Bip01_Pelvis")
+    local physBone = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or 1
+    local phys = rag:GetPhysicsObjectNum(physBone)
+    if not IsValid(phys) then
+        physBone = 0
+        phys = rag:GetPhysicsObjectNum(physBone)
+    end
+    if not IsValid(phys) then return false end
+
+    if not state.ragOrganismOverridden then
+        state.originalRagOrganism = rag.organism
+        state.ragOrganismOverridden = rag.organism ~= organ
+    end
+    rag.organism = organ
+    rag.BZCNFurryGrabOwner = attacker
+
+    -- This is the same Z-City SWEP carry path the player uses. Holding both
+    -- simulated RMB and LMB activates its native grab + assimilation logic.
+    if isfunction(weapon.SetCarrying) then
+        local distance = (attacker:WorldSpaceCenter() - phys:GetPos()):Length()
+        local ok = pcall(weapon.SetCarrying, weapon, rag, physBone, phys:GetPos(), distance)
+        if not ok then
+            RestoreFurryRagdollOrganism(state)
+            return false
+        end
+    else
+        RestoreFurryRagdollOrganism(state)
+        return false
+    end
+
+    state.rag = rag
+    state.organism = organ
+    state.attached = true
+    state.pendingUntil = nil
+    state.lastThink = CurTime()
+    attacker.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, IN_ATTACK2)
+    return true
+end
+
+local function TransformFurryTarget(attacker, target, state)
+    BZCN.StopFurryAssimilation(attacker)
+    if not IsValid(target) then return false end
+
+    if target:IsPlayer() then
+        local converted = false
+        if hg and isfunction(hg.Furrify) then
+            local ok, result = pcall(hg.Furrify, target)
+            converted = ok and result ~= false
+        end
+        if not converted and isfunction(target.SetPlayerClass) then
+            local ok = pcall(target.SetPlayerClass, target, "furry")
+            converted = ok
+        end
+
+        if converted then
+            timer.Simple(0.25, function()
+                if not IsValid(target) or not target:Alive() then return end
+                if IsValid(target.FakeRagdoll) and hg and isfunction(hg.FakeUp) then
+                    pcall(hg.FakeUp, target)
+                end
+            end)
+        end
+        hook.Run("BZCN_NPCFurryAssimilationComplete", attacker, target, converted)
+        return true
+    end
+
+    if BZCN.IsManaged(target) then
+        local support = hg and hg.BZCNNPCSupport
+        local rag = state and state.rag or target.BZCNNPCRagdoll
+        if target:GetNW2Bool("BZCNNPCDowned", false) and support and isfunction(support.Recover) then
+            pcall(support.Recover, target, rag, true)
+        end
+        local converted = BZCN.ChangeClass(target, "furry", false)
+        hook.Run("BZCN_NPCFurryAssimilationComplete", attacker, target, converted)
+        return converted == true
+    end
+    return false
+end
+
+function BZCN.TryFurryAssimilation(attacker, target)
+    if not IsValid(attacker) or not IsValid(target) or not BZCN.IsManaged(attacker) then
+        if IsValid(attacker) then BZCN.StopFurryAssimilation(attacker) end
+        return false
+    end
+    local profile = attacker.BZCNClassProfile or {}
+    if profile.FurryStyle ~= true then
+        BZCN.StopFurryAssimilation(attacker)
+        return false
+    end
+
+    local state = attacker.BZCNFurryGrab
+    if istable(state) and state.target ~= target then
+        BZCN.StopFurryAssimilation(attacker)
+        state = nil
+    end
+    if not IsValid(target) or target:Health() <= 0 or IsFurryTarget(target) then
+        BZCN.StopFurryAssimilation(attacker)
+        return false
+    end
+    if not (target:IsPlayer() or BZCN.IsManaged(target)) then return false end
+    if target:IsPlayer() and not target:Alive() then
+        BZCN.StopFurryAssimilation(attacker)
+        return false
+    end
+    if attacker:GetNW2Bool("BZCNNPCDowned", false)
+        or CurTime() < (attacker.BZCNMedicalUntil or 0) then
+        BZCN.StopFurryAssimilation(attacker)
+        return false
+    end
+
+    local maxRange = tonumber(profile.FurryGrabRange) or 86
+    if not state and attacker:GetPos():Distance(target:GetPos()) > maxRange then return false end
+
+    local weapon = attacker.BZCNRuntimeWeapon
+    if not IsValid(weapon) or weapon:GetClass() ~= "weapon_hands_sh" then
+        weapon = ConfigureWeaponEntity(attacker, "weapon_hands_sh", "BZCNRuntimeWeapon")
+    end
+    if not IsValid(weapon) then return false end
+
+    if not state then
+        state = {
+            target = target,
+            weapon = weapon,
+            started = CurTime(),
+            pendingUntil = CurTime() + 3,
+            lastThink = CurTime(),
+            attached = false
+        }
+        attacker.BZCNFurryGrab = state
+        attacker.BZCNFurryGrabTarget = target
+        attacker.BZCNCombatTarget = target
+        if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, false) end
+
+        if target:IsPlayer() then
+            if not IsValid(GetCurrentFurryRagdoll(target)) and hg and isfunction(hg.LightStunPlayer) then
+                pcall(hg.LightStunPlayer, target, 3)
+            end
+        elseif BZCN.IsManaged(target) then
+            local support = hg and hg.BZCNNPCSupport
+            if not target:GetNW2Bool("BZCNNPCDowned", false)
+                and support and isfunction(support.EnterDownedState) then
+                pcall(support.EnterDownedState, target, "furry_grab")
+            end
+        end
+    end
+
+    -- Grab initiation can create a player fake-ragdoll asynchronously. Keep
+    -- the paws lowered while waiting briefly for Z-City's real ragdoll link.
+    local rag = GetCurrentFurryRagdoll(target)
+    if not IsValid(rag) then
+        if CurTime() > (state.pendingUntil or (state.started + 3)) then
+            BZCN.StopFurryAssimilation(attacker)
+            return false
+        end
+        attacker.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, IN_ATTACK2)
+        return true
+    end
+
+    if not state.attached or state.rag ~= rag or not IsValid(state.rag) then
+        if not AttachFurryRagdoll(attacker, state, rag) then
+            attacker.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, IN_ATTACK2)
+            return CurTime() <= (state.pendingUntil or (state.started + 3))
+        end
+    end
+
+    local organ = state.organism or target.organism or target.BZCN_Organism
+    if not istable(organ) then
+        BZCN.StopFurryAssimilation(attacker)
+        return false
+    end
+    organ.assimilated = math.Clamp(tonumber(organ.assimilated) or 0, 0, 1)
+    organ.lightstun = CurTime() + 1
+    attacker.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, IN_ATTACK2)
+
+    if target:IsPlayer() and isfunction(target.SetLocalVar) then
+        pcall(target.SetLocalVar, target, "assimilation", organ.assimilated)
+    elseif target.SetNW2Float then
+        target:SetNW2Float("BZCNAssimilation", organ.assimilated)
+    end
+
+    if organ.assimilated >= 0.999 then
+        return TransformFurryTarget(attacker, target, state)
+    end
+    return true
+end
+
+hook.Add("EntityRemoved", "BZCN_CleanupFurryAssimilation", function(ent)
+    if not ent then return end
+    if ent.BZCNFurryGrab then BZCN.StopFurryAssimilation(ent) end
+
+    -- If a held target's ragdoll disappears, clear the alias and simulated
+    -- input instead of leaving the NextBot stuck in the grab pose.
+    for _, owner in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        local state = IsValid(owner) and owner.BZCNFurryGrab or nil
+        if state and (state.target == ent or state.rag == ent) then
+            BZCN.StopFurryAssimilation(owner)
+        end
+    end
+end)
+
+
 local function WoundCount(wounds)
     if not istable(wounds) then return 0 end
     local count = 0
