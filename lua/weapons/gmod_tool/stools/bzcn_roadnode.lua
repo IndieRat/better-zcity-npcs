@@ -59,7 +59,15 @@ function TOOL:LeftClick(trace)
         ply:ChatPrint("[BZCN Roads] Road system is not loaded.")
         return false
     end
-    BZCNRoads:AddNode(trace.HitPos + trace.HitNormal * 2, ply)
+    local position = trace.HitPos + trace.HitNormal * 2
+    -- Cache the nearest old node before insertion, because AddNode returns the
+    -- new node as the nearest result once it has been inserted.
+    local nearest, distance = BZCNRoads:Nearest(position, 1500)
+    local node = BZCNRoads:AddNode(position, ply)
+    if node and nearest and nearest.id ~= node.id and distance and distance >= 90
+        and not table.HasValue(node.links or {}, nearest.id) then
+        BZCNRoads:Connect(node.id, nearest.id, false)
+    end
     return true
 end
 
