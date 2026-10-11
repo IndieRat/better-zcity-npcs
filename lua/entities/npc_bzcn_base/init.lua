@@ -77,6 +77,12 @@ function ENT:Initialize()
     self.BZCN_Sprinting = false
     if self.SetNW2Float then self:SetNW2Float("BZCNStamina", 100) end
     self:SetCollisionGroup(COLLISION_GROUP_NPC)
+    -- Use a compact human-sized movement hull rather than inheriting unusually
+    -- wide model bounds (notably on custom/furry player models). The model and
+    -- its hitboxes remain unchanged; only movement/collision bounds are tightened.
+    if self.SetCollisionBounds then
+        self:SetCollisionBounds(Vector(-13, -13, 0), Vector(13, 13, 72))
+    end
     if self.SetUseType then self:SetUseType(SIMPLE_USE) end
 
     if self.loco then
@@ -85,6 +91,10 @@ function ENT:Initialize()
         self.loco:SetDeceleration(900)
         self.loco:SetStepHeight(18)
         self.loco:SetJumpHeight(48)
+        -- Keep managed NextBots from converging on the same exact point and
+        -- interpenetrating when following/chasing in a crowd.
+        if isfunction(self.loco.SetAvoidance) then self.loco:SetAvoidance(true) end
+        if isfunction(self.loco.SetAvoidanceRange) then self.loco:SetAvoidanceRange(48) end
     end
 
     BZCN.ApplyClass(self, className, true)
