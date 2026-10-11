@@ -356,6 +356,49 @@ hook.Add("BZCN_NPCSpawned", "BZCN_TaskDirectorHome", function(ent)
     if not IsManaged(ent) then return end
     ent.BZCNHomePosition = ent:GetPos()
     ent.BZCNTaskHomeRadius = 650
+
+    local kind = GetKind(ent)
+    if kind == "metrocop" then
+        ent.BZCNMorale = tonumber(ent.BZCNMorale) or 100
+        if ent.SetNW2Float then ent:SetNW2Float("BZCNMorale", ent.BZCNMorale) end
+    elseif kind == "rebel" then
+        -- Rebels are volunteers committed to getting people out and bringing
+        -- casualties/homeward supplies back; losing allies doesn't break them.
+        ent.BZCNResolve = 100
+        if ent.SetNW2Float then ent:SetNW2Float("BZCNResolve", 100) end
+    end
+end)
+
+hook.Add("BZCN_EntityDamaged", "BZCN_MetroCopMoraleDamage", function(victim, attacker, damageInfo)
+    if not IsManaged(victim) or GetKind(victim) ~= "metrocop" then return end
+    if not IsValid(attacker) or attacker == victim then return end
+    local damage = IsValid(damageInfo) and isfunction(damageInfo.GetDamage)
+        and tonumber(damageInfo:GetDamage()) or 0
+    local maxHealth = math.max(tonumber(victim:GetMaxHealth()) or 1, 1)
+    local loss = math.Clamp(2 + (math.max(damage, 0) / maxHealth) * 18, 2, 14)
+    victim.BZCNMorale = math.Clamp((tonumber(victim.BZCNMorale) or 100) - loss, 0, 100)
+    if victim.SetNW2Float then victim:SetNW2Float("BZCNMorale", victim.BZCNMorale) end
+    hook.Run("BZCN_MetroCopMoraleChanged", victim, victim.BZCNMorale, -loss, "injured")
+end)
+
+hook.Add("BZCN_NPCKilled", "BZCN_MetroCopAllyCasualtyMorale", function(victim)
+    if not IsValid(victim) then return end
+    local deadKind = GetKind(victim)
+    for _, ally in ipairs(ents.FindInSphere(victim:GetPos(), 850)) do
+        if not IsManaged(ally) or ally == victim then continue end
+        local kind = GetKind(ally)
+        if kind == "metrocop" and deadKind == "metrocop" then
+            local loss = 8
+            ally.BZCNMorale = math.Clamp((tonumber(ally.BZCNMorale) or 100) - loss, 0, 100)
+            if ally.SetNW2Float then ally:SetNW2Float("BZCNMorale", ally.BZCNMorale) end
+            hook.Run("BZCN_MetroCopMoraleChanged", ally, ally.BZCNMorale, -loss, "ally_lost")
+        elseif kind == "rebel" and deadKind == "rebel" then
+            -- Resolve stays steady: Rebels regroup and rescue instead of
+            -- running away when a volunteer falls.
+            ally.BZCNResolve = 100
+            if ally.SetNW2Float then ally:SetNW2Float("BZCNResolve", 100) end
+        end
+    end
 end)
 
 timer.Create("BZCN_TaskWeaponPickup", 0.75, 0, function()
