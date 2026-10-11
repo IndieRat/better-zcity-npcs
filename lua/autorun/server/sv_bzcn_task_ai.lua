@@ -219,7 +219,8 @@ local function FindGuardPost(ent)
     elseif IsValid(bestDoor) then
         selected = bestDoor:GetPos() + Vector(math.Rand(-100, 100), math.Rand(-100, 100), 0)
     else
-        selected = ChooseHomePoint(ent, 320)
+        local angle = math.Rand(0, math.pi * 2)
+        selected = home + Vector(math.cos(angle), math.sin(angle), 0) * math.Rand(180, 320)
     end
 
     local area = navmesh.GetNearestNavArea(selected, false, 320, false, true)
