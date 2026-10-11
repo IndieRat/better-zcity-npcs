@@ -309,10 +309,47 @@ end
 
 function Actor.GetFireDelay(owner, weapon)
     local profile = IsValidEntity(owner) and owner.BZCNClassProfile or {}
-    local primary = IsValidEntity(weapon) and weapon.Primary or {}
-    local wait = tonumber(primary and primary.Wait)
-    if wait and wait > 0 then return math.Clamp(wait, 0.06, 3) end
-    return math.Clamp(tonumber(profile and profile.AttackDelay) or 0.35, 0.06, 3)
+    local weaponClass = IsValidEntity(weapon) and weapon:GetClass()
+        or (IsValidEntity(owner) and (owner.BZCN_SelectedWeapon
+            or (owner.BZCNClassProfile and owner.BZCNClassProfile.WeaponClass))) or ""
+    local stored = weaponClass ~= "" and weapons and weapons.GetStored
+        and weapons.GetStored(weaponClass) or nil
+    local primary = IsValidEntity(weapon) and istable(weapon.Primary) and weapon.Primary
+        or (istable(stored) and istable(stored.Primary) and stored.Primary) or {}
+    local configured = tonumber(primary.Wait) or tonumber(primary.Delay)
+    local base = configured and configured > 0 and configured
+        or tonumber(profile.AttackDelay) or 0.35
+    local hold = Actor.GetWeaponHoldType(owner, weapon, weaponClass)
+    local pistol = hold == "pistol" or string.find(string.lower(weaponClass), "glock", 1, true) ~= nil
+        or string.find(string.lower(weaponClass), "pistol", 1, true) ~= nil
+        or string.find(string.lower(weaponClass), "revolver", 1, true) ~= nil
+    local automatic = primary.Automatic == true or tonumber(primary.Automatic) == 1
+        or primary.AutoFire == true
+
+    -- NPCs share the weapon's actual fire mode and delay, but receive additional
+    -- recovery time for recoil. This prevents tiny SWEP.Wait values from turning
+    -- a semi-auto pistol into an almost automatic weapon against players.
+    if not automatic then
+        if IsValidEntity(owner) then owner.BZCNFireCadenceState = nil end
+        return math.Clamp(math.max(base, pistol and 0.34 or 0.22) + math.Rand(0.045, 0.11), 0.28, 2.2)
+    end
+
+    -- Automatic weapons fire in short, imperfect bursts rather than maintaining
+    -- the SWEP's engine-rate limit indefinitely. The state belongs to each NPC,
+    -- not the shared weapon definition.
+    local state = IsValidEntity(owner) and owner.BZCNFireCadenceState or nil
+    if not istable(state) or state.weaponClass ~= weaponClass then
+        state = {weaponClass = weaponClass, shots = 0, burstLimit = math.random(3, 5)}
+    end
+    state.shots = (tonumber(state.shots) or 0) + 1
+    local delay = math.max(base, 0.12) + math.Rand(0.025, 0.07)
+    if state.shots >= (tonumber(state.burstLimit) or 4) then
+        delay = delay + math.Rand(0.22, 0.48)
+        state.shots = 0
+        state.burstLimit = math.random(3, 5)
+    end
+    if IsValidEntity(owner) then owner.BZCNFireCadenceState = state end
+    return math.Clamp(delay, 0.12, 1.8)
 end
 
 -- A target that is already incapacitated is no longer a combat target. Keep
