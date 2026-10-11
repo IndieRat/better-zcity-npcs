@@ -73,6 +73,32 @@ local function IsAlive(ent)
     return IsValid(ent) and ent:Health() > 0
 end
 
+local function IsAssimilationLocked(ent)
+    if not IsValid(ent) then return false end
+    local owner = ResolveNPC(ent)
+    if not IsValid(owner) then owner = ent end
+    if owner.BZCNAssimilationLocked ~= true
+        and not (owner.GetNW2Bool and owner:GetNW2Bool("BZCNAssimilationLocked", false)) then
+        return false
+    end
+
+    -- Once assimilation reaches completion, the recovery machine may stand
+    -- the victim up so the class conversion can finish. Until then, neither
+    -- a manual FakeUp call nor the NPC recovery timer can break the hold.
+    local organ = owner.organism or owner.BZCN_Organism or {}
+    local progress = tonumber(organ.assimilated)
+    if progress == nil and owner.GetNW2Float then
+        progress = tonumber(owner:GetNW2Float("BZCNAssimilation", 0)) or 0
+    end
+    return (tonumber(progress) or 0) < 0.999
+end
+
+Support.IsAssimilationLocked = IsAssimilationLocked
+
+hook.Add("Should Fake Up", "BZCNNPCSupport_AssimilationLock", function(ent)
+    if IsAssimilationLocked(ent) then return false end
+end)
+
 local function FinalizeManagedNPCDeath(owner, sourceDamage)
     if not IsValid(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner))
         or owner:Health() > 0 or owner.BZCNDeathHandled then
@@ -747,7 +773,9 @@ local function ClearDownedState(owner, restoreEntity)
 end
 
 local function CanRecoverFromZCityOrganism(owner, state)
-    if not IsValid(owner) or not state or not state.usesZCityOrganism then return true end
+    if not IsValid(owner) or not state then return false end
+    if IsAssimilationLocked(owner) then return false end
+    if not state.usesZCityOrganism then return true end
 
     -- A severe leg injury is one of the conditions that caused the downed
     -- state. Keep the NPC down until it improves instead of letting StateSync
@@ -807,7 +835,8 @@ local function Recover(owner, rag, removedExternally)
         end
     end
 
-    if not removedExternally and not CanRecoverFromZCityOrganism(owner, state) then
+    if IsAssimilationLocked(owner)
+        or (not removedExternally and not CanRecoverFromZCityOrganism(owner, state)) then
         local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
         state.recoverTimer = timerName
         timer.Create(timerName, 0.75, 1, function()
@@ -1082,6 +1111,209 @@ Support.CanRecover = function(owner)
     local state = owner.BZCNNPCOrg
     return state ~= nil and state.downed == true
         and CanRecoverFromZCityOrganism(owner, state)
+end
+
+local function ResolvePhysicalVictim(ent)
+    if not IsValid(ent) then return nil end
+    local owner = ResolveNPC(ent)
+    if IsValid(owner) then return owner end
+
+    owner = ent.BZCNNPCOwner or ent.ply or ent.Player
+    if not IsValid(owner) and ent.GetNW2Entity then
+        owner = ent:GetNW2Entity("BZCNNPCOwner")
+    end
+    if not IsValid(owner) and ent.GetNWEntity then
+        owner = ent:GetNWEntity("RagdollOwner")
+        if not IsValid(owner) then owner = ent:GetNWEntity("ply") end
+    end
+    if not IsValid(owner) and hg and isfunction(hg.RagdollOwner) then
+        local ok, resolved = pcall(hg.RagdollOwner, ent)
+        if ok and IsValid(resolved) then owner = resolved end
+    end
+    return IsValid(owner) and owner or ent
+end
+
+local function ApplyImpactImpulse(rag, hitPos, direction, force)
+    if not IsValid(rag) or not rag.GetPhysicsObjectCount then return false end
+    direction = isvector(direction) and direction or vector_origin
+    if direction:LengthSqr() < 0.01 then direction = rag:GetForward() end
+    direction = direction:GetNormalized()
+    force = math.Clamp(tonumber(force) or 2500, 500, 18000)
+    local impulse = direction * force + Vector(0, 0, math.min(force * 0.07, 1400))
+
+    local bone = rag:LookupBone("ValveBiped.Bip01_Spine2")
+        or rag:LookupBone("ValveBiped.Bip01_Spine1")
+        or rag:LookupBone("ValveBiped.Bip01_Pelvis")
+    local physIndex = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or -1
+    local phys = physIndex and physIndex >= 0 and rag:GetPhysicsObjectNum(physIndex) or nil
+    if not IsValid(phys) then phys = rag:GetPhysicsObject() end
+    if not IsValid(phys) then
+        for index = 0, math.max((rag:GetPhysicsObjectCount() or 0) - 1, -1) do
+            local candidate = rag:GetPhysicsObjectNum(index)
+            if IsValid(candidate) then phys = candidate break end
+        end
+    end
+    if not IsValid(phys) then return false end
+
+    if isvector(hitPos) then
+        phys:ApplyForceOffset(impulse, hitPos)
+    else
+        phys:ApplyForceCenter(impulse)
+    end
+    phys:Wake()
+    return true
+end
+
+function Support.ApplyPhysicalImpact(victim, attacker, hitPos, direction, force, reason, stunDuration)
+    local owner = ResolvePhysicalVictim(victim)
+    if not IsSupportedNPC(owner) or not IsAlive(owner) then return false end
+
+    local state = Support.Attach(owner)
+    if not state then return false end
+    local now = CurTime()
+    stunDuration = math.Clamp(tonumber(stunDuration) or 2, 0.25, 6)
+
+    -- If a ragdoll already exists, transfer the incoming momentum into it.
+    -- This also allows repeated kicks/props to jostle an NPC already down.
+    local existingRag = owner.BZCNNPCRagdoll or owner.FakeRagdoll
+    if state.downed and IsValid(existingRag) then
+        local organism = owner.organism or owner.BZCN_Organism
+        if istable(organism) then
+            organism.stun = math.max(tonumber(organism.stun) or 0, now + stunDuration)
+            organism.lightstun = math.max(tonumber(organism.lightstun) or 0, now + stunDuration)
+        end
+        ApplyImpactImpulse(existingRag, hitPos, direction, force)
+        return true
+    end
+
+    -- An actual tackle can knock an NPC down during a get-up transition, but
+    -- must never break the active assimilation lock that keeps its victim held.
+    if IsAssimilationLocked(owner) then return false end
+    if (tonumber(owner.BZCNNPCLastImpactAt) or 0) > now - 0.22 then return false end
+    owner.BZCNNPCLastImpactAt = now
+
+    if state.gettingUp then
+        if state.getUpTimer then timer.Remove(state.getUpTimer) end
+        state.getUpTimer = nil
+        state.gettingUp = false
+        SetNWBool(owner, "BZCNNPCGettingUp", false)
+        owner:SetMoveType(owner.BZCNNPCOldMoveType or MOVETYPE_STEP)
+    end
+
+    local organism = owner.organism or owner.BZCN_Organism
+    if istable(organism) then
+        organism.stun = math.max(tonumber(organism.stun) or 0, now + stunDuration)
+        organism.lightstun = math.max(tonumber(organism.lightstun) or 0, now + stunDuration)
+    end
+
+    EnterDownedState(owner, reason or "impact")
+    local rag = owner.BZCNNPCRagdoll or owner.FakeRagdoll
+    if not IsValid(rag) then return false end
+    ApplyImpactImpulse(rag, hitPos, direction, force)
+    hook.Run("BZCNNPC_PhysicalImpact", attacker, owner, reason or "impact", hitPos, direction, force)
+    return true
+end
+
+function Support.PerformKick(attacker, targetEntity, hitPos, direction, damageAmount, force, forceDown, reason)
+    if not IsValid(attacker) or not IsValid(targetEntity) then return false end
+    local victim = ResolvePhysicalVictim(targetEntity)
+    if not IsValid(victim) or victim == attacker or not victim.Health or victim:Health() <= 0 then return false end
+
+    direction = isvector(direction) and direction or attacker:GetForward()
+    direction.z = direction.z or 0
+    if direction:LengthSqr() < 0.01 then direction = attacker:GetForward() end
+    direction = direction:GetNormalized()
+    damageAmount = math.Clamp(tonumber(damageAmount) or 12, 1, 40)
+    force = math.Clamp(tonumber(force) or damageAmount * 350, 800, 18000)
+
+    local victimIsManagedNPC = IsSupportedNPC(victim)
+    local victimIsProxy = victim ~= targetEntity
+    local alreadyDown = victimIsManagedNPC and victim.BZCNNPCOrg
+        and victim.BZCNNPCOrg.downed == true
+    -- A native Homigrad kick already deals damage to an actual ragdoll physics
+    -- bone. Do not double that damage; still apply the missing live-NPC bridge.
+    if not (victimIsProxy and alreadyDown) then
+        local info = DamageInfo()
+        info:SetAttacker(IsValid(attacker) and attacker or game.GetWorld())
+        info:SetInflictor(IsValid(attacker.BZCNRuntimeWeapon) and attacker.BZCNRuntimeWeapon
+            or (attacker.GetActiveWeapon and attacker:GetActiveWeapon()) or attacker)
+        info:SetDamage(damageAmount)
+        info:SetDamageType(DMG_CLUB)
+        info:SetDamagePosition(isvector(hitPos) and hitPos or victim:WorldSpaceCenter())
+        info:SetDamageForce(direction * force)
+        victim:TakeDamageInfo(info)
+    end
+
+    if victimIsManagedNPC then
+        if forceDown == true or math.random(1, 5) > 1 then
+            Support.ApplyPhysicalImpact(victim, attacker, hitPos, direction, force,
+                reason or "kick", 1.8)
+        elseif isfunction(victim.SetVelocity) then
+            victim:SetVelocity(direction * 120 + Vector(0, 0, 35))
+        end
+    elseif victim:IsPlayer() then
+        if victimIsProxy then
+            ApplyImpactImpulse(targetEntity, hitPos, direction, force)
+        else
+            victim:SetVelocity(direction * 150 + Vector(0, 0, 45))
+            if (forceDown == true or math.random(1, 5) > 1)
+                and not IsValid(victim.FakeRagdoll) and hg and isfunction(hg.Fake) then
+                timer.Simple(0, function()
+                    if IsValid(victim) and victim:Alive() and not IsValid(victim.FakeRagdoll)
+                        and not IsAssimilationLocked(victim) then
+                        pcall(hg.Fake, victim)
+                    end
+                end)
+            end
+        end
+    elseif isfunction(victim.SetVelocity) then
+        victim:SetVelocity(direction * 160 + Vector(0, 0, 45))
+    end
+
+    hook.Run("BZCNNPC_Kick", attacker, victim, hitPos, direction, damageAmount)
+    return true
+end
+
+function Support.TryFurryPounce(attacker, target)
+    if not IsValid(attacker) or not IsValid(target) or not BZCN
+        or not BZCN.IsManaged or not BZCN.IsManaged(attacker) then return false end
+    local profile = attacker.BZCNClassProfile or {}
+    if profile.FurryStyle ~= true or attacker:GetNW2Bool("BZCNNPCDowned", false)
+        or CurTime() < (attacker.BZCNNextPounceAt or 0) or not attacker:OnGround()
+        or attacker.BZCNFurryGrab then
+        return false
+    end
+
+    local origin = attacker:WorldSpaceCenter()
+    local destination = target:WorldSpaceCenter()
+    local delta = destination - origin
+    delta.z = 0
+    local distance = delta:Length()
+    local range = math.Clamp(tonumber(profile.FurryPounceRange) or 250, 140, 360)
+    if distance < math.max((tonumber(profile.FurryGrabRange) or 86) + 24, 110)
+        or distance > range then return false end
+
+    local trace = util.TraceLine({
+        start = origin,
+        endpos = destination,
+        filter = {attacker, target},
+        mask = MASK_SOLID
+    })
+    if trace.Hit and trace.Fraction < 0.98 then return false end
+    if delta:LengthSqr() < 1 then return false end
+    delta:Normalize()
+
+    attacker.BZCNNPCPounce = {target = target, expires = CurTime() + 1.15}
+    attacker.BZCNNextPounceAt = CurTime() + math.Rand(2.8, 4.1)
+    if attacker.loco then
+        attacker.loco:Jump()
+        attacker.loco:SetVelocity(delta * 285 + Vector(0, 0, 185))
+    elseif isfunction(attacker.SetVelocity) then
+        attacker:SetVelocity(delta * 285 + Vector(0, 0, 185))
+    end
+    attacker:SetAngles(Angle(0, delta:Angle().y, 0))
+    hook.Run("BZCNNPC_FurryPounce", attacker, target)
+    return true
 end
 
 InstallManagedTakeDamageInfoGuard = function(owner)
@@ -1535,8 +1767,161 @@ hook.Add("InitPostEntity", "BZCNNPCSupport_Existing", function()
     timer.Simple(0.1, function()
         for _, ent in ipairs(ents.GetAll()) do
             if IsSupportedNPC(ent) then Support.Attach(ent) end
+            if IsValid(ent) then
+                local class = ent:GetClass()
+                if class == "prop_physics" or class == "prop_physics_override"
+                    or class == "prop_physics_multiplayer" or class == "prop_physics_respawnable" then
+                    timer.Simple(0.05, function()
+                        if not IsValid(ent) or ent.BZCNNPCPhysicsShockInstalled then return end
+                        local phys = ent:GetPhysicsObject()
+                        if not IsValid(phys) then return end
+                        ent.BZCNNPCPhysicsShockInstalled = true
+                        ent:AddCallback("PhysicsCollide", function(prop, data)
+                            if not IsValid(prop) or not istable(data) or not IsValid(data.HitEntity) then return end
+                            if isfunction(prop.IsPlayerHolding) and prop:IsPlayerHolding() then return end
+                            if data.HitEntity:GetClass() == "prop_ragdoll"
+                                and not ResolveNPC(data.HitEntity) then return end
+                            local physics = prop:GetPhysicsObject()
+                            if not IsValid(physics) then return end
+                            local mass = physics:GetMass()
+                            local velocity = physics:GetVelocity()
+                            local speed = tonumber(data.Speed) or velocity:Length()
+                            if mass <= 20 or speed <= math.max(700 - mass, 200)
+                                or velocity:Length() <= 50 then return end
+                            local victim = ResolvePhysicalVictim(data.HitEntity)
+                            if not IsSupportedNPC(victim) or not IsAlive(victim) then return end
+                            local direction = velocity:GetNormalized()
+                            local impulse = math.Clamp(speed * mass * 0.8, 2200, 18000)
+                            Support.ApplyPhysicalImpact(victim, prop,
+                                isvector(data.HitPos) and data.HitPos or victim:WorldSpaceCenter(),
+                                direction, impulse, "physics_shock", 2.1)
+                            hook.Run("BZCNNPC_PhysicsShock", prop, victim, data)
+                        end)
+                    end)
+                end
+            end
         end
     end)
+end)
+
+local function InstallPhysicsShockCallback(ent)
+    if not IsValid(ent) or ent.BZCNNPCPhysicsShockInstalled then return end
+    local class = ent:GetClass()
+    if class ~= "prop_physics" and class ~= "prop_physics_override"
+        and class ~= "prop_physics_multiplayer" and class ~= "prop_physics_respawnable" then return end
+    local physics = ent:GetPhysicsObject()
+    if not IsValid(physics) then return end
+    ent.BZCNNPCPhysicsShockInstalled = true
+    ent:AddCallback("PhysicsCollide", function(prop, data)
+        if not IsValid(prop) or not istable(data) or not IsValid(data.HitEntity) then return end
+        if isfunction(prop.IsPlayerHolding) and prop:IsPlayerHolding() then return end
+        if data.HitEntity:GetClass() == "prop_ragdoll"
+            and not ResolveNPC(data.HitEntity) then return end
+        local phys = prop:GetPhysicsObject()
+        if not IsValid(phys) then return end
+        local mass = phys:GetMass()
+        local velocity = phys:GetVelocity()
+        local speed = tonumber(data.Speed) or velocity:Length()
+        if mass <= 20 or speed <= math.max(700 - mass, 200)
+            or velocity:Length() <= 50 then return end
+        local victim = ResolvePhysicalVictim(data.HitEntity)
+        if not IsSupportedNPC(victim) or not IsAlive(victim) then return end
+        Support.ApplyPhysicalImpact(victim, prop,
+            isvector(data.HitPos) and data.HitPos or victim:WorldSpaceCenter(),
+            velocity:GetNormalized(), math.Clamp(speed * mass * 0.8, 2200, 18000),
+            "physics_shock", 2.1)
+        hook.Run("BZCNNPC_PhysicsShock", prop, victim, data)
+    end)
+end
+
+hook.Add("OnEntityCreated", "BZCNNPCSupport_PhysicsShockProps", function(ent)
+    timer.Simple(0.05, function() InstallPhysicsShockCallback(ent) end)
+end)
+
+local kickEnds = setmetatable({}, {__mode = "k"})
+hook.Add("Think", "BZCNNPCSupport_PlayerLegKickBridge", function()
+    for _, ply in ipairs(player.GetAll()) do
+        if not IsValid(ply) then continue end
+        local endTime = ply.GetNWFloat and ply:GetNWFloat("InLegKick", 0) or 0
+        local previous = tonumber(kickEnds[ply]) or 0
+        if endTime > CurTime() and endTime > previous + 0.05 then
+            kickEnds[ply] = endTime
+            timer.Simple(0.29, function()
+                if not IsValid(ply) or not ply:Alive()
+                    or not ply.GetNWFloat or ply:GetNWFloat("InLegKick", 0) <= CurTime() then return end
+                local angle = ply:EyeAngles()
+                local crouching = (ply.KeyDown and ply:KeyDown(IN_DUCK)) or ply:Crouching()
+                angle.p = crouching and 0 or math.max(angle.p, 10)
+                local character = hg and isfunction(hg.GetCurrentCharacter)
+                    and hg.GetCurrentCharacter(ply) or ply
+                local startPos = crouching
+                    and (ply:GetPos() + ply:OBBCenter() - ply:GetUp() * 5)
+                    or ply:EyePos()
+                local radius = Vector(5, 5, 5)
+                local trace = util.TraceHull({
+                    start = startPos,
+                    endpos = startPos + angle:Forward() * 82,
+                    mins = -radius,
+                    maxs = radius,
+                    filter = {ply, character, ply:GetActiveWeapon()},
+                    mask = MASK_SHOT
+                })
+                if not trace.Hit or not IsValid(trace.Entity) then return end
+                local victim = ResolvePhysicalVictim(trace.Entity)
+                if not IsSupportedNPC(victim) or victim == character then return end
+                Support.PerformKick(ply, trace.Entity, trace.HitPos, angle:Forward(),
+                    angle.p > 55 and not crouching and 22 or 14, 5600, false, "player_kick")
+            end)
+        end
+        if endTime <= CurTime() then kickEnds[ply] = endTime end
+    end
+end)
+
+hook.Add("OnPlayerHitGround", "BZCNNPCSupport_PlayerTackle", function(ply, inWater, onFloater, speed)
+    if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive()
+        or (tonumber(speed) or 0) < 330 then return end
+    local velocity = ply:GetVelocity()
+    if velocity:Length() < 160 then return end
+
+    local startPos = ply:GetPos() + Vector(0, 0, 18)
+    local direction = velocity:LengthSqr() > 1 and velocity:GetNormalized() or ply:GetForward()
+    local trace = util.TraceHull({
+        start = startPos,
+        endpos = startPos + direction * 58 - Vector(0, 0, 28),
+        mins = Vector(-16, -16, -8),
+        maxs = Vector(16, 16, 16),
+        filter = ply,
+        mask = MASK_PLAYERSOLID
+    })
+    local victim = IsValid(trace.Entity) and ResolvePhysicalVictim(trace.Entity) or nil
+    if not IsSupportedNPC(victim) or victim == ply or not IsAlive(victim) then return end
+    Support.PerformKick(ply, trace.Entity, trace.HitPos, direction, 14,
+        math.Clamp((tonumber(speed) or 330) * 18, 4200, 14000), true, "player_tackle")
+end)
+
+timer.Create("BZCNNPCSupport_PounceContact", 0.05, 0, function()
+    for _, attacker in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        local pounce = IsValid(attacker) and attacker.BZCNNPCPounce or nil
+        if not istable(pounce) then continue end
+        local target = pounce.target
+        if not IsValid(target) or CurTime() > (pounce.expires or 0)
+            or attacker:GetNW2Bool("BZCNNPCDowned", false) then
+            attacker.BZCNNPCPounce = nil
+            continue
+        end
+        if attacker:WorldSpaceCenter():DistToSqr(target:WorldSpaceCenter()) > 56 * 56 then continue end
+        local startPos = attacker:WorldSpaceCenter()
+        local endPos = target:WorldSpaceCenter()
+        local line = util.TraceLine({start = startPos, endpos = endPos, filter = {attacker, target}, mask = MASK_SOLID})
+        if line.Hit and line.Fraction < 0.98 then continue end
+
+        local direction = endPos - startPos
+        direction.z = 0
+        if direction:LengthSqr() < 1 then direction = attacker:GetForward() end
+        Support.PerformKick(attacker, target, endPos, direction, 16, 9000, true, "furry_pounce")
+        attacker.BZCNNPCPounce = nil
+        hook.Run("BZCNNPC_PounceHit", attacker, target)
+    end
 end)
 
 hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg)
