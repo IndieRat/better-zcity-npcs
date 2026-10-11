@@ -1891,6 +1891,30 @@ function ENT:OnKilled(damageInfo)
     -- If already downed, preserve that physical ragdoll and convert its shared
     -- physiology into the native dead-body organism format.
     if IsValid(deathRagdoll) then
+        -- Some death-ragdoll adapters create a fresh organism table and omit
+        -- the living body's wound records. Carry the actual wound state across
+        -- so fatal damage does not visually/physiologically erase prior wounds.
+        local sourceOrganism = self.organism or self.BZCN_Organism
+        local ragOrganism = deathRagdoll.organism or deathRagdoll.BZCN_Organism
+        if istable(sourceOrganism) then
+            if not istable(ragOrganism) then
+                ragOrganism = table.Copy(sourceOrganism)
+            else
+                for _, field in ipairs({
+                    "wounds", "arterialwounds", "internalBleed", "internalBleedHeal",
+                    "blood", "shock", "pain", "fractures", "brokenBones", "damage",
+                    "burns", "bulletwounds", "stabwounds"
+                }) do
+                    if sourceOrganism[field] ~= nil then
+                        ragOrganism[field] = istable(sourceOrganism[field])
+                            and table.Copy(sourceOrganism[field]) or sourceOrganism[field]
+                    end
+                end
+            end
+            deathRagdoll.organism = ragOrganism
+            deathRagdoll.BZCN_Organism = ragOrganism
+            if istable(ragOrganism) then ragOrganism.owner = deathRagdoll end
+        end
         self:Remove()
         return
     end
