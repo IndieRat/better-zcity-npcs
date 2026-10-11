@@ -328,7 +328,6 @@ function Tasks.RunIdleTask(ent)
     end
 
     if task == "stay" or task == "hold" or task == "observe" then
-        if self and false then end
         ent.loco:SetDesiredSpeed(0)
         local nearby
         for _, target in ipairs(ents.FindInSphere(ent:GetPos(), 360)) do
