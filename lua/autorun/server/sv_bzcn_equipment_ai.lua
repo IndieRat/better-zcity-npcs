@@ -42,6 +42,13 @@ end
 local function RemoveRuntimeWeapon(ent, key)
     local weapon = ent[key]
     ent[key] = nil
+    if key == "BZCNRuntimeWeapon" and IsValid(ent) and IsValid(weapon) then
+        local inventory = GetInventory(ent)
+        if istable(inventory.Weapons) and inventory.Weapons[weapon:GetClass()] == weapon then
+            inventory.Weapons[weapon:GetClass()] = true
+            if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
+        end
+    end
     if key == "BZCNRuntimeWeapon" and IsValid(ent) and ent.SetNW2Entity
         and (not IsValid(weapon) or ent:GetNW2Entity("BZCNRuntimeWeapon") == weapon) then
         ent:SetNW2Entity("BZCNRuntimeWeapon", NULL)
@@ -192,6 +199,34 @@ function BZCN.EquipRuntimeWeapon(ent, class)
     ent.BZCNRuntimeWeaponUnavailable = nil
     ent.BZCN_SelectedWeapon = class
     if ent.SetNW2String then ent:SetNW2String("BZCNWeaponClass", class) end
+
+    -- Z-City's inventory uses the live SWEP entity for an owned/held weapon.
+    -- Publishing that entity instead of leaving a stale "true" entry keeps
+    -- player-like inventory and loot/pickpocket adapters consistent.
+    local inventory = GetInventory(ent)
+    inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    inventory.Items = istable(inventory.Items) and inventory.Items or {}
+    inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+    inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
+    inventory.Weapons[class] = weapon
+
+    -- Seed one NPC's own reserve supply on first equipping a firearm. Extra
+    -- ammunition pickups are then tracked and spent by the NPC reload path.
+    local primary = istable(weapon.Primary) and weapon.Primary or {}
+    local ammoName = primary.Ammo
+    local clipSize = tonumber(primary.ClipSize) or 0
+    if isstring(ammoName) and ammoName ~= "" and clipSize > 0 then
+        local ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName)
+        local ammoKey = isnumber(ammoID) and ammoID >= 0 and ammoID or ammoName
+        ent.BZCNAmmoSeededClasses = ent.BZCNAmmoSeededClasses or {}
+        if not ent.BZCNAmmoSeededClasses[class] then
+            if inventory.Ammo[ammoKey] == nil and inventory.Ammo[tostring(ammoKey)] == nil then
+                inventory.Ammo[ammoKey] = clipSize * 2
+            end
+            ent.BZCNAmmoSeededClasses[class] = true
+        end
+    end
+    if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
     if BZCN.ShowHeldWeapon then BZCN.ShowHeldWeapon(ent) end
     return true
 end
