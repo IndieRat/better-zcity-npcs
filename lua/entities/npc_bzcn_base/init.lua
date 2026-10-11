@@ -21,16 +21,17 @@ local function HasSenseRecord(self, target, requireHostile)
 end
 
 local function GetWaterSurfacePosition(self)
-    local waterLevel = self:WaterLevel()
-    if waterLevel <= 0 then return nil end
+    if self:WaterLevel() <= 0 then return nil end
     local pos = self:WorldSpaceCenter()
-    local trace = util.TraceLine({
-        start = pos + Vector(0, 0, 16),
-        endpos = pos + Vector(0, 0, 768),
-        filter = self,
-        mask = MASK_WATER
-    })
-    if trace.Hit and isvector(trace.HitPos) then return trace.HitPos end
+    local contentsMask = CONTENTS_WATER or 32
+    -- Water brushes are not consistently returned by TraceLine. Sample point
+    -- contents upward instead and use the first dry point as the surface.
+    for height = 8, 768, 8 do
+        local sample = pos + Vector(0, 0, height)
+        if bit.band(util.PointContents(sample), contentsMask) == 0 then
+            return sample
+        end
+    end
     return nil
 end
 
@@ -55,7 +56,9 @@ local function UpdateSwimState(self)
         local desiredZ = surface.z - 42
         local verticalError = desiredZ - current.z
         if math.abs(verticalError) > 8 then
-            self.loco:SetVelocity(self:GetVelocity() + Vector(0, 0, math.Clamp(verticalError * 1.4, -80, 95)))
+            local velocity = self:GetVelocity()
+            self.loco:SetVelocity(Vector(velocity.x, velocity.y,
+                math.Clamp(velocity.z + verticalError * 1.4, -80, 95)))
         end
     end
 
@@ -1149,6 +1152,7 @@ function ENT:RunBehaviour()
         local downed = self:GetNW2Bool("BZCNNPCDowned", false)
         local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
             and hg.BZCNNPCSupport.IsGettingUp(self)
+        local swimming = UpdateSwimState(self)
         if downed or gettingUp then
             if self.loco then self.loco:SetDesiredSpeed(0) end
             coroutine.wait(0.1)
