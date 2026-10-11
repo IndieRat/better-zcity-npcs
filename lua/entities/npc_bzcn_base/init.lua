@@ -797,7 +797,13 @@ function ENT:FollowAlly(target)
             coroutine.wait(0.15)
         else
             if path:GetAge() > 0.35 or not path:IsValid() then
-                path:Compute(self, target:GetPos())
+                local computed = TryComputePathToGoal(path, self, target:GetPos())
+                if not computed then
+                    TryOpenDoorToward(self, target:GetPos())
+                    TrySafeUnstuck(self, target:GetPos())
+                    coroutine.wait(0.1)
+                    continue
+                end
             end
             if path:IsValid() then path:Update(self) end
             local speed = self:GetRunSpeed() or profile.Speed or self.MoveSpeed or 175
@@ -805,9 +811,7 @@ function ENT:FollowAlly(target)
                 and hg.BZCNNPCSupport.ShouldCrawl(self)
             self.loco:SetDesiredSpeed(speed * (crawl and 0.42 or 0.62))
             if self.loco:IsStuck() then
-                self.loco:ClearStuck()
-                if not (self.TryBZCNClimb and self:TryBZCNClimb()) then self.loco:Jump() end
-                return
+                TrySafeUnstuck(self, target:GetPos())
             end
             coroutine.yield()
         end
@@ -1216,6 +1220,18 @@ function ENT:ChaseEnemy(target)
         local baseSpeed = tonumber(self:GetRunSpeed()) or tonumber(profile.Speed)
             or tonumber(self.MoveSpeed) or 175
         local distance = self:GetPos():Distance(goalPos)
+        if profile.HeadcrabStyle == true and visible and distance > 58 and distance < 290
+            and now >= (self.BZCNNextPounceAt or 0) and self:OnGround() then
+            local direction = goalPos - self:GetPos()
+            direction.z = 0
+            if direction:LengthSqr() > 1 then
+                direction:Normalize()
+                self.BZCNNextPounceAt = now + 1.9
+                self.loco:Jump()
+                self.loco:SetVelocity(direction * 245 + Vector(0, 0, 155))
+                hook.Run("BZCN_HeadcrabPounce", self, target)
+            end
+        end
         local sprintStart = tonumber(profile.SprintStartRange) or 275
         local sprinting, stamina = UpdatePursuitStamina(self,
             distance > sprintStart and not (hg and hg.BZCNNPCSupport
