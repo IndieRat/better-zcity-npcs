@@ -239,10 +239,24 @@ local function ApplyTacticalOrder(ply, gesture)
         local companion = Profile(ent).Companion and owner == ply
         local friendly = isfunction(ent.IsBZCNAlly) and ent:IsBZCNAlly(ply)
         local kind = LineKind(ent)
-        if not companion and not (friendly and kind ~= "combine" and kind ~= "metrocop") then continue end
+        if not companion and not friendly then continue end
         if companion then
             SetOrder(ent, order, point)
             Companion.Say(ent, order == "follow" and "greeting" or "mood", ply)
+        elseif kind == "combine" or kind == "metrocop" then
+            local leader = IsValid(ent.BZCNSquadLeader) and ent.BZCNSquadLeader or ent
+            local command = order == "follow" and "regroup" or order
+            for _, member in ipairs(ents.FindInSphere(leader:GetPos(), 920)) do
+                if not Managed(member) then continue end
+                local memberKind = LineKind(member)
+                if memberKind ~= "combine" and memberKind ~= "metrocop" then continue end
+                if member.BZCNSquadLeader ~= leader and member ~= leader then continue end
+                member.BZCNSquadCommand = command
+                member.BZCNSquadCommandPos = point
+                member.BZCNSquadCommandUntil = CurTime() + 18
+                if member.SetNW2String then member:SetNW2String("BZCNSquadCommand", command) end
+                if isvector(point) and member.SetNW2Vector then member:SetNW2Vector("BZCNSquadCommandPos", point) end
+            end
         else
             ent.BZCNSquadCommand = order
             ent.BZCNSquadCommandPos = point
@@ -264,6 +278,94 @@ hook.Add("PlayerSay", "BZCN_CompanionTextOrders", function(ply, text)
         if GetCompanionOwner(ent) == ply then SetOrder(ent, order) end
     end
 end)
+
+function Companion.RunSquadTask(ent)
+    if not Managed(ent) or Profile(ent).Companion then return false end
+    local command = ent.BZCNSquadCommand
+    if not isstring(command) or command == ""
+        or (ent.BZCNSquadCommandUntil or 0) <= CurTime() then return false end
+
+    local profile = Profile(ent)
+    local speed = tonumber(profile.Speed) or 175
+    local point = ent.BZCNSquadCommandPos
+    local leader = IsValid(ent.BZCNSquadLeader) and ent.BZCNSquadLeader or nil
+
+    if command == "hold" then
+        ent.loco:SetDesiredSpeed(0)
+        local face = IsValid(leader) and leader:GetPos()
+            or (isvector(point) and point or ent:GetPos() + ent:GetForward() * 100)
+        ent.loco:FaceTowards(face)
+        coroutine.wait(0.2)
+        return true
+    end
+
+    if command == "regroup" or command == "follow" then
+        if IsValid(leader) and leader ~= ent then
+            point = leader:GetPos() + Vector(math.Rand(-90, 90), math.Rand(-90, 90), 0)
+        elseif not isvector(point) then
+            point = ent:GetPos() + ent:GetForward() * -180
+        end
+        if ent:GetPos():DistToSqr(point) > 145 * 145 then
+            local path = Path("Follow")
+            path:SetMinLookAheadDistance(110)
+            path:SetGoalTolerance(70)
+            path:Compute(ent, point)
+            if path:IsValid() then
+                ent.loco:SetDesiredSpeed(speed * 0.75)
+                path:Update(ent)
+            elseif ent.TryBZCNClimb then
+                ent:TryBZCNClimb()
+            end
+        else
+            ent.loco:SetDesiredSpeed(0)
+            if IsValid(leader) then ent.loco:FaceTowards(leader:GetPos()) end
+        end
+        coroutine.wait(0.2)
+        return true
+    end
+
+    if command == "cover" then
+        local threat = IsValid(ent.BZCNLastAttacker) and ent.BZCNLastAttacker or nil
+        local away = IsValid(threat) and (ent:GetPos() - threat:GetPos()) or ent:GetForward() * -1
+        away.z = 0
+        if away:LengthSqr() < 1 then away = ent:GetForward() * -1 end
+        away:Normalize()
+        local destination = ent:GetPos() + away * 145
+        local area = navmesh.GetNearestNavArea(destination, false, 280, false, true)
+        if IsValid(area) then destination = area:GetClosestPointOnArea(destination) end
+        if ent:GetPos():DistToSqr(destination) > 60 * 60 then
+            local path = Path("Follow")
+            path:SetMinLookAheadDistance(90)
+            path:SetGoalTolerance(45)
+            path:Compute(ent, destination)
+            if path:IsValid() then ent.loco:SetDesiredSpeed(speed * 0.72); path:Update(ent) end
+        else
+            ent.loco:SetDesiredSpeed(0)
+            if IsValid(threat) then ent.loco:FaceTowards(threat:GetPos()) end
+        end
+        coroutine.wait(0.2)
+        return true
+    end
+
+    if command == "investigate" and isvector(point) then
+        if ent:GetPos():DistToSqr(point) > 85 * 85 then
+            local path = Path("Follow")
+            path:SetMinLookAheadDistance(100)
+            path:SetGoalTolerance(50)
+            path:Compute(ent, point)
+            if path:IsValid() then ent.loco:SetDesiredSpeed(speed * 0.62); path:Update(ent)
+            elseif ent.TryBZCNClimb then ent:TryBZCNClimb() end
+        else
+            ent.loco:SetDesiredSpeed(0)
+            ent.BZCNSquadCommand = "hold"
+            ent.BZCNSquadCommandPos = point
+        end
+        coroutine.wait(0.2)
+        return true
+    end
+
+    return false
+end
 
 function Companion.RunIdleTask(ent)
     local p = Profile(ent)
