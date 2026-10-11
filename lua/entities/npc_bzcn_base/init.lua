@@ -1559,7 +1559,32 @@ function ENT:ChaseEnemy(target)
                                     if not IsValid(phys) then phys = rag:GetPhysicsObject() end
                                     if IsValid(phys) then
                                         phys:Wake()
-                                        phys:SetVelocity(direction * 285 + Vector(0, 0, 115))
+                                        -- Preserve inherited movement instead of replacing it with a fixed launch speed.
+                                        local inherited = phys:GetVelocity()
+                                        local launchImpulse = direction * 285 + Vector(0, 0, 115)
+                                        phys:SetVelocity(inherited + launchImpulse)
+
+                                        -- The shared fake actor keeps an aim target and a stable per-tick
+                                        -- shadow target for physical movement; the launch momentum remains intact.
+                                        if BZCN and BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
+                                            local fakeActor = BZCN.FakeActor.Attach(self, rag, {
+                                                gain = 1.5,
+                                                maxCorrection = 100,
+                                                maxSpeed = 650,
+                                                maxSpeedDamp = 850,
+                                                maxAngular = 1100,
+                                                maxAngularDamp = 1500,
+                                                dampFactor = 0.75,
+                                                aimWeight = 0.12
+                                            })
+                                            if fakeActor then
+                                                fakeActor:SetMode("pounce")
+                                                fakeActor:SetMoveVelocity(phys:GetVelocity())
+                                                local aimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+                                                    and BZCNCombatActor.GetTargetAimPoint(target)
+                                                fakeActor:SetAimTarget(isvector(aimPoint) and aimPoint or target:WorldSpaceCenter())
+                                            end
+                                        end
                                     end
                                 end)
                             end
