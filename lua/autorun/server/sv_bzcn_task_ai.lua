@@ -55,6 +55,7 @@ local function GetKind(ent)
     local profile = ent.BZCNClassProfile or {}
     local class = string.lower(tostring(ent.BZCNClass or ent.PlayerClassName or ""))
     local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+    if ent.BZCNGoodCopDefected then return "rebel" end
     if profile.FurryStyle == true or class == "furry" or class == "furry_companion" or faction == "furry" then return "furry" end
     if class == "headcrab" or profile.HeadcrabStyle == true then return "headcrab" end
     if class == "headcrab_zombie" or profile.ZombieStyle == true then return "zombie" end
