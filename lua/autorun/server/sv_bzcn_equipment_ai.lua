@@ -1129,6 +1129,8 @@ hook.Add("KeyPress", "BZCN_PlayerFurryManagedNPCGrab", function(ply, button)
     if not trace or not IsValid(trace.Entity) then return end
     local target = ResolveManagedNPCFromFurryEntity(trace.Entity)
     if not IsValid(target) or target:Health() <= 0 or IsFurryTarget(target) then return end
+    local physicallyReachable = TraceFurryGrab(ply, target, weapon)
+    if not physicallyReachable then return end
     if ply:WorldSpaceCenter():Distance(target:WorldSpaceCenter()) > 112 then return end
     local support = hg and hg.BZCNNPCSupport
     if not support or not isfunction(support.EnterDownedState) then return end
