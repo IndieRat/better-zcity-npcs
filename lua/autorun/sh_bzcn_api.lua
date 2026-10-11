@@ -722,10 +722,17 @@ if SERVER then
         for class, value in pairs(inventory.Weapons or {}) do if value then weaponsFound[#weaponsFound + 1] = class end end
         table.sort(weaponsFound)
         local state = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.GetNPCHealthTable(target)
+        local grab = target.BZCNFurryGrab
+        local grabTarget = istable(grab) and grab.target or nil
+        local grabOrg = IsValid(grabTarget) and (grabTarget.organism or grabTarget.BZCN_Organism) or nil
+        if not istable(grabOrg) and istable(grab) and IsValid(grab.rag) then grabOrg = grab.rag.organism end
+        local faction = target.BZCN_Faction or target:GetNetVar("BZCNFaction", "(none)")
+        local teamName = isfunction(target.GetTeamName) and target:GetTeamName() or target.BZCN_TeamName or "(none)"
         local lines = {
             "[BZCN] " .. target:GetClass() .. " #" .. target:EntIndex(),
             "PlayerClassName: " .. tostring(target.PlayerClassName) .. " | IsPlayer(): " .. tostring(target:IsPlayer()),
             "Name: " .. tostring(target:Nick()) .. " | Health: " .. target:Health() .. "/" .. (target.BZCNClassProfile and target.BZCNClassProfile.Health or 0),
+            "Faction/team: " .. tostring(faction) .. " / " .. tostring(teamName),
             "Inventory.Weapons: " .. (#weaponsFound > 0 and table.concat(weaponsFound, ", ") or "(empty)"),
             "Selected weapon: " .. tostring(target.BZCN_SelectedWeapon or target:GetNW2String("BZCNWeaponClass", "(none)")),
             "Runtime SWEP: " .. tostring(IsValid(target.BZCNRuntimeWeapon) and target.BZCNRuntimeWeapon:GetClass() or "(none)"),
@@ -733,6 +740,9 @@ if SERVER then
                 .. " / " .. tostring(IsValid(target.BZCNRuntimeMedicalWeapon) and target.BZCNRuntimeMedicalWeapon:GetClass() or "(none)"),
             "IX animation class: " .. tostring(isfunction(target.GetBZCNAnimationClass) and target:GetBZCNAnimationClass() or "(pending)"),
             "Movement state: " .. tostring(target.BZCNMovementState or target:GetNW2String("BZCNMovementState", "(pending)")),
+            "Furry grab: " .. tostring(istable(grab)) .. " | target: "
+                .. tostring(IsValid(grabTarget) and (grabTarget:EntIndex() .. " " .. grabTarget:GetClass()) or "(none)")
+                .. " | assimilation: " .. tostring(istable(grabOrg) and grabOrg.assimilated or "(n/a)"),
             "Medical inventory: " .. tostring(istable(inventory.Weapons) and inventory.Weapons.weapon_medkit_sh == true)
                 .. " / " .. tostring(istable(inventory.Weapons) and inventory.Weapons.weapon_bandage_sh == true),
             "Netvars + Inventory bridge: " .. tostring(isfunction(target.GetNetVar) and isfunction(target.SetNetVar)),
