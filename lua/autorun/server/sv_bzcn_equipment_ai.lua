@@ -86,6 +86,14 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     -- weapon_hands_sh initializes with fists lowered. Do not raise them here:
     -- Z-City furry grab/assimilation is bound to RMB with fists lowered.
     -- AttackRuntimeMelee raises them only during a punch action.
+    if class == "weapon_hands_sh" and owner.BZCNClassProfile
+        and owner.BZCNClassProfile.FurryStyle == true then
+        -- The engine doesn't run Player active-weapon input for a NextBot.
+        -- Drive ApplyForce from the adapter Think hook below instead, once per
+        -- server frame, so the native assimilation rate and hold force stay real.
+        weapon.BZCNRuntimeManualThink = true
+        weapon.Think = function() end
+    end
 
     if weapon.SetClip1 and not MEDICAL_WEAPONS[class] then
         local clip = weapon.GetMaxClip1 and weapon:GetMaxClip1() or 0
@@ -825,6 +833,31 @@ timer.Create("BZCN_MedicalAI", 1, 0, function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if IsValid(ent) and BZCN.IsManaged(ent) then
             BZCN.TryUseMedicalItem(ent)
+        end
+    end
+end)
+
+-- NextBots don't receive Z-City's Player active-weapon Think/input loop.
+-- Pump its native carry function every server frame while a furry grab is active.
+-- This is what applies the force and advances the actual SWEP assimilation code.
+hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        local state = IsValid(ent) and ent.BZCNFurryGrab or nil
+        if not state then continue end
+        local target = state.target
+        local weapon = state.weapon
+        if not IsValid(target) or not IsValid(weapon) then
+            BZCN.StopFurryAssimilation(ent)
+            continue
+        end
+        ent.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, IN_ATTACK2)
+        if isfunction(weapon.ApplyForce) then
+            local ok, err = pcall(weapon.ApplyForce, weapon)
+            if not ok then
+                ErrorNoHalt("[BZCN] furry carry update failed for NPC #"
+                    .. tostring(ent:EntIndex()) .. ": " .. tostring(err) .. "\\n")
+                BZCN.StopFurryAssimilation(ent)
+            end
         end
     end
 end)
