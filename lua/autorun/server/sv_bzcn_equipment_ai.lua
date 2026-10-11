@@ -676,7 +676,8 @@ end
 local function NeedsMedicalAttention(target)
     if not IsValid(target) or target:Health() <= 0 then return false, 0 end
     local org = target.organism or target.BZCN_Organism
-    local hasOrganism = istable(org)
+    local hasOrganism = istable(org) and (org.owner ~= nil or org.fakePlayer == true
+        or org.blood ~= nil or org.wounds ~= nil or org.arterialwounds ~= nil)
     if not hasOrganism then org = {} end
 
     local wounds = WoundCount(org.wounds) + WoundCount(org.arterialwounds)
@@ -762,7 +763,10 @@ local function UseMedicalItem(healer, target, class)
 
     local applied = false
     local targetOrg = target.organism or target.BZCN_Organism
-    if not istable(targetOrg) then
+    local targetHasOrganism = istable(targetOrg) and (targetOrg.owner ~= nil
+        or targetOrg.fakePlayer == true or targetOrg.blood ~= nil
+        or targetOrg.wounds ~= nil or targetOrg.arterialwounds ~= nil)
+    if not targetHasOrganism then
         -- Fallback first aid for ordinary Source NPCs that have no Z-City
         -- organism table: improve their engine health instead of trying to run
         -- the organism-only medkit implementation on an empty table.
