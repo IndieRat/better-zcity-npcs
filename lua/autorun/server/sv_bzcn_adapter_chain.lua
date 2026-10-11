@@ -253,25 +253,30 @@ end
 local function ResolveSensedEntity(ent)
     if not IsValid(ent) then return nil end
     local owner = ent.BZCNNPCOwner
-    if not IsValid(owner) and ent.GetNW2Entity then
-        owner = ent:GetNW2Entity("BZCNNPCOwner")
+    if not IsValid(owner) and ent.GetNW2Entity then owner = ent:GetNW2Entity("BZCNNPCOwner") end
+    if not IsValid(owner) and ent.GetNWEntity then owner = ent:GetNWEntity("BZCNNPCOwner") end
+    if not IsValid(owner) and ent.GetClass and ent:GetClass() == "prop_ragdoll" then
+        owner = ent.ply or ent.Player
+        if not IsValid(owner) and hg and isfunction(hg.RagdollOwner) then
+            local ok, result = pcall(hg.RagdollOwner, ent)
+            if ok then owner = result end
+        end
     end
-    if IsValid(owner) then return owner end
+    if IsValid(owner) and owner ~= ent then return owner end
     return ent
 end
 
 local function HasLineOfSight(observer, target)
+    if BZCNCombatActor and BZCNCombatActor.HasLineOfSight then
+        return BZCNCombatActor.HasLineOfSight(observer, target)
+    end
     local startPos = SafeCall(observer, "EyePos") or observer:WorldSpaceCenter()
     local endPos = target:WorldSpaceCenter()
     local filter = {observer, target}
     if IsValid(observer.BZCNHeldWeaponProxy) then filter[#filter + 1] = observer.BZCNHeldWeaponProxy end
     if IsValid(target.BZCNHeldWeaponProxy) then filter[#filter + 1] = target.BZCNHeldWeaponProxy end
-
     local trace = util.TraceLine({
-        start = startPos,
-        endpos = endPos,
-        filter = filter,
-        mask = MASK_VISIBLE
+        start = startPos, endpos = endPos, filter = filter, mask = MASK_VISIBLE
     })
     return not trace.Hit or trace.Fraction >= 0.999
 end
@@ -293,11 +298,15 @@ function BZCN.SenseNPC(observer, radius)
         local nativeNPC = candidate:IsNPC()
         if not candidate:IsPlayer() and not IsManagedNPC(candidate) and not nativeNPC then return end
         if GetHealth(candidate) <= 0 then return end
-        local distanceSquared = observer:GetPos():DistToSqr(candidate:GetPos())
+        local targetPosition = BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+            and BZCNCombatActor.GetTargetPosition(candidate) or candidate:GetPos()
+        if not isvector(targetPosition) then targetPosition = candidate:GetPos() end
+        local distanceSquared = observer:GetPos():DistToSqr(targetPosition)
         if distanceSquared > radius * radius then return end
         if not HasLineOfSight(observer, candidate) then return end
         candidateList[#candidateList + 1] = {
             Entity = candidate,
+            Position = targetPosition,
             DistanceSquared = distanceSquared,
             Distance = math.sqrt(distanceSquared)
         }
