@@ -67,7 +67,9 @@ BZCN.RegisterClass("Combine", {
 BZCN.RegisterClass("Metrocop", {
     Name = "Metro Police", PlayerClassName = "Metrocop", TeamName = "Combine",
     Model = "models/player/police.mdl", Health = 115, Speed = 172,
-    Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
+    -- Civil Protection starts watchful instead of treating an ordinary player as
+    -- hostile on sight. Attacks and recent ally-threat memory still escalate.
+    Faction = "Combine", EnemyPlayers = false, EnemyFactions = {"Rebel", "furry"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 160, HelpRange = 1350, HelpMemory = 10,
     AnimationClass = "metrocop", AnimationHoldType = "smg", Ranged = false, WeaponDamage = 10,
     WeaponRange = 1150, AttackDelay = 0.38, MedicalRange = 320, CanScavengeWeapons = true,
