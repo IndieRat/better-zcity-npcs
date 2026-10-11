@@ -1085,6 +1085,10 @@ local function TraceFurryGrab(attacker, target, weapon)
 end
 
 function BZCN.TryFurryAssimilation(attacker, target)
+    if BZCN.RuleEnabled and not BZCN.RuleEnabled("furry_grabs") then
+        if IsValid(attacker) then BZCN.StopFurryAssimilation(attacker) end
+        return false
+    end
     if not IsValid(attacker) or not IsValid(target) or not BZCN.IsManaged(attacker) then
         if IsValid(attacker) then BZCN.StopFurryAssimilation(attacker) end
         return false
