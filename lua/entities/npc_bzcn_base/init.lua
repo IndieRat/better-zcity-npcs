@@ -63,9 +63,15 @@ local function UpdateSwimState(self)
     end
 
     if self.LookupSequence and self.ResetSequence then
-        local sequence = self:LookupSequence("swim_all")
-        if not sequence or sequence < 0 then sequence = self:LookupSequence("swim") end
-        if sequence and sequence >= 0 and self.BZCNSwimSequence ~= sequence then
+        local sequence
+        for _, name in ipairs({"swim_all", "swim", "swimforward", "swimleft"}) do
+            local candidate = self:LookupSequence(name)
+            if candidate and candidate >= 0 then
+                sequence = candidate
+                break
+            end
+        end
+        if sequence and self.BZCNSwimSequence ~= sequence then
             self.BZCNSwimSequence = sequence
             self:ResetSequence(sequence)
             self:SetCycle(0)
@@ -73,7 +79,8 @@ local function UpdateSwimState(self)
         end
     end
     if self.SetPoseParameter then
-        pcall(self.SetPoseParameter, self, "aim_pitch", 0.5)
+        -- Source aim pitch uses negative angles for looking upward.
+        pcall(self.SetPoseParameter, self, "aim_pitch", 0.12)
         pcall(self.SetPoseParameter, self, "move_x", 0.5)
         pcall(self.SetPoseParameter, self, "move_y", 0.5)
     end
@@ -1158,26 +1165,36 @@ function ENT:RunBehaviour()
             coroutine.wait(0.1)
         elseif swimming then
             local enemy = self:HaveEnemy()
-            local waterTarget
+            local targetPoint
             if IsValid(enemy) then
-                waterTarget = BZCNCombatActor and BZCNCombatActor.GetTargetPosition
-                    and BZCNCombatActor.GetTargetPosition(enemy) or enemy:GetPos()
-            else
-                local surface = GetWaterSurfacePosition(self)
-                if surface then
-                    local away = self:GetPos() - surface
-                    away.z = 0
-                    if away:LengthSqr() < 1 then away = self:GetForward() end
-                    waterTarget = self:GetPos() + away:GetNormalized() * 180
-                end
+                targetPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+                    and BZCNCombatActor.GetTargetAimPoint(enemy) or enemy:WorldSpaceCenter()
             end
-            if self.loco and isvector(waterTarget) then
+
+            if self.loco then
+                local velocity = self:GetVelocity()
+                local desired = Vector(velocity.x * 0.35, velocity.y * 0.35, 0)
+                if isvector(targetPoint) then
+                    local delta = targetPoint - self:WorldSpaceCenter()
+                    delta.z = 0
+                    if delta:LengthSqr() > 64 then desired = desired + delta:GetNormalized() * 105 end
+                end
+
+                -- Stroke toward the target while applying a capped buoyancy
+                -- correction. Avoid navmesh paths here: most maps have no
+                -- underwater nav areas, so a normal Follow path stalls.
+                local surface = GetWaterSurfacePosition(self)
+                local vertical = math.Clamp(velocity.z, -35, 35)
+                if surface then
+                    local errorZ = (surface.z - 42) - self:GetPos().z
+                    vertical = math.Clamp(vertical + errorZ * 0.35, -45, 65)
+                else
+                    vertical = math.max(vertical, 12)
+                end
+                desired.z = vertical
                 self.loco:SetDesiredSpeed(math.max(tonumber(self.BZCNClassProfile and self.BZCNClassProfile.Speed) or 175, 140))
-                local path = Path("Follow")
-                path:SetMinLookAheadDistance(80)
-                path:SetGoalTolerance(40)
-                path:Compute(self, waterTarget)
-                if path:IsValid() then path:Update(self) end
+                self.loco:SetVelocity(desired)
+                if isvector(targetPoint) then self.loco:FaceTowards(targetPoint) end
             end
             UpdatePursuitStamina(self, false)
             coroutine.wait(0.1)
