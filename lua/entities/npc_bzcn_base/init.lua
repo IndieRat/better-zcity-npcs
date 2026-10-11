@@ -816,8 +816,9 @@ function ENT:ChaseEnemy(target)
 
         local goalPos = (visible or impulseTracking) and target:GetPos() or lastSeenPos
         local loseDistance = tonumber(self.LoseTargetDist) or 1400
-        if self:GetPos():DistToSqr(goalPos) > loseDistance * loseDistance then return end
-        if not visible and self:GetPos():DistToSqr(goalPos) <= 64 * 64 then return end
+        if not impulseTracking and self:GetPos():DistToSqr(goalPos) > loseDistance * loseDistance then return end
+        if not visible and not impulseTracking
+            and self:GetPos():DistToSqr(goalPos) <= 64 * 64 then return end
 
         local downed = self:GetNW2Bool("BZCNNPCDowned", false)
         local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
