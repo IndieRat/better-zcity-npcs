@@ -108,6 +108,25 @@ function ENT:Initialize()
     self.BZCNClassProfile = self.BZCNClassProfile or profile
     self.BZCN_Faction = profile.Faction or className
 
+    -- Give each spawned NPC a valid random choice from its class loadout.
+    -- Only select weapons that were added to that NPC's inventory and actually
+    -- exist in the mounted Z-City weapon registry.
+    local runtimeProfile = self.BZCNClassProfile
+    local choices = runtimeProfile and runtimeProfile.WeaponChoices
+    local inventory = isfunction(self.GetNetVar) and self:GetNetVar("Inventory", {}) or {}
+    local owned = istable(inventory) and inventory.Weapons or {}
+    local available = {}
+    for _, weaponClass in ipairs(istable(choices) and choices or {}) do
+        if owned[weaponClass] and weapons and weapons.GetStored
+            and istable(weapons.GetStored(weaponClass)) then
+            available[#available + 1] = weaponClass
+        end
+    end
+    if #available > 0 then
+        self.BZCN_SelectedWeapon = available[math.random(#available)]
+        self:SetNW2String("BZCNWeaponClass", self.BZCN_SelectedWeapon)
+    end
+
     if className == "default" then
         local appearance
         local appearanceApplied = false
@@ -711,14 +730,51 @@ function ENT:HaveEnemy()
 end
 
 function ENT:ChaseEnemy(target)
-    if not IsValid(target) then return end
+    if not IsValid(target) or not self.loco then return end
+
     local path = Path("Follow")
     path:SetMinLookAheadDistance(250)
     path:SetGoalTolerance(45)
-    path:Compute(self, target:GetPos())
-    if not path:IsValid() then return end
 
-    while path:IsValid() and self:IsBZCNEnemy(target) and HasSenseRecord(self, target, true) do
+    local lastSeenPos = target:GetPos()
+    local lastSeenAt = CurTime()
+    local pathGoal
+    local nextPathCompute = 0
+    local stuckCount = 0
+    local profile = self:GetBZCNProfile()
+    local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
+    local meleeOnlyWeapon = weaponClass == "weapon_hands_sh"
+        or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
+    local hasRangedWeapon = profile.Ranged == true and not meleeOnlyWeapon
+        and profile.FurryStyle ~= true
+
+    while IsValid(target) and self:IsBZCNEnemy(target) do
+        local now = CurTime()
+        local visible = HasSenseRecord(self, target, true)
+        if visible then
+            lastSeenPos = target:GetPos()
+            lastSeenAt = now
+            self.BZCNEnemyMemory = {
+                Entity = target,
+                Position = lastSeenPos,
+                Time = lastSeenAt
+            }
+        else
+            local memory = self.BZCNEnemyMemory
+            if memory and memory.Entity == target and isvector(memory.Position)
+                and now - (tonumber(memory.Time) or 0) <= 4 then
+                lastSeenPos = memory.Position
+                lastSeenAt = memory.Time
+            elseif now - lastSeenAt > 4 then
+                return
+            end
+        end
+
+        local goalPos = visible and target:GetPos() or lastSeenPos
+        local loseDistance = tonumber(self.LoseTargetDist) or 1400
+        if self:GetPos():DistToSqr(goalPos) > loseDistance * loseDistance then return end
+        if not visible and self:GetPos():DistToSqr(goalPos) <= 64 * 64 then return end
+
         local downed = self:GetNW2Bool("BZCNNPCDowned", false)
         local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
             and hg.BZCNNPCSupport.IsGettingUp(self)
@@ -727,12 +783,15 @@ function ENT:ChaseEnemy(target)
             coroutine.wait(0.1)
             return
         end
-        if CurTime() < (self.BZCNMedicalUntil or 0) then
+        if now < (self.BZCNMedicalUntil or 0) then
             self.loco:SetDesiredSpeed(0)
-            if IsValid(self.BZCNMedicalTarget) then self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos()) end
+            if IsValid(self.BZCNMedicalTarget) then
+                self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos())
+            end
             coroutine.wait(0.1)
             continue
         end
+
         if self.BZCNFurryGrab then
             local grabbedTarget = self.BZCNFurryGrab.target
             local stillHolding = IsValid(grabbedTarget) and BZCN
@@ -746,14 +805,16 @@ function ENT:ChaseEnemy(target)
             end
         end
 
-        if path:GetAge() > 0.4 then path:Compute(self, target:GetPos()) end
+        profile = self:GetBZCNProfile()
+        local baseSpeed = tonumber(self:GetRunSpeed()) or tonumber(profile.Speed)
+            or tonumber(self.MoveSpeed) or 175
+        local distance = self:GetPos():Distance(goalPos)
+        local sprintStart = tonumber(profile.SprintStartRange) or 275
+        local sprinting, stamina = UpdatePursuitStamina(self,
+            distance > sprintStart and not (hg and hg.BZCNNPCSupport
+                and hg.BZCNNPCSupport.ShouldCrawl and hg.BZCNNPCSupport.ShouldCrawl(self)))
         local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
             and hg.BZCNNPCSupport.ShouldCrawl(self)
-        local profile = self:GetBZCNProfile()
-        local baseSpeed = self:GetRunSpeed() or profile.Speed or self.MoveSpeed or 175
-        local distance = self:GetPos():Distance(target:GetPos())
-        local sprintStart = tonumber(profile.SprintStartRange) or 275
-        local sprinting, stamina = UpdatePursuitStamina(self, distance > sprintStart and not crawling)
         local desiredSpeed = baseSpeed
         if crawling then
             desiredSpeed = baseSpeed * 0.42
@@ -762,15 +823,66 @@ function ENT:ChaseEnemy(target)
         elseif distance > sprintStart and stamina <= 8 then
             desiredSpeed = baseSpeed * 0.78
         end
+
+        local actualDistance = visible and self:GetPos():Distance(target:GetPos()) or math.huge
+        local engageDistance = 32
+        if hasRangedWeapon then
+            engageDistance = math.Clamp((tonumber(profile.WeaponRange) or 900) * 0.35, 220, 360)
+        elseif profile.FurryStyle == true then
+            engageDistance = math.max(32, (tonumber(profile.FurryGrabRange) or 86) * 0.68)
+        end
+
+        -- Firearms should stop at a usable range instead of trying to occupy
+        -- the same position as the target. Face the enemy while attacking.
+        if visible and actualDistance <= engageDistance then
+            self.loco:SetDesiredSpeed(0)
+            self.loco:FaceTowards(target:WorldSpaceCenter())
+            self.BZCNEnemy = target
+            self:AttackTarget(target)
+            coroutine.wait(0.1)
+            continue
+        end
+
         self.loco:SetDesiredSpeed(desiredSpeed)
-        path:Update(self)
-        if self:GetPos():DistToSqr(target:GetPos()) < (profile.WeaponRange or 900)^2 then
+        local mustCompute = now >= nextPathCompute and (
+            not path:IsValid()
+            or path:GetAge() > 0.4
+            or not isvector(pathGoal)
+            or pathGoal:DistToSqr(goalPos) > 64 * 64
+        )
+        if mustCompute then
+            pcall(path.Compute, path, self, goalPos)
+            pathGoal = goalPos
+            nextPathCompute = now + 0.4
+        end
+
+        -- PathFollower fails when no usable navmesh path exists. A direct
+        -- locomotion approach is a fallback so an otherwise valid enemy chase
+        -- does not abort at the first invalid path.
+        if path:IsValid() then
+            path:Update(self)
+        else
+            self.loco:Approach(goalPos, 1)
+        end
+        self.loco:FaceTowards(visible and target:GetPos() or goalPos)
+
+        local range = tonumber(profile.WeaponRange) or 900
+        if visible and self:GetPos():DistToSqr(target:GetPos()) <= range * range then
+            self.BZCNEnemy = target
             self:AttackTarget(target)
         end
+
         if self.loco:IsStuck() then
             self.loco:ClearStuck()
+            stuckCount = stuckCount + 1
+            nextPathCompute = 0
             if not (self.TryBZCNClimb and self:TryBZCNClimb()) then self.loco:Jump() end
-            return
+            if stuckCount >= 5 then
+                self.BZCNNextChaseRetry = CurTime() + 0.75
+                return
+            end
+        else
+            stuckCount = 0
         end
         coroutine.yield()
     end
