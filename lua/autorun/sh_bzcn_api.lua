@@ -189,6 +189,21 @@ function BZCN.InstallAdapter(ent)
         end
         hg.BZCNFakeGuardInstalled = true
     end
+    if SERVER and hg and isfunction(hg.LightStunPlayer)
+        and not hg.BZCNLightStunGuardInstalled then
+        local nativeLightStunPlayer = hg.LightStunPlayer
+        hg.LightStunPlayer = function(target, ...)
+            -- Assimilation's native callback is Player-oriented. Managed NPCs
+            -- retain the organism timer without entering the player-only stun path.
+            if IsValid(target) and BZCN.IsManaged and BZCN.IsManaged(target) then
+                local organ = target.organism or target.BZCN_Organism
+                if istable(organ) then organ.lightstun = CurTime() + 1 end
+                return
+            end
+            return nativeLightStunPlayer(target, ...)
+        end
+        hg.BZCNLightStunGuardInstalled = true
+    end
 
     -- Preserve the original Z-City netvar functions. Many organism modules
     -- use SetNetVar for wounds/armor/name sync; a BZCN-only replacement makes
