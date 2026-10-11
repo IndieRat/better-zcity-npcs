@@ -957,7 +957,37 @@ end
 
 hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
-        local state = IsValid(ent) and ent.BZCNFurryGrab or nil
+        if not IsValid(ent) then continue end
+
+        -- Z-City's player assimilation path calls hg.Furrify(), which is
+        -- Player-only. If a player fills the meter on a managed civilian's
+        -- shared ragdoll organism, finish the equivalent NPC class conversion.
+        local organ = ent.organism or ent.BZCN_Organism
+        if not IsFurryTarget(ent) and not ent.BZCNFurryConversionPending
+            and istable(organ) and (tonumber(organ.assimilated) or 0) >= 0.999 then
+            ent.BZCNFurryConversionPending = true
+            timer.Simple(0, function()
+                if not IsValid(ent) then return end
+                local currentOrgan = ent.organism or ent.BZCN_Organism
+                if not IsFurryTarget(ent) and istable(currentOrgan)
+                    and (tonumber(currentOrgan.assimilated) or 0) >= 0.999 then
+                    local support = hg and hg.BZCNNPCSupport
+                    if ent:GetNW2Bool("BZCNNPCDowned", false)
+                        and support and isfunction(support.Recover) then
+                        pcall(support.Recover, ent, ent.BZCNNPCRagdoll, true)
+                    end
+                    local converted = BZCN.ChangeClass(ent, "furry", false)
+                    if converted then
+                        local convertedOrgan = ent.organism or ent.BZCN_Organism
+                        if istable(convertedOrgan) then convertedOrgan.assimilated = 0 end
+                        hook.Run("BZCN_NPCFurryAssimilationComplete", nil, ent, true)
+                    end
+                end
+                if IsValid(ent) then ent.BZCNFurryConversionPending = nil end
+            end)
+        end
+
+        local state = ent.BZCNFurryGrab
         if not state then continue end
         local target = state.target
         local weapon = state.weapon
