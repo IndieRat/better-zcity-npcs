@@ -629,8 +629,17 @@ end
 local function SendFriendsToHelp(source)
     if not IsValid(source) then return end
     for _, helper in ipairs(ents.FindInSphere(source:GetPos(), 1200)) do
-        if helper == source or not Managed(helper) or not isfunction(helper.IsBZCNAlly)
-            or not helper:IsBZCNAlly(source) or not CanHelp(helper, source) then continue end
+        if helper == source or not Managed(helper) or not CanHelp(helper, source) then continue end
+        local sourceIsThreat = isfunction(helper.IsBZCNEnemy) and helper:IsBZCNEnemy(source)
+        local sourceIsAlly = isfunction(helper.IsBZCNAlly) and helper:IsBZCNAlly(source)
+        local armedVolunteer = IsArmed(helper) and not sourceIsThreat
+            and (LineKind(helper) == "rebel" or sourceIsAlly
+                or LineKind(helper) == "metrocop" or Profile(helper).Companion == true)
+        -- A help yell recruits nearby willing armed people, not just entities
+        -- that already share a formal faction relation. Never call an enemy
+        -- to rescue someone they are currently hunting.
+        if not sourceIsAlly and not armedVolunteer then continue end
+        if sourceIsThreat then continue end
         helper.BZCNHelpTarget = source
         helper.BZCNHelpUntil = CurTime() + 20
         helper.BZCNMedicalTarget = source
