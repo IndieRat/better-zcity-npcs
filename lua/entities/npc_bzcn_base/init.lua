@@ -1002,6 +1002,43 @@ function ENT:RunBehaviour()
                 if IsValid(self.BZCNMedicalTarget) then self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos()) end
             end
             coroutine.wait(0.1)
+        elseif IsValid(self.BZCNFleeThreat) and (self.BZCNFleeUntil or 0) > CurTime() then
+            local threat = self.BZCNFleeThreat
+            if self.loco and IsValid(threat) then
+                local away = self:GetPos() - threat:GetPos()
+                away.z = 0
+                if away:LengthSqr() < 1 then away = self:GetForward() * -1 end
+                away:Normalize()
+                local destination = self:GetPos() + away * math.Rand(420, 700)
+                local area = navmesh.GetNearestNavArea(destination, false, 300, false, true)
+                if IsValid(area) then destination = area:GetClosestPointOnArea(destination) end
+                local path = Path("Follow")
+                path:SetMinLookAheadDistance(100)
+                path:SetGoalTolerance(50)
+                path:Compute(self, destination)
+                if path:IsValid() then
+                    self.loco:SetDesiredSpeed(math.max(tonumber(self.BZCNClassProfile and self.BZCNClassProfile.Speed) or 175, 190))
+                    local stopAt = CurTime() + 1.4
+                    while path:IsValid() and CurTime() < stopAt
+                        and IsValid(self.BZCNFleeThreat) and self.BZCNFleeUntil > CurTime()
+                        and not self:GetNW2Bool("BZCNNPCDowned", false) do
+                        if path:GetAge() > 0.35 then path:Compute(self, destination) end
+                        if path:IsValid() then path:Update(self) end
+                        if self.loco:IsStuck() then
+                            self.loco:ClearStuck()
+                            if self.TryBZCNClimb and self:TryBZCNClimb() then break end
+                            self.loco:Jump()
+                            break
+                        end
+                        coroutine.wait(0.1)
+                    end
+                end
+            end
+            if (self.BZCNFleeUntil or 0) <= CurTime() then
+                self.BZCNFleeThreat = nil
+                self.BZCNFleeUntil = nil
+            end
+            coroutine.wait(0.1)
         else
             local enemy = self:HaveEnemy()
             if IsValid(enemy) then
