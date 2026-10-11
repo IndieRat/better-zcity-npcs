@@ -527,11 +527,31 @@ function ENT:PlayBZCNAttackAnimation()
 end
 
 function ENT:AttackTarget(target)
+    local profile = self:GetBZCNProfile()
+    local now = CurTime()
+
+    -- Once the paws have secured a target, continue the hold/assimilation loop
+    -- even if the hidden owner is no longer visible to the ordinary sense scan.
+    if profile.FurryStyle and self.BZCNFurryGrab and BZCN
+        and isfunction(BZCN.TryFurryAssimilation) then
+        local grabbedTarget = self.BZCNFurryGrab.target
+        if IsValid(grabbedTarget) and BZCN.TryFurryAssimilation(self, grabbedTarget) then
+            self.LastAttack = now + 0.1
+            return
+        end
+    end
+
     if not self:IsBZCNEnemy(target) or not HasSenseRecord(self, target, true)
         or CurTime() < (self.BZCNMedicalUntil or 0) then return end
-    local profile = self:GetBZCNProfile()
     local distance = self:GetPos():Distance(target:GetPos())
-    local now = CurTime()
+
+    if profile.FurryStyle and BZCN and isfunction(BZCN.TryFurryAssimilation)
+        and distance <= (tonumber(profile.FurryGrabRange) or 86)
+        and BZCN.TryFurryAssimilation(self, target) then
+        self.LastAttack = now + 0.1
+        return
+    end
+
     if now < (self.LastAttack or 0) then return end
 
     local ranged = profile.Ranged and distance <= (profile.WeaponRange or 1100)
