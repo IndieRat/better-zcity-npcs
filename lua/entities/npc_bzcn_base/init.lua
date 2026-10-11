@@ -1486,17 +1486,52 @@ function ENT:RunBehaviour()
             if IsValid(enemy) then
                 self:ChaseEnemy(enemy)
             else
-                -- Faction task pools get first choice during idle time. This
-                -- prevents every friendly NPC from defaulting to player-follow.
-                local taskHandled = BZCNTaskAI and isfunction(BZCNTaskAI.RunIdleTask)
-                    and BZCNTaskAI.RunIdleTask(self)
-                if not taskHandled then
-                    local ally = self:FindFollowTarget()
-                    if IsValid(ally) then
-                        self:FollowAlly(ally)
+                local profile = self:GetBZCNProfile()
+                local helpTarget = self.BZCNHelpTarget
+                local helping = IsValid(helpTarget)
+                    and (self.BZCNHelpUntil or 0) > CurTime()
+                    and self:IsBZCNAlly(helpTarget)
+                    and not (BZCNCombatActor and BZCNCombatActor.IsIncapacitated
+                        and BZCNCombatActor.IsIncapacitated(helpTarget))
+
+                if helping then
+                    local range = tonumber(profile.MedicalRange) or 320
+                    if self:GetPos():DistToSqr(helpTarget:GetPos()) <= range * range then
+                        self.loco:SetDesiredSpeed(0)
+                        self.loco:FaceTowards(helpTarget:WorldSpaceCenter())
+                        if BZCN and isfunction(BZCN.TryUseMedicalItem) then
+                            BZCN.TryUseMedicalItem(self)
+                        end
+                        coroutine.wait(0.25)
                     else
-                        self:Wander()
-                        coroutine.wait(0.2)
+                        self:FollowAlly(helpTarget)
+                        coroutine.wait(0.1)
+                    end
+                elseif profile.Companion == true and BZCNCompanionAI
+                    and isfunction(BZCNCompanionAI.RunIdleTask) then
+                    local taskHandled = BZCNCompanionAI.RunIdleTask(self)
+                    if not taskHandled then
+                        local ally = self:FindFollowTarget()
+                        if IsValid(ally) then
+                            self:FollowAlly(ally)
+                        else
+                            self:Wander()
+                            coroutine.wait(0.2)
+                        end
+                    end
+                else
+                    -- Faction task pools get priority; a companion's owner is
+                    -- handled above so crowd/guard tasks can never pull it away.
+                    local taskHandled = BZCNTaskAI and isfunction(BZCNTaskAI.RunIdleTask)
+                        and BZCNTaskAI.RunIdleTask(self)
+                    if not taskHandled then
+                        local ally = self:FindFollowTarget()
+                        if IsValid(ally) then
+                            self:FollowAlly(ally)
+                        else
+                            self:Wander()
+                            coroutine.wait(0.2)
+                        end
                     end
                 end
             end
