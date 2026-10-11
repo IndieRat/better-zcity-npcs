@@ -165,55 +165,97 @@ local function StartConversation(a, b)
     if not AreCompatible(a, b) or GetKind(a) ~= "civilian" then return nil end
     local now = CurTime()
     local pair = a.BZCNConversation
-    if not istable(pair) or pair.untilTime < now or pair.a ~= a or pair.b ~= b then
-        if istable(a.BZCNConversation) or istable(b.BZCNConversation) then return nil end
-        if a:EntIndex() > b:EntIndex() then a, b = b, a end
-        pair = {a = a, b = b, turn = 1, nextAt = now + math.Rand(0.3, 0.8), untilTime = now + math.Rand(7, 12)}
-        a.BZCNConversation = pair
-        b.BZCNConversation = pair
+    if istable(pair) and pair.untilTime > now and istable(pair.members) then
+        for _, member in ipairs(pair.members) do
+            if member == b then return pair end
+        end
+        return nil
     end
+    if istable(a.BZCNConversation) or istable(b.BZCNConversation) then return nil end
+
+    if a:EntIndex() > b:EntIndex() then a, b = b, a end
+    pair = {
+        a = a, b = b, members = {a, b}, turn = 1,
+        nextAt = now + math.Rand(0.3, 0.8),
+        untilTime = now + math.Rand(7, 12)
+    }
+
+    -- Invite one extra civilian already standing nearby. The conversation
+    -- stays a small circle; nobody lines up behind one speaker.
+    local center = (a:GetPos() + b:GetPos()) * 0.5
+    for _, candidate in ipairs(ents.FindInSphere(center, 260)) do
+        if #pair.members >= 3 then break end
+        if candidate == a or candidate == b or not AreCompatible(a, candidate)
+            or GetKind(candidate) ~= "civilian" or not IsAvailable(candidate)
+            or istable(candidate.BZCNConversation) then continue end
+        if candidate:GetPos():DistToSqr(center) <= 260 * 260 then
+            pair.members[#pair.members + 1] = candidate
+        end
+    end
+    table.sort(pair.members, function(left, right) return left:EntIndex() < right:EntIndex() end)
+    pair.a, pair.b = pair.members[1], pair.members[2]
+    for _, member in ipairs(pair.members) do member.BZCNConversation = pair end
+    pair.turn = 1
     return pair
+end
+
+local function ClearConversation(pair)
+    if not istable(pair) then return end
+    for _, member in ipairs(pair.members or {pair.a, pair.b}) do
+        if IsValid(member) and member.BZCNConversation == pair then
+            member.BZCNConversation = nil
+        end
+    end
 end
 
 local function RunConversation(ent)
     local pair = ent.BZCNConversation
-    if not istable(pair) or pair.untilTime < CurTime()
-        or not IsValid(pair.a) or not IsValid(pair.b) then
-        if istable(pair) then
-            if IsValid(pair.a) then pair.a.BZCNConversation = nil end
-            if IsValid(pair.b) then pair.b.BZCNConversation = nil end
+    local validGroup = istable(pair) and pair.untilTime > CurTime()
+        and istable(pair.members) and #pair.members >= 2
+    if validGroup then
+        for _, member in ipairs(pair.members) do
+            if not IsAvailable(member) or member.BZCNConversation ~= pair then
+                validGroup = false
+                break
+            end
         end
-        local mate = FindMate(ent, 330, true)
-        if IsValid(mate) then pair = StartConversation(ent, mate) end
     end
-    if not istable(pair) then
+
+    if not validGroup then
+        ClearConversation(pair)
+        local mate = FindMate(ent, 330, true)
+        if IsValid(mate) then pair = StartConversation(ent, mate) else pair = nil end
+    end
+    if not istable(pair) or not istable(pair.members) then
         if ent.loco then ent.loco:SetDesiredSpeed(0) end
         coroutine.wait(0.7)
         return
     end
 
-    local mate = pair.a == ent and pair.b or pair.a
-    if IsValid(mate) and ent.loco then
-        ent.loco:SetDesiredSpeed(0)
-        ent.loco:FaceTowards(mate:WorldSpaceCenter())
-        if mate.loco then mate.loco:SetDesiredSpeed(0); mate.loco:FaceTowards(ent:WorldSpaceCenter()) end
+    local center = Vector(0, 0, 0)
+    local side
+    for index, member in ipairs(pair.members) do
+        center = center + member:WorldSpaceCenter()
+        if member == ent then side = index end
     end
-    local side = pair.a == ent and 1 or 2
+    center = center / #pair.members
+    if ent.loco then
+        ent.loco:SetDesiredSpeed(0)
+        ent.loco:FaceTowards(center)
+    end
     if CurTime() >= pair.nextAt and pair.turn == side then
         local social = BZCN.Social
         if social and isfunction(social.PlayGesture) then
             social.PlayGesture(ent, math.random(1, 3) == 1 and "agree" or "wave")
         end
         if social and isfunction(social.PlayPhrase) then
-            social.PlayPhrase(ent, side == 1 and "ambient" or "answer", side == 1 and "Satisfied" or nil, true)
+            social.PlayPhrase(ent, side == 1 and "ambient" or "answer",
+                side == 1 and "Satisfied" or nil, true)
         end
-        pair.turn = side == 1 and 2 or 1
+        pair.turn = (side % #pair.members) + 1
         pair.nextAt = CurTime() + math.Rand(1.2, 2.5)
     end
-    if CurTime() >= pair.untilTime then
-        pair.a.BZCNConversation = nil
-        pair.b.BZCNConversation = nil
-    end
+    if CurTime() >= pair.untilTime then ClearConversation(pair) end
     coroutine.wait(0.35)
 end
 
