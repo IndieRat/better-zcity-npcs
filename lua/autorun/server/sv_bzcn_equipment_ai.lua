@@ -25,6 +25,20 @@ local function GetStored(class)
     return istable(stored) and stored or nil
 end
 
+local function IsHomigradWeaponClass(class)
+    local current = class
+    local seen = {}
+    for _ = 1, 12 do
+        if not isstring(current) or current == "" or seen[current] then return false end
+        if current == "homigrad_base" then return true end
+        seen[current] = true
+        local stored = GetStored(current)
+        if not stored then return false end
+        current = stored.Base
+    end
+    return false
+end
+
 local function RemoveRuntimeWeapon(ent, key)
     local weapon = ent[key]
     ent[key] = nil
@@ -74,14 +88,44 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     owner:DeleteOnRemove(weapon)
 
     if not MEDICAL_WEAPONS[class] then
-        -- Runtime SWEPs only provide the selected weapon's stats, model and
-        -- optional fists state. BZCN drives all attacks through its own AI:
-        -- suppress native Think/NPCShoot callbacks so Player-oriented
-        -- homigrad_base FireLuaBullets hooks are never invoked for a NextBot.
+        -- The actor invokes fire on its own cadence. Do not run a Player input
+        -- loop from Think, but keep Homigrad's native PrimaryAttack -> PrimaryShoot
+        -- -> FireBullet path for weapons based on homigrad_base.
         weapon.Think = function() end
-        weapon.PrimaryAttack = function() end
-        weapon.SecondaryAttack = function() end
-        weapon.Reload = function() end
+        local nativeHomigrad = IsHomigradWeaponClass(class)
+            and isfunction(weapon.PrimaryAttack) and isfunction(weapon.FireBullet)
+        if nativeHomigrad then
+            weapon.BZCNNativeHomigradFire = true
+            weapon.BZCNNativePrimaryAttack = weapon.PrimaryAttack
+            local nativeFireBullet = weapon.FireBullet
+            weapon.BZCNNativeFireBullet = nativeFireBullet
+            weapon.FireBullet = function(self, ...)
+                self.BZCNNativeFireWasCalled = true
+                local ok, a, b, c, d = pcall(nativeFireBullet, self, ...)
+                if not ok then
+                    self.BZCNNativeFireError = tostring(a)
+                    ErrorNoHalt("[BZCN] Native Homigrad FireBullet failed for "
+                        .. tostring(self:GetClass()) .. ": " .. tostring(a) .. "\\n")
+                    return
+                end
+                self.BZCNNativeFireSucceeded = true
+                return a, b, c, d
+            end
+            -- PrimaryAttack asks whether IN_USE is held. A managed actor has
+            -- no real Player input source; expose only the actor's transient trigger.
+            weapon.KeyDown = function(self, button)
+                if button == IN_ATTACK then return self.BZCNActorTrigger == true end
+                return false
+            end
+            weapon.SecondaryAttack = function() end
+            weapon.Reload = function() end
+        else
+            -- Unknown/non-Homigrad weapons get the conservative stat-based
+            -- adapter. Never call an arbitrary Player-oriented SWEP attack blindly.
+            weapon.PrimaryAttack = function() end
+            weapon.SecondaryAttack = function() end
+            weapon.Reload = function() end
+        end
         weapon.NPCShoot_Primary = function() end
         weapon.NPCShoot_Secondary = function() end
     end
@@ -145,10 +189,15 @@ local function FireStatBasedShot(ent, target, weapon)
     local profile = ent.BZCNClassProfile or {}
     local weaponClass = ent.BZCN_SelectedWeapon or profile.WeaponClass
     local damage, primary = GetDamageFromWeapon(weapon, profile, weaponClass)
-    local source = isfunction(ent.EyePos) and ent:EyePos() or ent:WorldSpaceCenter()
-    local destination = target:WorldSpaceCenter()
+    local solution = BZCNCombatActor and BZCNCombatActor.UpdateAim
+        and BZCNCombatActor.UpdateAim(ent, target, weapon) or nil
+    local source = solution and solution.source
+        or (isfunction(ent.EyePos) and ent:EyePos() or ent:WorldSpaceCenter())
+    local destination = solution and solution.point or target:WorldSpaceCenter()
     local aim = destination - source
-    local direction = aim:LengthSqr() > 0 and aim:GetNormalized() or ent:GetForward()
+    local direction = solution and solution.direction
+        or (aim:LengthSqr() > 0 and aim:GetNormalized() or ent:GetForward())
+    local targetBody = solution and solution.body or target
     local spread = tonumber(primary.Cone) or tonumber(primary.Spread) or 0.012
     spread = math.Clamp(spread, 0, 0.15)
     local force = tonumber(primary.Force) or damage * 25
@@ -199,7 +248,13 @@ local function FireStatBasedShot(ent, target, weapon)
             filter = {ent, IsValid(weapon) and weapon or NULL},
             mask = MASK_SHOT
         })
-        if IsValid(trace.Entity) and trace.Entity == target then
+        local hitEntity = IsValid(trace.Entity) and trace.Entity or nil
+        local resolvesToTarget = hitEntity == target or hitEntity == targetBody
+        if not resolvesToTarget and hitEntity and BZCNCombatActor
+            and BZCNCombatActor.ResolveTarget then
+            resolvesToTarget = BZCNCombatActor.ResolveTarget(hitEntity) == target
+        end
+        if hitEntity and resolvesToTarget then
             local info = DamageInfo()
             info:SetAttacker(ent)
             info:SetInflictor(IsValid(weapon) and weapon or ent)
@@ -207,7 +262,9 @@ local function FireStatBasedShot(ent, target, weapon)
             info:SetDamageType(DMG_BULLET)
             info:SetDamagePosition(trace.HitPos)
             info:SetDamageForce(fallbackDirection * force)
-            target:TakeDamageInfo(info)
+            -- Damage the visible ragdoll when appropriate so the injury bridge
+            -- can translate the hit into the live body's organism/health.
+            hitEntity:TakeDamageInfo(info)
         end
         didFire = true
     end
@@ -272,26 +329,61 @@ function BZCN.FireRuntimeWeapon(ent, target)
 
     ent.BZCNCombatTarget = target
     ent.BZCN_SimulatedButtons = IN_ATTACK
-    local fired = FireStatBasedShot(ent, target, weapon)
+    local fired = false
+    local nativeHandled = false
 
-    if fired and clipSize > 0 and beforeClip > 0 and weapon.SetClip1 then
-        local remaining = math.max(beforeClip - 1, 0)
-        weapon:SetClip1(remaining)
-        if weapon.SetNWInt then weapon:SetNWInt("Clip1", remaining) end
+    if weapon.BZCNNativeHomigradFire and isfunction(weapon.BZCNNativePrimaryAttack) then
+        if BZCNCombatActor and BZCNCombatActor.UpdateAim then
+            BZCNCombatActor.UpdateAim(ent, target, weapon)
+        end
+        weapon.BZCNNativeFireWasCalled = false
+        weapon.BZCNNativeFireSucceeded = false
+        weapon.BZCNNativeFireError = nil
+        weapon.BZCNActorTrigger = true
+        weapon.drawBullet = true
+        local ok, err = pcall(weapon.BZCNNativePrimaryAttack, weapon)
+        weapon.BZCNActorTrigger = nil
+        nativeHandled = weapon.BZCNNativeFireWasCalled == true
+        fired = nativeHandled and weapon.BZCNNativeFireSucceeded == true
+        if not ok then
+            ErrorNoHalt("[BZCN] Native Homigrad PrimaryAttack failed for "
+                .. tostring(class) .. ": " .. tostring(err) .. "\\n")
+        end
+        if nativeHandled then
+            -- Homigrad already consumed ammo and ran its ammo-type bullet path.
+            -- Keep the actor's cooldown per weapon instance, not in shared SWEP.Primary.
+            local nextFire = now + (BZCNCombatActor and BZCNCombatActor.GetFireDelay
+                and BZCNCombatActor.GetFireDelay(ent, weapon)
+                or math.max(tonumber(profile.AttackDelay) or 0.35, 0.06))
+            weapon.BZCNNextFire = nextFire
+            if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(nextFire) end
+            if fired then hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon, nil) end
+        end
     end
 
-    if fired and weapon.SetNextPrimaryFire then
-        local currentNext = weapon:GetNextPrimaryFire()
-        if currentNext <= now then
-            local nextFire = now + math.max(tonumber(profile.AttackDelay) or 0.35, 0.08)
-            weapon.BZCNNextFire = nextFire
-            weapon:SetNextPrimaryFire(nextFire)
+    if not nativeHandled then
+        fired = FireStatBasedShot(ent, target, weapon)
+        if fired and clipSize > 0 and beforeClip > 0 and weapon.SetClip1 then
+            local remaining = math.max(beforeClip - 1, 0)
+            weapon:SetClip1(remaining)
+            if weapon.SetNWInt then weapon:SetNWInt("Clip1", remaining) end
         end
+        if fired and weapon.SetNextPrimaryFire then
+            local currentNext = weapon:GetNextPrimaryFire()
+            if currentNext <= now then
+                local nextFire = now + (BZCNCombatActor and BZCNCombatActor.GetFireDelay
+                    and BZCNCombatActor.GetFireDelay(ent, weapon)
+                    or math.max(tonumber(profile.AttackDelay) or 0.35, 0.06))
+                weapon.BZCNNextFire = nextFire
+                weapon:SetNextPrimaryFire(nextFire)
+            end
+        end
+        if fired then hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon, nil) end
     end
 
     ent.BZCN_SimulatedButtons = 0
     ent.BZCNCombatTarget = nil
-    return fired
+    return fired or nativeHandled
 end
 
 function BZCN.AttackRuntimeMelee(ent, target, trace)
