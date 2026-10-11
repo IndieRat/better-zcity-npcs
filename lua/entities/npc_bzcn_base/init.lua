@@ -746,11 +746,19 @@ function ENT:AttackTarget(target)
             and BZCNCombatActor.GetFireDelay(self, self.BZCNRuntimeWeapon)
             or math.max(tonumber(profile.AttackDelay) or 0.3, 0.06)
         self.LastAttack = now + math.min(retryDelay, 0.10)
-        self:PlayBZCNAttackAnimation()
+        local weapon = self.BZCNRuntimeWeapon
+        local fireReady = not (BZCNCombatActor and BZCNCombatActor.CanFire)
+            or BZCNCombatActor.CanFire(self, weapon)
+        if fireReady then
+            if BZCNCombatActor and BZCNCombatActor.UpdateAim then
+                BZCNCombatActor.UpdateAim(self, target, weapon)
+            end
+            self:PlayBZCNAttackAnimation()
+        end
 
-        -- The equipment adapter fires engine bullets from the selected SWEP's
-        -- damage/spread/sound settings instead of relying on Player-oriented
-        -- NPCShoot_Primary callbacks that can consume a cooldown without firing.
+        -- Homigrad weapons use their native PrimaryAttack -> PrimaryShoot ->
+        -- FireBullet path. The combat actor controls aim/cadence, with a
+        -- conservative stat-based fallback for unrelated SWEPs.
         if BZCN and isfunction(BZCN.FireRuntimeWeapon)
             and BZCN.FireRuntimeWeapon(self, target) then
             hook.Run("BZCN_NPCFiredFakeWeapon", self, target, nil)
@@ -762,7 +770,14 @@ function ENT:AttackTarget(target)
         and BZCNCombatActor.GetTargetAimPoint(target)) or target:WorldSpaceCenter()
         local trace = util.TraceLine({start = source, endpos = destination, filter = {self}, mask = MASK_SHOT})
         self:EmitSound(profile.FireSound or "Weapon_SMG1.Single", 72, math.random(95, 105), 0.7)
-        if trace.Hit and trace.Entity == target then
+        local body = BZCNCombatActor and BZCNCombatActor.GetVisibleBody
+            and BZCNCombatActor.GetVisibleBody(target) or target
+        local hitTarget = trace.Entity == target or trace.Entity == body
+        if not hitTarget and IsValid(trace.Entity) and BZCNCombatActor
+            and BZCNCombatActor.ResolveTarget then
+            hitTarget = BZCNCombatActor.ResolveTarget(trace.Entity) == target
+        end
+        if trace.Hit and hitTarget then
             local damage = DamageInfo()
             damage:SetAttacker(self)
             damage:SetInflictor(self)
@@ -770,7 +785,7 @@ function ENT:AttackTarget(target)
             damage:SetDamageType(DMG_BULLET)
             damage:SetDamagePosition(trace.HitPos)
             damage:SetDamageForce((destination - source):GetNormalized() * 1200)
-            target:TakeDamageInfo(damage)
+            trace.Entity:TakeDamageInfo(damage)
         end
         hook.Run("BZCN_NPCFiredFakeWeapon", self, target, trace)
         return
