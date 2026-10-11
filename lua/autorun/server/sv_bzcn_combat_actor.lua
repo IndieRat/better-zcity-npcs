@@ -255,6 +255,16 @@ function Actor.UpdateAim(attacker, target, weapon)
     if direction:LengthSqr() < 1 then direction = attacker:GetForward() end
     local aimAngle = direction:Angle()
 
+    -- A short residual recoil window slightly unsettles the next shot instead
+    -- of letting an NPC instantly snap back to a perfectly identical aim point.
+    local recoilRemaining = (tonumber(attacker.BZCNRecoilUntil) or 0) - CurTime()
+    if recoilRemaining > 0 then
+        local recoilScale = math.Clamp(recoilRemaining / 0.22, 0, 1)
+        aimAngle.p = aimAngle.p + math.Rand(-2.4, 2.4) * recoilScale
+        aimAngle.y = aimAngle.y + math.Rand(-2.8, 2.8) * recoilScale
+        direction = aimAngle:Forward()
+    end
+
     -- Face the actual visible body, and expose sensible aim pose parameters for
     -- Homigrad's NPC branch and the model animation layer.
     attacker:SetAngles(Angle(0, aimAngle.y, 0))
@@ -324,14 +334,17 @@ function Actor.GetFireDelay(owner, weapon)
         or string.find(string.lower(weaponClass), "pistol", 1, true) ~= nil
         or string.find(string.lower(weaponClass), "revolver", 1, true) ~= nil
     local automatic = primary.Automatic == true or tonumber(primary.Automatic) == 1
-        or primary.AutoFire == true
+        or primary.AutoFire == true or (istable(stored) and stored.Automatic == true)
+        or (IsValidEntity(weapon) and weapon.Automatic == true)
 
     -- NPCs share the weapon's actual fire mode and delay, but receive additional
     -- recovery time for recoil. This prevents tiny SWEP.Wait values from turning
     -- a semi-auto pistol into an almost automatic weapon against players.
     if not automatic then
         if IsValidEntity(owner) then owner.BZCNFireCadenceState = nil end
-        return math.Clamp(math.max(base, pistol and 0.34 or 0.22) + math.Rand(0.045, 0.11), 0.28, 2.2)
+        local delay = math.Clamp(math.max(base, pistol and 0.34 or 0.22) + math.Rand(0.045, 0.11), 0.28, 2.2)
+        if IsValidEntity(owner) then owner.BZCNRecoilUntil = CurTime() + delay + 0.12 end
+        return delay
     end
 
     -- Automatic weapons fire in short, imperfect bursts rather than maintaining
@@ -348,7 +361,10 @@ function Actor.GetFireDelay(owner, weapon)
         state.shots = 0
         state.burstLimit = math.random(3, 5)
     end
-    if IsValidEntity(owner) then owner.BZCNFireCadenceState = state end
+    if IsValidEntity(owner) then
+        owner.BZCNFireCadenceState = state
+        owner.BZCNRecoilUntil = CurTime() + math.Clamp(delay, 0.12, 1.8) + 0.12
+    end
     return math.Clamp(delay, 0.12, 1.8)
 end
 
