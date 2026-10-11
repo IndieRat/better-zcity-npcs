@@ -96,7 +96,17 @@ end
 Support.IsAssimilationLocked = IsAssimilationLocked
 
 hook.Add("Should Fake Up", "BZCNNPCSupport_AssimilationLock", function(ent)
-    if IsAssimilationLocked(ent) then return false end
+    -- This addon owns only managed-NPC recovery. Never return a value for real
+    -- players (or unrelated entities): a non-nil hook result short-circuits
+    -- Z-City's remaining hooks and original gamemode hook.
+    local owner = ResolveNPC(ent)
+    if not IsValid(owner) then
+        if not IsSupportedNPC(ent) then return end
+        owner = ent
+    end
+    if not IsSupportedNPC(owner) then return end
+
+    if IsAssimilationLocked(owner) then return false end
 end)
 
 local function FinalizeManagedNPCDeath(owner, sourceDamage)
