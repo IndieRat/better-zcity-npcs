@@ -25,24 +25,6 @@ local function GetStored(class)
     return istable(stored) and stored or nil
 end
 
-local function HasZCityNPCAttack(class)
-    local current = GetStored(class)
-    local seen = {}
-    for _ = 1, 12 do
-        if not istable(current) then return false end
-        local key = current.ClassName or current.Base or tostring(current)
-        if seen[key] then return false end
-        seen[key] = true
-
-        local name = string.lower(tostring(current.Base or ""))
-        if name == "homigrad_base" or name == "weapon_melee" then return true end
-        if current.NPCUsable == true or current.BZCNNPCUsable == true then return true end
-        if name == "" then break end
-        current = GetStored(name)
-    end
-    return false
-end
-
 local function RemoveRuntimeWeapon(ent, key)
     local weapon = ent[key]
     ent[key] = nil
@@ -148,41 +130,79 @@ end
 local function FireStatBasedShot(ent, target, weapon)
     if not IsValid(ent) or not IsValid(target) then return false end
     local profile = ent.BZCNClassProfile or {}
-    local damage, primary = GetDamageFromWeapon(weapon, profile, ent.BZCN_SelectedWeapon or profile.WeaponClass)
-    local source = ent:WorldSpaceCenter() + Vector(0, 0, 8)
+    local weaponClass = ent.BZCN_SelectedWeapon or profile.WeaponClass
+    local damage, primary = GetDamageFromWeapon(weapon, profile, weaponClass)
+    local source = isfunction(ent.EyePos) and ent:EyePos() or ent:WorldSpaceCenter()
     local destination = target:WorldSpaceCenter()
-    local direction = (destination - source):GetNormalized()
+    local aim = destination - source
+    local direction = aim:LengthSqr() > 0 and aim:GetNormalized() or ent:GetForward()
     local spread = tonumber(primary.Cone) or tonumber(primary.Spread) or 0.012
     spread = math.Clamp(spread, 0, 0.15)
-    if spread > 0 then direction = (direction + VectorRand() * spread):GetNormalized() end
+    local force = tonumber(primary.Force) or damage * 25
 
-    local sound = IsValid(weapon) and weapon.Primary and weapon.Primary.Sound or nil
+    local sound = primary.Sound
     if istable(sound) then sound = sound[1] end
-    if isstring(sound) and sound ~= "" then
-        ent:EmitSound(sound, 72, 100, 0.8)
-    else
-        ent:EmitSound(profile.FireSound or "Weapon_SMG1.Single", 72, math.random(95, 105), 0.7)
+    if not isstring(sound) or sound == "" then
+        sound = profile.FireSound or "Weapon_SMG1.Single"
     end
 
-    local trace = util.TraceLine({
-        start = source,
-        endpos = source + direction * math.max(tonumber(profile.WeaponRange) or 1100, 128),
-        filter = {ent, IsValid(weapon) and weapon or NULL},
-        mask = MASK_SHOT
-    })
-    if IsValid(trace.Entity) and trace.Entity == target then
-        local force = tonumber(primary.Force) or damage * 25
-        local info = DamageInfo()
-        info:SetAttacker(ent)
-        info:SetInflictor(IsValid(weapon) and weapon or ent)
-        info:SetDamage(damage)
-        info:SetDamageType(DMG_BULLET)
-        info:SetDamagePosition(trace.HitPos)
-        info:SetDamageForce(direction * force)
-        target:TakeDamageInfo(info)
+    -- Runtime SWEPs are hidden and their usual NPCShoot_Primary -> PrimaryAttack
+    -- path may update cooldowns without producing a shot for a NextBot owner.
+    -- Fire an engine bullet directly, using the selected SWEP's actual stats.
+    local didFire = false
+    local trace
+    if isfunction(ent.FireBullets) then
+        local bullet = {
+            Num = math.max(math.floor(tonumber(primary.NumShots) or 1), 1),
+            Src = source,
+            Dir = direction,
+            Spread = Vector(spread, spread, 0),
+            Tracer = 1,
+            TracerName = isstring(primary.TracerName) and primary.TracerName or "Tracer",
+            Force = force,
+            Damage = damage,
+            AmmoType = isstring(primary.Ammo) and primary.Ammo or "Pistol",
+            Attacker = ent,
+            Callback = function(attacker, hit, damageInfo)
+                if not damageInfo then return end
+                damageInfo:SetAttacker(ent)
+                damageInfo:SetInflictor(IsValid(weapon) and weapon or ent)
+                damageInfo:SetDamageType(DMG_BULLET)
+                if hit and hit.HitPos then
+                    damageInfo:SetDamageForce((hit.HitPos - source):GetNormalized() * force)
+                end
+            end
+        }
+        local ok = pcall(ent.FireBullets, ent, bullet)
+        didFire = ok
     end
+
+    -- Defensive fallback for unusual scripted entities without FireBullets.
+    if not didFire then
+        local fallbackDirection = (direction + VectorRand() * spread):GetNormalized()
+        trace = util.TraceLine({
+            start = source,
+            endpos = source + fallbackDirection * math.max(tonumber(profile.WeaponRange) or 1100, 128),
+            filter = {ent, IsValid(weapon) and weapon or NULL},
+            mask = MASK_SHOT
+        })
+        if IsValid(trace.Entity) and trace.Entity == target then
+            local info = DamageInfo()
+            info:SetAttacker(ent)
+            info:SetInflictor(IsValid(weapon) and weapon or ent)
+            info:SetDamage(damage)
+            info:SetDamageType(DMG_BULLET)
+            info:SetDamagePosition(trace.HitPos)
+            info:SetDamageForce(fallbackDirection * force)
+            target:TakeDamageInfo(info)
+        end
+        didFire = true
+    end
+
+    ent:EmitSound(sound, 72, math.random(95, 105), 0.8)
+    if isfunction(ent.MuzzleFlash) then pcall(ent.MuzzleFlash, ent) end
     hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon, trace)
-    return true
+    return didFire
 end
 
 function BZCN.FireRuntimeWeapon(ent, target)
@@ -208,12 +228,15 @@ function BZCN.FireRuntimeWeapon(ent, target)
     local beforeNext = math.max(entityNext, scriptNext)
     if beforeNext > now then return true end
 
-    local clipSize = weapon.GetMaxClip1 and weapon:GetMaxClip1() or tonumber(primary.ClipSize) or 0
+    local clipSize = tonumber(primary.ClipSize) or 0
+    if weapon.GetMaxClip1 then
+        local maxClip = tonumber(weapon:GetMaxClip1())
+        if maxClip and maxClip > 0 then clipSize = maxClip end
+    end
     local beforeClip = weapon.Clip1 and weapon:Clip1() or -1
     if clipSize > 0 and beforeClip == 0 then
-        -- A NextBot has no native Player reload input/viewmodel. Still call the
-        -- real SWEP Reload method, then refill its own clip after a short
-        -- reload window so native weapons don't become infinite-ammo fallback guns.
+        -- A NextBot has no native Player reload input/viewmodel. Refill its own
+        -- clip after a short reload window instead of leaving gun NPCs unarmed.
         if not weapon.BZCNReloadUntil then
             weapon.BZCNReloadUntil = now + math.max(tonumber(profile.ReloadDelay) or 1.25, 0.5)
             if isfunction(weapon.Reload) then pcall(weapon.Reload, weapon) end
@@ -231,48 +254,27 @@ function BZCN.FireRuntimeWeapon(ent, target)
         return true
     end
 
-    PlaceRuntimeWeapon(ent, weapon)
-    local source = ent:WorldSpaceCenter() + Vector(0, 0, 8)
-    local destination = target:WorldSpaceCenter()
-    local direction = (destination - source):GetNormalized()
-
     ent.BZCNCombatTarget = target
     ent.BZCN_SimulatedButtons = IN_ATTACK
+    local fired = FireStatBasedShot(ent, target, weapon)
 
-    local attemptedNative = HasZCityNPCAttack(class) and isfunction(weapon.NPCShoot_Primary)
-    local ok = false
-    if attemptedNative then
-        ok = pcall(weapon.NPCShoot_Primary, weapon, source, direction)
+    if fired and clipSize > 0 and beforeClip > 0 and weapon.SetClip1 then
+        local remaining = math.max(beforeClip - 1, 0)
+        weapon:SetClip1(remaining)
+        if weapon.SetNWInt then weapon:SetNWInt("Clip1", remaining) end
     end
 
-    local afterNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
-    local afterPrimaryNext = math.max(
-        tonumber(istable(weapon.Primary) and weapon.Primary.Next) or 0,
-        tonumber(istable(weapon.Primary) and weapon.Primary.NextFire) or 0
-    )
-    local afterClip = weapon.Clip1 and weapon:Clip1() or -1
-    local fired = attemptedNative and ok and (afterNext > entityNext or afterPrimaryNext > scriptNext or
-        (beforeClip >= 0 and afterClip >= 0 and afterClip < beforeClip))
-
-    -- Don't pre-set NextPrimaryFire: native PrimaryAttack implementations
-    -- often call CanPrimaryAttack(), which rejects a weapon whose cooldown is
-    -- already in the future. Let the actual SWEP run first, then enforce a
-    -- fallback cooldown only if its own attack method didn't do so.
-    if not fired then
-        fired = FireStatBasedShot(ent, target, weapon)
-    end
     if fired and weapon.SetNextPrimaryFire then
         local currentNext = weapon:GetNextPrimaryFire()
         if currentNext <= now then
-            local delay = math.max(tonumber(profile.AttackDelay) or 0.35, 0.08)
-            weapon:SetNextPrimaryFire(now + delay)
-            if istable(weapon.Primary) then weapon.Primary.Next = now + delay end
+            local nextFire = now + math.max(tonumber(profile.AttackDelay) or 0.35, 0.08)
+            weapon:SetNextPrimaryFire(nextFire)
+            if istable(weapon.Primary) then weapon.Primary.Next = nextFire end
         end
     end
 
     ent.BZCN_SimulatedButtons = 0
     ent.BZCNCombatTarget = nil
-    if fired then hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon) end
     return fired
 end
 

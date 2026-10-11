@@ -596,8 +596,13 @@ function ENT:AttackTarget(target)
 
     if now < (self.LastAttack or 0) then return end
 
-    local ranged = profile.Ranged and distance <= (profile.WeaponRange or 1100)
-        and distance > (profile.MeleeRange or 78) * 1.25
+    local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
+    local meleeOnlyWeapon = weaponClass == "weapon_hands_sh"
+        or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
+    -- A firearm remains a firearm at close range; don't let armed NPCs switch
+    -- to the generic melee branch just because an enemy got inside punch range.
+    local ranged = profile.Ranged == true and not meleeOnlyWeapon
+        and distance <= (tonumber(profile.WeaponRange) or 1100)
     if ranged then
         self.LastAttack = now + (profile.AttackDelay or 0.3)
         self:PlayBZCNAttackAnimation()
