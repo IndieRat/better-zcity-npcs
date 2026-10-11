@@ -129,6 +129,8 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "grabbing"
     elseif CurTime() < (self.BZCNMedicalUntil or 0) then
         state = "treating"
+    elseif CurTime() < (self.BZCNSittingUntil or 0) and self:OnGround() then
+        state = "sitting"
     elseif CurTime() < (self.BZCNClimbUntil or 0) then
         state = "climbing"
     elseif support and support.ShouldCrawl and support.ShouldCrawl(self) then
@@ -197,6 +199,23 @@ function ENT:GetBZCNMovementSequence(speed, state)
             if ok and isnumber(selected) and selected >= 0 then return selected end
         end
         state = "running"
+    elseif state == "sitting" then
+        local sequence = self.BZCNSitSequence
+        if not isnumber(sequence) or sequence < 0 then
+            sequence = GetFirstSequence(self, {
+                "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
+                "sit_idle", "sit", "sitting", "idle_sit"
+            })
+            self.BZCNSitSequence = sequence
+        end
+        if sequence >= 0 then return sequence end
+        state = "standing"
+    elseif state == "sprinting" then
+        local sequence = GetFirstSequence(self, {
+            "sprint_all", "sprint", "sprint_armed", "sprint_unarmed",
+            "run_all", "run_all_01", "run_unarmed"
+        })
+        if sequence >= 0 then return sequence end
     end
 
     local activity
@@ -341,6 +360,25 @@ function ENT:BodyUpdate()
     end
 
     if state == "getting_up" then
+        self:SetPlaybackRate(1)
+        self:FrameAdvance()
+        return
+    end
+
+    if state == "sitting" then
+        if self.loco then self.loco:SetDesiredSpeed(0) end
+        local sequence = self.BZCNSitSequence
+        if not isnumber(sequence) or sequence < 0 then
+            sequence = GetFirstSequence(self, {
+                "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
+                "sit_idle", "sit", "sitting", "idle_sit"
+            })
+            self.BZCNSitSequence = sequence
+        end
+        if sequence >= 0 and self:GetSequence() ~= sequence then
+            self:ResetSequence(sequence)
+            self:SetCycle(0)
+        end
         self:SetPlaybackRate(1)
         self:FrameAdvance()
         return
