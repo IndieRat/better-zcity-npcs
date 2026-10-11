@@ -951,15 +951,15 @@ function Tasks.RunIdleTask(ent)
             if forward:LengthSqr() < 0.001 then forward = ent:GetForward() end
             forward:Normalize()
             local right = Vector(-forward.y, forward.x, 0)
-            local strength = phase == 1 and 16 or 7
+            local strength = phase == 1 and 3.5 or 1.2
 
             local function Guide(boneName, target, forceScale)
                 local phys = GetSitPhysics(rag, boneName)
                 if not IsValid(phys) then return end
                 local delta = target - phys:GetPos()
                 phys:Wake()
-                phys:ApplyForceCenter(delta * strength * forceScale - phys:GetVelocity() * 4)
-                phys:AddAngleVelocity(-phys:GetAngleVelocity() * (phase == 1 and 0.3 or 0.55))
+                phys:ApplyForceCenter(delta:GetNormalized() * math.min(delta:Length() * strength, 95) * forceScale - phys:GetVelocity() * 1.8)
+                phys:AddAngleVelocity(-phys:GetAngleVelocity() * (phase == 1 and 0.12 or 0.22))
             end
 
             -- Match left/right targets so the legs settle evenly instead of
@@ -983,12 +983,12 @@ function Tasks.RunIdleTask(ent)
             if phase == 2 then
                 for i = 0, (rag:GetPhysicsObjectCount() or 0) - 1 do
                     local phys = rag:GetPhysicsObjectNum(i)
-                    if IsValid(phys) then phys:AddAngleVelocity(-phys:GetAngleVelocity() * 0.55) end
+                    if IsValid(phys) then phys:AddAngleVelocity(-phys:GetAngleVelocity() * 0.2) end
                 end
             end
         end
         local sitTimer = "BZCNRagdollSitPose_" .. ent:EntIndex() .. "_" .. math.floor(sitUntil * 1000)
-        timer.Create(sitTimer, 0.2, 0, function()
+        timer.Create(sitTimer, 0.5, 0, function()
             if not IsValid(ent) or ent.BZCNRagdollSitUntil ~= sitUntil
                 or CurTime() >= sitUntil then
                 timer.Remove(sitTimer)
