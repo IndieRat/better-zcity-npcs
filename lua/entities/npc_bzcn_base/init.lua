@@ -849,9 +849,13 @@ function ENT:AttackTarget(target)
 end
 
 function ENT:HaveEnemy()
+    local enemyPosition = IsValid(self.BZCNEnemy) and BZCNCombatActor
+        and BZCNCombatActor.GetTargetPosition and BZCNCombatActor.GetTargetPosition(self.BZCNEnemy)
+        or (IsValid(self.BZCNEnemy) and self.BZCNEnemy:GetPos())
     if self:IsBZCNEnemy(self.BZCNEnemy)
         and HasSenseRecord(self, self.BZCNEnemy, true)
-        and self:GetPos():DistToSqr(self.BZCNEnemy:GetPos()) <= (self.LoseTargetDist or 1400)^2 then
+        and isvector(enemyPosition)
+        and self:GetPos():DistToSqr(enemyPosition) <= (self.LoseTargetDist or 1400)^2 then
         return self.BZCNEnemy
     end
     return self:FindEnemy()
