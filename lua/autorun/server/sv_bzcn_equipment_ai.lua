@@ -581,6 +581,7 @@ function BZCN.TryFurryAssimilation(attacker, target)
     if isfunction(attacker.SetLocalVar) then
         pcall(attacker.SetLocalVar, attacker, "assimilation", organ.assimilated)
     end
+    if attacker.SetNW2Float then attacker:SetNW2Float("BZCNAssimilation", organ.assimilated) end
     if target.SetNW2Float then
         target:SetNW2Float("BZCNAssimilation", organ.assimilated)
     end
