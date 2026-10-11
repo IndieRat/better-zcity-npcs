@@ -244,8 +244,16 @@ local function ReactToPhrase(playerEnt, soundPath, context)
         if distance > 780 * 780 then continue end
 
         local perNPCDelay = hostile and 4 or 2.5
-        if now < (npc.BZCNNextSocialReactionAt or 0) then continue end
-        npc.BZCNNextSocialReactionAt = now + perNPCDelay
+        local urgentSignal = string.find(signal, "help", 1, true)
+            or string.find(signal, "medic", 1, true)
+            or string.find(signal, "backup", 1, true)
+            or string.find(signal, "pain", 1, true)
+            or string.find(signal, "shock", 1, true)
+            or string.find(signal, "yell", 1, true)
+            or string.find(signal, "scream", 1, true)
+            or string.find(signal, "runforyourlife", 1, true)
+        if now < (npc.BZCNNextSocialReactionAt or 0) and not urgentSignal then continue end
+        npc.BZCNNextSocialReactionAt = now + (urgentSignal and 0.8 or perNPCDelay)
 
         local chosenGesture = hostile and "disagree" or gesture
         PlayNPCGesture(npc, chosenGesture)
@@ -450,8 +458,10 @@ local function ReactToGesture(playerEnt, gesture)
 
     for _, npc in ipairs(ents.FindInSphere(playerEnt:GetPos(), 700)) do
         if not IsManagedNPC(npc) or IsUnavailableForSocial(npc) then continue end
-        if now < (npc.BZCNNextSocialReactionAt or 0) then continue end
-        npc.BZCNNextSocialReactionAt = now + 2.5
+        -- Explicit player gestures override ambient chatter cooldowns; only the
+        -- player-level debounce above prevents spam. Combat/medical states still
+        -- filter through IsUnavailableForSocial.
+        npc.BZCNNextSocialReactionAt = now + 1.0
 
         local hostile = EntityIsHostileTo(npc, playerEnt)
         if gesture == "flipoff" then
