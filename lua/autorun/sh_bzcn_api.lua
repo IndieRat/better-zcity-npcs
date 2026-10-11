@@ -5,6 +5,7 @@
 if SERVER then
     AddCSLuaFile()
     AddCSLuaFile("autorun/client/cl_bzcn_hud_bridge.lua")
+    AddCSLuaFile("autorun/client/cl_bzcn_tpik_adapter.lua")
 end
 
 BZCN = BZCN or {}
@@ -360,18 +361,30 @@ function BZCN.InstallAdapter(ent)
     -- NextBots do not participate in PlayerSwitchWeapon/PlayerSpawn hooks; give
     -- Z-City SWEP code the minimum Player-shaped API it probes during attacks.
     data.GetActiveWeapon = function(self)
-        return IsValid(self.BZCNRuntimeWeapon) and self.BZCNRuntimeWeapon or nil
+        local weapon = IsValid(self.BZCNRuntimeWeapon) and self.BZCNRuntimeWeapon or nil
+        if not IsValid(weapon) and self.GetNW2Entity then
+            weapon = self:GetNW2Entity("BZCNRuntimeWeapon")
+        end
+        return IsValid(weapon) and weapon or nil
     end
     data.SetActiveWeapon = function(self, weapon)
         if IsValid(weapon) then
             self.BZCNRuntimeWeapon = weapon
             self.BZCNRuntimeWeaponClass = weapon:GetClass()
+            if SERVER and self.SetNW2Entity then self:SetNW2Entity("BZCNRuntimeWeapon", weapon) end
         end
     end
     data.GetWeapons = function(self)
-        local result = {}
+        local result, seen = {}, {}
         for _, key in ipairs({"BZCNRuntimeWeapon", "BZCNRuntimeMeleeWeapon", "BZCNRuntimeMedicalWeapon"}) do
-            if IsValid(self[key]) then result[#result + 1] = self[key] end
+            local weapon = self[key]
+            if not IsValid(weapon) and key == "BZCNRuntimeWeapon" and self.GetNW2Entity then
+                weapon = self:GetNW2Entity("BZCNRuntimeWeapon")
+            end
+            if IsValid(weapon) and not seen[weapon] then
+                result[#result + 1] = weapon
+                seen[weapon] = true
+            end
         end
         return result
     end
@@ -860,6 +873,7 @@ if SERVER then
     function BZCN.HideHeldWeapon(ent)
         if not IsValid(ent) then return end
         heldWeaponProxies[ent] = nil
+        if ent.SetNW2Entity then ent:SetNW2Entity("BZCNHeldWeaponProxy", NULL) end
         if IsValid(ent.BZCNHeldWeaponProxy) then ent.BZCNHeldWeaponProxy:Remove() end
         ent.BZCNHeldWeaponProxy = nil
     end
@@ -907,6 +921,7 @@ if SERVER then
         end
 
         ent.BZCNHeldWeaponProxy = proxy
+        if ent.SetNW2Entity then ent:SetNW2Entity("BZCNHeldWeaponProxy", proxy) end
         ent:DeleteOnRemove(proxy)
     end
 
