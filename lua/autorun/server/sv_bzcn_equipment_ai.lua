@@ -958,7 +958,6 @@ hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
         end
     end
 end)
-hook.Add("EntityRemoved", "BZCN_CleanupRuntimeSWEPs"
 hook.Add("EntityRemoved", "BZCN_CleanupRuntimeSWEPs", function(ent)
     if not IsValid(ent) then return end
     RemoveRuntimeWeapon(ent, "BZCNRuntimeWeapon")
