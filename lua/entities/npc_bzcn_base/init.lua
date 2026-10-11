@@ -151,8 +151,13 @@ function ENT:Initialize()
     -- Use a compact human-sized movement hull rather than inheriting unusually
     -- wide model bounds (notably on custom/furry player models). The model and
     -- its hitboxes remain unchanged; only movement/collision bounds are tightened.
+    if isnumber(profile.ModelScale) and self.SetModelScale then
+        self:SetModelScale(math.Clamp(profile.ModelScale, 0.35, 1.4), 0)
+    end
     if self.SetCollisionBounds then
-        self:SetCollisionBounds(Vector(-13, -13, 0), Vector(13, 13, 72))
+        local mins = isvector(profile.HullMins) and profile.HullMins or Vector(-13, -13, 0)
+        local maxs = isvector(profile.HullMaxs) and profile.HullMaxs or Vector(13, 13, 72)
+        self:SetCollisionBounds(mins, maxs)
     end
     if self.CollisionRulesChanged then self:CollisionRulesChanged() end
     if self.SetUseType then self:SetUseType(SIMPLE_USE) end
@@ -358,6 +363,13 @@ end
 
 function ENT:IsBZCNEnemy(target)
     if not IsValid(target) or target == self or target:Health() <= 0 then return false end
+    local companionOwner = self.BZCNCompanionOwner
+    if not IsValid(companionOwner) and self.GetNW2Entity then
+        companionOwner = self:GetNW2Entity("BZCNCompanionOwner")
+    end
+    if companionOwner == target then return false end
+    if self.BZCNGoodCopDefected and target:IsPlayer()
+        and self:GetBZCNEntityFaction(target) == "default" then return false end
     if BZCNCombatActor and BZCNCombatActor.IsIncapacitated
         and BZCNCombatActor.IsIncapacitated(target) then return false end
 
@@ -609,11 +621,22 @@ end
 function ENT:FindFollowTarget()
     local profile = self:GetBZCNProfile()
     if profile.FollowAllies == false then return nil end
+    local followRange = tonumber(profile.FollowRange) or 900
+    local companionOwner = self.BZCNCompanionOwner
+    if not IsValid(companionOwner) and self.GetNW2Entity then
+        companionOwner = self:GetNW2Entity("BZCNCompanionOwner")
+    end
+    if profile.Companion == true and IsValid(companionOwner)
+        and companionOwner:Health() > 0 and self:GetPos():DistToSqr(companionOwner:GetPos()) <= followRange * followRange then
+        self.BZCNFollowTarget = companionOwner
+        return companionOwner
+    end
+
     local context = BZCN.GetLastAdapterContext and BZCN.GetLastAdapterContext(self)
     local sense = context and context.sense
     if not sense then return nil end
 
-    local followRange = tonumber(profile.FollowRange) or 900
+    followRange = tonumber(profile.FollowRange) or 900
     local followRangeSqr = followRange * followRange
     local preferred = self.BZCNFollowTarget
     if not IsValid(preferred) and self.GetNW2Entity then
@@ -1359,6 +1382,9 @@ function ENT:RunBehaviour()
             and hg.BZCNNPCSupport.IsGettingUp(self)
         local swimming = UpdateSwimState(self)
         if downed or gettingUp then
+            if self.loco then self.loco:SetDesiredSpeed(0) end
+            coroutine.wait(0.1)
+        elseif CurTime() < (self.BZCNSittingUntil or 0) then
             if self.loco then self.loco:SetDesiredSpeed(0) end
             coroutine.wait(0.1)
         elseif swimming then
