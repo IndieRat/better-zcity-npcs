@@ -872,6 +872,10 @@ function Tasks.RunIdleTask(ent)
     end
 
     if task == "sit" then
+        if BZCN.RuleEnabled and not BZCN.RuleEnabled("ragdoll_sitting") then
+            coroutine.wait(0.45)
+            return true
+        end
         local support = hg and hg.BZCNNPCSupport
         if not support or not isfunction(support.EnterDownedState)
             or not isfunction(support.Recover)
