@@ -1406,8 +1406,15 @@ function ENT:ChaseEnemy(target)
                             pcall(self.AddGesture, self, ACT_GESTURE_RANGE_ATTACK_MELEE)
                         end
                         self:EmitSound("npc_fastzombie.leap", 70, math.random(95, 105))
+                        -- A pounce is a short horizontal tackle, not a second
+                        -- jump impulse layered on top of the NextBot's locomotion.
+                        -- Clamp existing momentum so repeated sprint/jump frames
+                        -- cannot turn the launch into uncontrolled flight.
+                        local velocity = self:GetVelocity()
+                        local horizontal = Vector(velocity.x, velocity.y, 0)
+                        if horizontal:Length() > 260 then horizontal:Normalize() horizontal:Mul(260) end
                         self.loco:Jump()
-                        self.loco:SetVelocity(direction * 350 + Vector(0, 0, 215))
+                        self.loco:SetVelocity(horizontal + direction * 285 + Vector(0, 0, 115))
                         hook.Run("BZCN_FurryPounce", self, target)
                         coroutine.wait(0.05)
                         continue
