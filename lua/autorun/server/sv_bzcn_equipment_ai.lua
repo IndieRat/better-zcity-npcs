@@ -1109,8 +1109,30 @@ function BZCN.TryFurryAssimilation(attacker, target)
         BZCN.StopFurryAssimilation(attacker)
         return false
     end
-    if attacker:GetNW2Bool("BZCNNPCDowned", false)
-        or CurTime() < (attacker.BZCNMedicalUntil or 0) then
+    local support = hg and hg.BZCNNPCSupport
+    local attackerOrganism = attacker.organism or attacker.BZCN_Organism
+    local downed = attacker:GetNW2Bool("BZCNNPCDowned", false)
+        or attacker:GetNW2Bool("BZCNNPCGettingUp", false)
+        or CurTime() < (attacker.BZCNMedicalUntil or 0)
+    if support and isfunction(support.IsGettingUp) then
+        local ok, gettingUp = pcall(support.IsGettingUp, attacker)
+        downed = downed or (ok and gettingUp == true)
+    end
+    if support and isfunction(support.ShouldCrawl) then
+        local ok, crawling = pcall(support.ShouldCrawl, attacker)
+        downed = downed or (ok and crawling == true)
+    end
+    if BZCNCombatActor and isfunction(BZCNCombatActor.IsIncapacitated) then
+        local ok, incapacitated = pcall(BZCNCombatActor.IsIncapacitated, attacker)
+        downed = downed or (ok and incapacitated == true)
+    end
+    if istable(attackerOrganism) then
+        downed = downed or (tonumber(attackerOrganism.lightstun) or 0) > CurTime()
+            or (tonumber(attackerOrganism.stun) or 0) > CurTime()
+    end
+    if downed then
+        -- A carrier must never keep the victim attached through its own stun,
+        -- fake-ragdoll, crawl, or recovery transition.
         BZCN.StopFurryAssimilation(attacker)
         return false
     end
