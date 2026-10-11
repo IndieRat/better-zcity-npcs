@@ -193,3 +193,26 @@ hook.Add("HUDPaint", "BZCN_ClientHUDBridge", function()
 
     DrawNPCPanel(npc, body, trace)
 end)
+
+-- Progress display for a furry player assimilating a managed NPC. Z-City's
+-- native bar expects a Player-owned carryent, while managed NextBot ragdolls
+-- use the explicit bridge above; use replicated progress as the common signal.
+hook.Add("HUDPaint", "BZCN_PlayerAssimilationProgress", function()
+    local ply = LocalPlayer()
+    if not IsValid(ply) or not ply:Alive()
+        or not ply:GetNW2Bool("BZCNAssimilationActive", false) then return end
+
+    local progress = math.Clamp(ply:GetNW2Float("BZCNAssimilation", 0), 0, 1)
+    local width, height = math.min(ScrW() * 0.3, 420), 16
+    local x, y = (ScrW() - width) * 0.5, ScrH() * 0.77
+
+    draw.SimpleTextOutlined("Assimilating...", "BZCN_NPCHudTitle",
+        ScrW() * 0.5, y - 26, Color(180, 205, 255),
+        TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 1, Color(0, 0, 0, 220))
+    draw.RoundedBox(5, x, y, width, height, Color(12, 15, 20, 225))
+    draw.RoundedBox(4, x + 2, y + 2, (width - 4) * progress, height - 4,
+        Color(150, 160, 245, 240))
+    draw.SimpleText(math.floor(progress * 100) .. "%", "BZCN_NPCHudBody",
+        ScrW() * 0.5, y + height + 3, Color(230, 235, 255),
+        TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+end)
