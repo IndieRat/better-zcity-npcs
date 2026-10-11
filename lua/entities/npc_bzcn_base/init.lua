@@ -1460,14 +1460,10 @@ function ENT:ChaseEnemy(target)
             and visible and self.loco
             and now >= (self.BZCNNextPounceAt or 0) and self:OnGround()
             and distance >= 82 and distance <= 330 then
-            local support = hg and hg.BZCNNPCSupport
+            -- Use the local tackle path so the launch always enters our
+            -- explicit fake-ragdoll lunge lifecycle. The optional helper can
+            -- report success after an upright leap, bypassing this behavior.
             local started = false
-            if support and isfunction(support.TryFurryPounce) then
-                local ok, result = pcall(support.TryFurryPounce, self, target)
-                started = ok and result == true
-            end
-            -- Keep this local implementation as a reliable fallback when the
-            -- optional organism integration has no pounce helper loaded.
             if not started then
                 local start = self:WorldSpaceCenter()
                 local finish = target:WorldSpaceCenter()
