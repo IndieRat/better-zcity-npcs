@@ -78,6 +78,94 @@ local function InstallClientAimAdapter(ent)
     ent.BZCNClientAimAdapter = true
 end
 
+local function GetOrCreateHandWorldModel(weapon, definition)
+    if not IsValid(weapon) then return nil end
+    if isfunction(weapon.GetWM) then
+        local ok, model = pcall(weapon.GetWM, weapon)
+        if ok and IsValid(model) then return model end
+    end
+    if IsValid(weapon.worldModel) then return weapon.worldModel end
+
+    local modelPath = istable(definition) and (definition.WorldModelFake or definition.WorldModel) or nil
+    if not isstring(modelPath) or modelPath == "" or modelPath == "models/weapons/c_arms.mdl" then return nil end
+    local ok, model = pcall(ClientsideModel, modelPath, RENDERGROUP_OPAQUE)
+    if not ok or not IsValid(model) then return nil end
+    model:SetNoDraw(true)
+    model:SetPos(vector_origin)
+    weapon.worldModel = model
+    weapon.BZCNHandWorldModel = model
+    return model
+end
+
+local function TryPlayerStyleHandSetup(ent, weapon, definition)
+    if not IsValid(ent) or not IsValid(weapon) or not isfunction(weapon.SetHandPos) then return false end
+
+    -- Homigrad's player SWEP SetHandPos implementations skip non-players (and
+    -- entities not marked shouldTransmit). A NextBot cannot pass those checks,
+    -- even though the shared TPIK solver can manipulate its humanoid arm bones.
+    local entityTable = ent.GetTable and ent:GetTable() or {}
+    local oldIsPlayerOverride = entityTable.IsPlayer
+    local oldShouldTransmit, oldNotSeen = ent.shouldTransmit, ent.NotSeen
+    local oldChatGestureWeight = ent.ChatGestureWeight
+
+    ent.rhold = nil
+    ent.lhold = nil
+    ent.IsPlayer = function() return true end
+    ent.shouldTransmit = true
+    ent.NotSeen = nil
+    if ent.ChatGestureWeight == nil then ent.ChatGestureWeight = 0 end
+
+    GetOrCreateHandWorldModel(weapon, definition)
+    local ok, err = pcall(weapon.SetHandPos, weapon)
+
+    ent.IsPlayer = oldIsPlayerOverride
+    ent.shouldTransmit = oldShouldTransmit
+    ent.NotSeen = oldNotSeen
+    ent.ChatGestureWeight = oldChatGestureWeight
+
+    if not ok then
+        local logAt = tonumber(ent.BZCNHandSetupLogAt) or 0
+        if CurTime() >= logAt then
+            ent.BZCNHandSetupLogAt = CurTime() + 5
+            ErrorNoHalt("[BZCN hand pose] NPC #" .. tostring(ent:EntIndex())
+                .. " (" .. tostring(weapon:GetClass()) .. "): " .. tostring(err) .. "\n")
+        end
+    end
+    return ok and (ent.rhold ~= nil or ent.lhold ~= nil)
+end
+
+local function ApplyFallbackHandTargets(ent, weapon, definition)
+    if not IsValid(ent) or not IsValid(weapon) then return end
+    local aim = ent:EyeAngles()
+    local spine = ent:LookupBone("ValveBiped.Bip01_Spine4")
+    local matrix = spine and ent:GetBoneMatrix(spine)
+    local origin = IsValid(matrix) and matrix:GetTranslation() or ent:WorldSpaceCenter()
+    local forward, right, up = aim:Forward(), aim:Right(), aim:Up()
+
+    -- A stable two-hand aiming stance used only when a weapon's own SetHandPos
+    -- cannot supply player-style hand goals. hg.DoTPIK consumes these matrices.
+    ent.BZCNHandTargets = ent.BZCNHandTargets or {right = Matrix(), left = Matrix()}
+    local targets = ent.BZCNHandTargets
+    targets.right:SetTranslation(origin + forward * 13 + right * 5 - up * 5)
+    targets.right:SetAngles(aim)
+    targets.left:SetTranslation(origin + forward * 16 - right * 3 - up * 5)
+    targets.left:SetAngles(aim)
+    ent.rhold = targets.right
+    ent.lhold = targets.left
+end
+
+local function ApplyFingerHoldPose(ent, weapon)
+    if not IsValid(ent) or not IsValid(weapon) or not hg then return end
+    local hold = weapon.hold_type
+    if not isstring(hold) or hold == "" then
+        local ok, isPistol = false, false
+        if isfunction(weapon.IsPistolHoldType) then ok, isPistol = pcall(weapon.IsPistolHoldType, weapon) end
+        hold = ok and isPistol and "pistol_hold2" or "ak_hold"
+    end
+    if isfunction(hg.set_hold) then pcall(hg.set_hold, ent, hold) end
+    if isfunction(hg.set_holdrh) then pcall(hg.set_holdrh, ent, hold) end
+end
+
 local function ApplyTPIK(ent)
     if not IsManaged(ent) then return end
     if ent:GetNW2Bool("BZCNNPCDowned", false) or ent:GetNoDraw() then return end
@@ -88,7 +176,12 @@ local function ApplyTPIK(ent)
     local weapon = GetRuntimeWeapon(ent)
     if not IsValid(weapon) then return end
     InstallClientAimAdapter(ent)
-    if isfunction(weapon.SetHandPos) then pcall(weapon.SetHandPos, weapon) end
+
+    -- Runtime SWEP instances are not active Player weapons, so Homigrad never
+    -- initializes their player-only hand target state for NextBots. Run the
+    -- weapon-specific setup with temporary compatibility flags, then provide
+    -- a generic two-hand target only when that setup could not create one.
+    local hasNativeTargets = TryPlayerStyleHandSetup(ent, weapon, definition)
 
     -- This is the state the native TPIK solver reads from GetActiveWeapon().
     -- Set on the client-side SWEP instance; these are not networked SWEP vars.
@@ -96,6 +189,8 @@ local function ApplyTPIK(ent)
     weapon.lhandik = not (definition and (definition.setlhik == false or definition.setlh == false))
     weapon.setrhik = weapon.rhandik
     weapon.setlhik = weapon.lhandik
+
+    if not hasNativeTargets then ApplyFallbackHandTargets(ent, weapon, definition) end
 
     if not isfunction(ent.IsSuperAdmin) then
         ent.IsSuperAdmin = function() return false end
@@ -112,6 +207,9 @@ local function ApplyTPIK(ent)
             end
         end
     end
+
+    -- Hand/finger poses are applied after arm IK so they follow the final wrists.
+    ApplyFingerHoldPose(ent, weapon)
 end
 
 local function UpdateRenderedWeapon(ent)
@@ -168,6 +266,8 @@ end)
 
 hook.Add("EntityRemoved", "BZCN_TPIKCleanup", function(ent)
     if not ent then return end
+    if IsValid(ent.BZCNHandWorldModel) then ent.BZCNHandWorldModel:Remove() end
     ent.BZCNTPiKFrame = nil
     ent.BZCNTPiKLogAt = nil
+    ent.BZCNHandSetupLogAt = nil
 end)
