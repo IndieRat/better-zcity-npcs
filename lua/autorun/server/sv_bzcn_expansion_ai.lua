@@ -84,6 +84,7 @@ local function GrammarSafe(line)
     line = string.gsub(line, "%s+", " ")
     line = string.gsub(line, "%s+([,%.%!%?])", "%1")
     line = string.gsub(line, "([%.%!%?])%1+", "%1")
+    line = string.gsub(line, "%f[%a]a ([aeiouAEIOU])", "an %1")
     line = string.gsub(line, "^%l", string.upper)
     if line ~= "" and not string.match(line, "[%.%!%?]$") then line = line .. "." end
     return line
