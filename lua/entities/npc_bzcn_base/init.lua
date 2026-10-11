@@ -952,6 +952,31 @@ function ENT:PlayBZCNAttackAnimation()
     self:SetPlaybackRate(1)
     return true
 end
+
+function ENT:PlayBZCNKickAnimation()
+    for _, name in ipairs({
+        "kick_pistol_base",
+        "kick_pistol_25_base",
+        "kick_pistol_45_base",
+        "kick",
+        "kick_forward",
+        "melee_kick"
+    }) do
+        local ok, sequence = pcall(self.LookupSequence, self, name)
+        if ok and isnumber(sequence) and sequence >= 0 then
+            if isfunction(self.AddGestureSequence) then
+                local gestureOK = pcall(self.AddGestureSequence, self, sequence)
+                if gestureOK then return true end
+            end
+            self:ResetSequence(sequence)
+            self:SetCycle(0)
+            self:SetPlaybackRate(1)
+            return true
+        end
+    end
+    return self:PlayBZCNAttackAnimation()
+end
+
 function ENT:AttackTarget(target)
     local profile = self:GetBZCNProfile()
     local now = CurTime()
@@ -961,13 +986,15 @@ function ENT:AttackTarget(target)
     if profile.FurryStyle and self.BZCNFurryGrab and BZCN
         and isfunction(BZCN.TryFurryAssimilation) then
         local grabbedTarget = self.BZCNFurryGrab.target
-        if IsValid(grabbedTarget) and BZCNCombatActor
-            and BZCNCombatActor.IsIncapacitated
-            and BZCNCombatActor.IsIncapacitated(grabbedTarget) then
-            if isfunction(BZCN.StopFurryAssimilation) then BZCN.StopFurryAssimilation(self) end
-        elseif IsValid(grabbedTarget) and BZCN.TryFurryAssimilation(self, grabbedTarget) then
+        -- A captured victim is expected to be downed. Do not treat that
+        -- intentional state as a reason to cancel the assimilation itself.
+        if IsValid(grabbedTarget) and grabbedTarget:Health() > 0
+            and BZCN.TryFurryAssimilation(self, grabbedTarget) then
             self.LastAttack = now + 0.1
             return
+        end
+        if self.BZCNFurryGrab and isfunction(BZCN.StopFurryAssimilation) then
+            BZCN.StopFurryAssimilation(self)
         end
     end
 
@@ -1019,8 +1046,44 @@ function ENT:AttackTarget(target)
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
     local meleeOnlyWeapon = weaponClass == "weapon_hands_sh"
         or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
-    -- A firearm remains a firearm at close range; don't let armed NPCs switch
-    -- to the generic melee branch just because an enemy got inside punch range.
+
+    local kickSupport = hg and hg.BZCNNPCSupport
+    if profile.FurryStyle ~= true and isfunction(kickSupport and kickSupport.PerformKick)
+        and distance <= 52 and math.random(1, 4) == 1 then
+        local kickStart = self:WorldSpaceCenter()
+        local kickEnd = target:WorldSpaceCenter()
+        local kickTrace = util.TraceHull({
+            start = kickStart,
+            endpos = kickEnd,
+            mins = Vector(-6, -6, -6),
+            maxs = Vector(6, 6, 6),
+            filter = self,
+            mask = MASK_SHOT
+        })
+        local hit = kickTrace.Entity == target
+        if not hit and IsValid(kickTrace.Entity) and BZCNCombatActor
+            and BZCNCombatActor.ResolveTarget then
+            hit = BZCNCombatActor.ResolveTarget(kickTrace.Entity) == target
+        end
+        if not hit and IsValid(kickTrace.Entity) and hg and isfunction(hg.RagdollOwner) then
+            local ok, ragOwner = pcall(hg.RagdollOwner, kickTrace.Entity)
+            hit = ok and ragOwner == target
+        end
+        if hit then
+            self.LastAttack = now + math.max(tonumber(profile.AttackDelay) or 1, 0.85)
+            self:PlayBZCNKickAnimation()
+            self:EmitSound("player/shove_0" .. math.random(1, 5) .. ".wav", 65)
+            local kickDirection = kickEnd - kickStart
+            if kickDirection:LengthSqr() < 1 then kickDirection = self:GetForward() end
+            kickSupport.PerformKick(self, kickTrace.Entity, kickTrace.HitPos, kickDirection,
+                tonumber(profile.MeleeDamage) or 12, 5200, false, "npc_kick")
+            hook.Run("BZCNNPC_Kick", self, target, kickTrace.HitPos)
+            return
+        end
+    end
+
+    -- Firearms remain the default at range. At point-blank distance the
+    -- optional kick above lets a human-like NPC create space or knock a threat down.
     local ranged = profile.Ranged == true and not meleeOnlyWeapon
         and distance <= (tonumber(profile.WeaponRange) or 1100)
     if ranged then
@@ -1109,6 +1172,18 @@ function ENT:AttackTarget(target)
         self:PlayBZCNAttackAnimation()
         self:EmitSound(profile.MeleeMissSound or "weapons/slam/throw.wav", 62, math.random(96, 104), 0.65)
         hook.Run("BZCN_NPCAttackMissed", self, target, trace)
+        return
+    end
+
+    kickSupport = hg and hg.BZCNNPCSupport
+    if profile.FurryStyle ~= true and isfunction(kickSupport and kickSupport.PerformKick)
+        and math.random(1, 4) == 1 then
+        self.LastAttack = now + math.max(tonumber(profile.AttackDelay) or 1, 0.85)
+        self:PlayBZCNKickAnimation()
+        self:EmitSound("player/shove_0" .. math.random(1, 5) .. ".wav", 65)
+        kickSupport.PerformKick(self, trace.Entity, trace.HitPos, delta,
+            tonumber(profile.MeleeDamage) or 12, 5200, false, "npc_kick")
+        hook.Run("BZCNNPC_Kick", self, target, trace.HitPos)
         return
     end
 
@@ -1231,6 +1306,17 @@ function ENT:ChaseEnemy(target)
         local baseSpeed = tonumber(self:GetRunSpeed()) or tonumber(profile.Speed)
             or tonumber(self.MoveSpeed) or 175
         local distance = self:GetPos():Distance(goalPos)
+        if profile.FurryStyle == true and visible and self.loco
+            and now >= (self.BZCNNextPounceAt or 0) then
+            local support = hg and hg.BZCNNPCSupport
+            if support and isfunction(support.TryFurryPounce)
+                and support.TryFurryPounce(self, target) then
+                self.BZCNNextPounceAt = now + 0.5
+                coroutine.wait(0.05)
+                continue
+            end
+        end
+
         if profile.HeadcrabStyle == true and visible and distance > 58 and distance < 290
             and now >= (self.BZCNNextPounceAt or 0) and self:OnGround() then
             local direction = goalPos - self:GetPos()
