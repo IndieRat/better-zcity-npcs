@@ -58,6 +58,18 @@ Player-shaped data
 
 The chain lives in `lua/autorun/server/sv_bzcn_adapter_chain.lua`. It feeds the same visible-target/hostility observations into NPC target selection, so AI perception and the compatibility hooks no longer use separate target scans. A writeback cannot change engine identity, position, velocity, or arbitrary entity references.
 
+### Gameplay rules menu
+
+Open **Spawn Menu → Utilities → User → Better ZCity NPCs** to toggle the server-side gamerules. The options are server-authoritative and require admin permissions:
+
+- Furry grabs and assimilation
+- Furry pounce / ragdoll tackle
+- Ragdoll sitting
+- NPC door interactions
+- Armed civilians resisting fleeing
+
+The matching archived server convars are named `bzcn_rule_furry_grabs`, `bzcn_rule_furry_tackles`, `bzcn_rule_ragdoll_sitting`, `bzcn_rule_door_interaction`, and `bzcn_rule_armed_civilian_bravery`. All default to enabled.
+
 Useful server commands (admin or server console):
 
 ```text
