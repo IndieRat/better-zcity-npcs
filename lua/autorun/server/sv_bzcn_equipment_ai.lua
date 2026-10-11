@@ -399,6 +399,19 @@ local function FireStatBasedShot(ent, target, weapon)
         didFire = true
     end
 
+    if didFire then
+        local firedAt = CurTime()
+        local delay = BZCNCombatActor and BZCNCombatActor.GetFireDelay
+            and BZCNCombatActor.GetFireDelay(ent, weapon)
+            or math.max(tonumber(profile.AttackDelay) or 0.35, 0.34)
+        local nextFire = firedAt + delay
+        ent.BZCNNextShotAt = nextFire
+        if IsValid(weapon) then
+            weapon.BZCNNextFire = nextFire
+            if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(nextFire) end
+        end
+    end
+
     ent:EmitSound(sound, 72, math.random(95, 105), 0.8)
     if isfunction(ent.MuzzleFlash) then pcall(ent.MuzzleFlash, ent) end
     hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon, trace)
@@ -419,6 +432,11 @@ function BZCN.FireRuntimeWeapon(ent, target)
     local class = ent.BZCN_SelectedWeapon or profile.WeaponClass
     if not isstring(class) or class == "" or MEDICAL_WEAPONS[class] then return false end
 
+    local now = CurTime()
+    -- This owner-level gate also covers the rare case where no runtime SWEP
+    -- entity can be created and the stat-based fallback has to fire directly.
+    if (tonumber(ent.BZCNNextShotAt) or 0) > now then return true end
+
     local weapon = ent.BZCNRuntimeWeapon
     if not IsValid(weapon) or weapon:GetClass() ~= class then
         if not BZCN.EquipRuntimeWeapon(ent, class) then
@@ -428,14 +446,14 @@ function BZCN.FireRuntimeWeapon(ent, target)
     end
     if not IsValid(weapon) then return FireStatBasedShot(ent, target, nil) end
 
-    local now = CurTime()
     PlaceRuntimeWeapon(ent, weapon)
     local primary = istable(weapon.Primary) and weapon.Primary or {}
     local entityNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
     -- Keep the fallback cooldown on the weapon entity. primary.Next may be a
     -- shared SWEP definition table, which can incorrectly lock every NPC together.
     local scriptNext = tonumber(weapon.BZCNNextFire) or 0
-    local beforeNext = math.max(entityNext, scriptNext)
+    local ownerNext = tonumber(ent.BZCNNextShotAt) or 0
+    local beforeNext = math.max(entityNext, scriptNext, ownerNext)
     if beforeNext > now then return true end
 
     local clipSize = tonumber(primary.ClipSize) or 0
@@ -537,6 +555,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
                 and BZCNCombatActor.GetFireDelay(ent, weapon)
                 or math.max(tonumber(profile.AttackDelay) or 0.35, 0.06))
             weapon.BZCNNextFire = nextFire
+            ent.BZCNNextShotAt = nextFire
             if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(nextFire) end
             if fired then hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon, nil) end
         end
