@@ -689,7 +689,7 @@ if SERVER then
             target = IsValid(trace.Entity) and trace.Entity or nil
         end
         if not IsValid(target) or not BZCN.IsManaged(target) or not BZCN.Classes[className or ""] then
-            local message = "Usage: bzcn_npc_set_class <entity-index> <default|Combine|Rebel|furry>"
+            local message = "Usage: bzcn_npc_set_class <entity-index> <default|Combine|Metrocop|Rebel|furry>"
             if IsValid(ply) then ply:ChatPrint(message) else print(message) end
             return
         end
