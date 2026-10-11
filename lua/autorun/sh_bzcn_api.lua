@@ -301,6 +301,10 @@ function BZCN.InstallAdapter(ent)
     data.GetMaxSpeed = function(self) return self:GetRunSpeed() end
     data.IsSprinting = function(self) return self.BZCN_Sprinting == true end
     data.InVehicle = function() return false end
+    data.IsTyping = function() return false end
+    data.GetEntityInUse = function(self)
+        return IsValid(self.BZCN_EntityInUse) and self.BZCN_EntityInUse or NULL
+    end
     data.Crouching = function() return false end
     data.GetActiveWeaponClass = function(self)
         return self.BZCN_SelectedWeapon or self:GetNW2String("BZCNWeaponClass", "")
