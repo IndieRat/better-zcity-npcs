@@ -323,6 +323,33 @@ function BZCN.InstallAdapter(ent)
     end
     data.KeyPressed = data.KeyDown
     data.KeyReleased = function() return false end
+    data.GetLocalVar = function(self, key, default)
+        local vars = self.BZCN_LocalVars
+        if istable(vars) and vars[key] ~= nil then return vars[key] end
+        if isstring(key) and self.GetNW2Float then
+            local number = self:GetNW2Float("BZCNLocalVar_" .. key, nil)
+            if number ~= nil then return number end
+        end
+        return default
+    end
+    data.SetLocalVar = function(self, key, value)
+        if not isstring(key) then return end
+        self.BZCN_LocalVars = self.BZCN_LocalVars or {}
+        self.BZCN_LocalVars[key] = value
+        if not self.SetNW2String then return value end
+        local kind = type(value)
+        self:SetNW2String("BZCNLocalVarType_" .. key, kind)
+        if kind == "number" then
+            self:SetNW2Float("BZCNLocalVar_" .. key, value)
+        elseif kind == "boolean" then
+            self:SetNW2Bool("BZCNLocalVar_" .. key, value)
+        elseif kind == "string" then
+            self:SetNW2String("BZCNLocalVar_" .. key, value)
+        elseif kind == "table" then
+            self:SetNW2String("BZCNLocalVar_" .. key, util.TableToJSON(value, false) or "{}")
+        end
+        return value
+    end
     data.EyePos = function(self)
         return self:WorldSpaceCenter() + Vector(0, 0, 6)
     end
