@@ -1076,14 +1076,42 @@ function BZCN.TryFurryAssimilation(attacker, target)
     if not IsValid(weapon) then return false end
     if state then
         state.weapon = weapon
+        -- The grab is a physical hold, not target-lock through geometry. Stop
+        -- if a wall/closed door separates the carrier from the held body.
+        local ragNow = GetCurrentFurryRagdoll(target)
+        local endPos = IsValid(ragNow) and ragNow:WorldSpaceCenter() or target:WorldSpaceCenter()
+        local startPos = isfunction(attacker.EyePos) and attacker:EyePos() or attacker:WorldSpaceCenter()
+        local sightFilter = {attacker, target, weapon}
+        if IsValid(ragNow) then sightFilter[#sightFilter + 1] = ragNow end
+        if IsValid(attacker.BZCNHeldWeaponProxy) then sightFilter[#sightFilter + 1] = attacker.BZCNHeldWeaponProxy end
+        local sight = util.TraceLine({start = startPos, endpos = endPos, filter = sightFilter, mask = MASK_SOLID})
+        if sight.Hit then
+            BZCN.StopFurryAssimilation(attacker)
+            return false
+        end
+
+        -- A target that was already downed can only be picked up from an
+        -- actual ragdoll arm/hand hit. Do not silently upgrade a torso/entity
+        -- target lock into a downed-ragdoll grab on later ticks.
+        if state.startedDowned and IsDownedForFurryGrab(target, ragNow) then
+            if not IsValid(ragNow) or state.grabEntity ~= ragNow
+                or not IsGrabbableArmBone(ragNow, state.grabPhysicsBone) then
+                BZCN.StopFurryAssimilation(attacker)
+                return false
+            end
+        end
     else
         -- Mirror weapon_hands_sh's secondary attack: the target must be traced
         -- within actual reach; downed targets require a physical arm hit.
-        local validTrace = TraceFurryGrab(attacker, target, weapon)
+        local validTrace, grabTrace = TraceFurryGrab(attacker, target, weapon)
         if not validTrace then return false end
+        attacker.BZCNPendingFurryGrabTrace = grabTrace
     end
 
     if not state then
+        local grabTrace = attacker.BZCNPendingFurryGrabTrace
+        attacker.BZCNPendingFurryGrabTrace = nil
+        local initialRag = GetCurrentFurryRagdoll(target)
         state = {
             target = target,
             weapon = weapon,
@@ -1091,7 +1119,10 @@ function BZCN.TryFurryAssimilation(attacker, target)
             pendingUntil = CurTime() + 3,
             lastThink = CurTime(),
             attached = false,
-            createdFake = target:IsPlayer() and not IsValid(GetCurrentFurryRagdoll(target)) or false
+            startedDowned = IsDownedForFurryGrab(target, initialRag),
+            grabEntity = IsValid(grabTrace) and grabTrace.Entity or nil,
+            grabPhysicsBone = IsValid(grabTrace) and grabTrace.PhysicsBone or nil,
+            createdFake = target:IsPlayer() and not IsValid(initialRag) or false
         }
         attacker.BZCNFurryGrab = state
         attacker.BZCNFurryGrabTarget = target
