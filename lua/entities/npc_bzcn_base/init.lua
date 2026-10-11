@@ -76,6 +76,10 @@ function ENT:Initialize()
     self.BZCNStaminaExhaustedUntil = 0
     self.BZCN_Sprinting = false
     if self.SetNW2Float then self:SetNW2Float("BZCNStamina", 100) end
+    -- Explicitly keep a normal solid hull: a NextBot with SOLID_NONE or
+    -- stale model bounds can be visible but fail player interaction/collision.
+    self:SetSolid(SOLID_BBOX)
+    if self.SetNotSolid then self:SetNotSolid(false) end
     self:SetCollisionGroup(COLLISION_GROUP_NPC)
     -- Use a compact human-sized movement hull rather than inheriting unusually
     -- wide model bounds (notably on custom/furry player models). The model and
@@ -83,6 +87,7 @@ function ENT:Initialize()
     if self.SetCollisionBounds then
         self:SetCollisionBounds(Vector(-13, -13, 0), Vector(13, 13, 72))
     end
+    if self.CollisionRulesChanged then self:CollisionRulesChanged() end
     if self.SetUseType then self:SetUseType(SIMPLE_USE) end
 
     if self.loco then
