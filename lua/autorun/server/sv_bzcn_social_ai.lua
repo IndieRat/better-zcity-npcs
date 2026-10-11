@@ -296,6 +296,7 @@ local function FleeFromFurry(civilian, furry)
     if not IsCivilianNPC(civilian) or not IsFurryThreat(furry)
         or civilian == furry or not CanUseSocialEmote(civilian) then return false end
     if civilian.BZCNFleeUntil and civilian.BZCNFleeUntil > CurTime() then return true end
+    if civilian.BZCNCuriousUntil and civilian.BZCNCuriousUntil > CurTime() then return true end
 
     if civilian.BZCNCuriosity == nil then civilian.BZCNCuriosity = math.random(1, 4) == 1 end
     if civilian.BZCNCuriosity == true then
@@ -379,6 +380,15 @@ local function IsVoiceSound(soundPath)
         or startsWith("n51/")
 end
 
+local function ReactToFurrySound(source, soundPath)
+    if not IsFurryThreat(source) or not isstring(soundPath)
+        or not string.find(string.lower(soundPath), "furry/", 1, true) then return end
+    for _, civilian in ipairs(ents.FindInSphere(source:GetPos(), 600)) do
+        if not IsCivilianNPC(civilian) or not CanUseSocialEmote(civilian) then continue end
+        FleeFromFurry(civilian, source)
+    end
+end
+
 -- Observe the final sound rather than intercepting Z-City's net receivers.
 -- That also catches its HG_ReplacePhrase furry override and context phrases.
 hook.Add("EntityEmitSound", "BZCN_Social_PhraseReaction", function(data)
@@ -389,7 +399,9 @@ hook.Add("EntityEmitSound", "BZCN_Social_PhraseReaction", function(data)
         local ok, owner = pcall(hg.RagdollOwner, source)
         if ok and IsValid(owner) and owner:IsPlayer() then source = owner end
     end
-    if not IsValid(source) or not source:IsPlayer() then return end
+    if not IsValid(source) then return end
+    ReactToFurrySound(source, data.SoundName)
+    if not source:IsPlayer() then return end
     ReactToPhrase(source, data.SoundName)
 end)
 
