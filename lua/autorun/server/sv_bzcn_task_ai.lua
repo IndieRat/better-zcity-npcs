@@ -872,24 +872,86 @@ function Tasks.RunIdleTask(ent)
     end
 
     if task == "sit" then
-        local sequence = ent:FindSequence({
-            "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
-            "sit_idle", "sit", "sitting", "idle_sit"
-        })
-        if sequence >= 0 then
-            ent.BZCNSitSequence = sequence
-            ent.BZCNSittingUntil = CurTime() + math.Rand(8, 24)
-            if ent.SetNW2Float then ent:SetNW2Float("BZCNSittingUntil", ent.BZCNSittingUntil) end
-            ent.loco:SetDesiredSpeed(0)
-            local nearby
-            for _, other in ipairs(ents.FindInSphere(ent:GetPos(), 220)) do
-                if other ~= ent and (other:IsPlayer() or IsManaged(other)) then nearby = other break end
-            end
-            if IsValid(nearby) then ent.loco:FaceTowards(nearby:GetPos()) end
-            coroutine.wait(0.65)
-        else
-            coroutine.wait(0.4)
+        local support = hg and hg.BZCNNPCSupport
+        if not support or not isfunction(support.EnterDownedState)
+            or not isfunction(support.Recover)
+            or ent:GetNW2Bool("BZCNNPCDowned", false)
+            or CurTime() < (ent.BZCNRagdollSitCooldown or 0) then
+            coroutine.wait(0.45)
+            return true
         end
+
+        ent.BZCNRagdollSitCooldown = CurTime() + math.Rand(18, 32)
+        ent.BZCNRagdollSitUntil = CurTime() + math.Rand(7, 12)
+        ent.BZCNRagdollSitPhase = 0
+        ent.loco:SetDesiredSpeed(0)
+        local entered, result = pcall(support.EnterDownedState, ent, "npc_ragdoll_sit")
+        if not entered or result == false then
+            ent.BZCNRagdollSitUntil = nil
+            coroutine.wait(0.5)
+            return true
+        end
+
+        -- Keep the actual Z-City fake-ragdoll active. The timed stages gently
+        -- fold the lower body in, then damp the limbs for a resting pose.
+        local sitUntil = ent.BZCNRagdollSitUntil
+        local function GetSitRagdoll()
+            if not IsValid(ent) then return nil end
+            local rag = ent.BZCNNPCRagdoll
+            if not IsValid(rag) then rag = ent.FakeRagdoll end
+            if not IsValid(rag) and isfunction(support.GetNPCHealthTable) then
+                local ok, healthState = pcall(support.GetNPCHealthTable, ent)
+                if ok and istable(healthState) and IsValid(healthState.ragdoll) then
+                    rag = healthState.ragdoll
+                end
+            end
+            return IsValid(rag) and rag or nil
+        end
+        local function TuckLegs(phase)
+            if not IsValid(ent) or ent.BZCNRagdollSitUntil ~= sitUntil then return end
+            local rag = GetSitRagdoll()
+            if not IsValid(rag) then return end
+            local pelvisBone = rag:LookupBone("ValveBiped.Bip01_Pelvis")
+            local pelvisPhysBone = isnumber(pelvisBone) and rag:TranslateBoneToPhysBone(pelvisBone) or 0
+            local pelvis = rag:GetPhysicsObjectNum(pelvisPhysBone)
+            if not IsValid(pelvis) then pelvis = rag:GetPhysicsObject() end
+            if not IsValid(pelvis) then return end
+            local center = pelvis:GetPos()
+            for _, boneName in ipairs({
+                "ValveBiped.Bip01_L_Thigh", "ValveBiped.Bip01_R_Thigh",
+                "ValveBiped.Bip01_L_Calf", "ValveBiped.Bip01_R_Calf"
+            }) do
+                local bone = rag:LookupBone(boneName)
+                local physBone = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or nil
+                local phys = isnumber(physBone) and rag:GetPhysicsObjectNum(physBone) or nil
+                if IsValid(phys) then
+                    local target = center + Vector(phase == 1 and 0 or 0, 0, phase == 1 and -10 or -4)
+                    local delta = target - phys:GetPos()
+                    phys:Wake()
+                    phys:ApplyForceCenter(delta * (phase == 1 and 18 or 5) - phys:GetVelocity() * 3)
+                    phys:AddAngleVelocity(-phys:GetAngleVelocity() * 0.35)
+                end
+            end
+            if phase == 2 then
+                for i = 0, (rag:GetPhysicsObjectCount() or 0) - 1 do
+                    local phys = rag:GetPhysicsObjectNum(i)
+                    if IsValid(phys) then phys:AddAngleVelocity(-phys:GetAngleVelocity() * 0.45) end
+                end
+            end
+        end
+        timer.Simple(0.25, function() TuckLegs(1) end)
+        timer.Simple(0.85, function() TuckLegs(2) end)
+        timer.Simple(math.max(sitUntil - CurTime(), 0.1), function()
+            if not IsValid(ent) or ent.BZCNRagdollSitUntil ~= sitUntil then return end
+            ent.BZCNRagdollSitUntil = nil
+            ent.BZCNRagdollSitPhase = nil
+            if ent:GetNW2Bool("BZCNNPCDowned", false) then
+                -- Recover still enforces Z-City's organism limits; if the body
+                -- cannot stand yet, the normal downed system owns recovery.
+                pcall(support.Recover, ent, GetSitRagdoll(), false)
+            end
+        end)
+        coroutine.wait(0.6)
         return true
     end
 
