@@ -315,6 +315,37 @@ function Actor.GetFireDelay(owner, weapon)
     return math.Clamp(tonumber(profile and profile.AttackDelay) or 0.35, 0.06, 3)
 end
 
+-- A target that is already incapacitated is no longer a combat target. Keep
+-- this centralized so aiming, firing, and the NextBot's target selector agree.
+function Actor.IsIncapacitated(target)
+    if not IsValidEntity(target) or target:Health() <= 0 then return true end
+    if target.IsPlayer and target:IsPlayer() and target.Alive and not target:Alive() then return true end
+
+    local nwFlags = {"BZCNNPCDowned", "BZCNNPCGettingUp", "IsDowned", "Downed", "KnockedDown", "IsKnockedDown"}
+    for _, key in ipairs(nwFlags) do
+        if target.GetNW2Bool and target:GetNW2Bool(key, false) then return true end
+    end
+
+    local state = target.BZCNNPCOrg or target.BZCN_Organism or target.organism
+    if istable(state) and (state.downed == true or state.gettingUp == true
+        or state.incapacitated == true or state.unconscious == true
+        or state.otrub == true or state.needotrub == true) then
+        return true
+    end
+
+    local support = hg and hg.BZCNNPCSupport
+    if support then
+        for _, method in ipairs({"IsDowned", "IsGettingUp"}) do
+            if isfunction(support[method]) then
+                local ok, result = pcall(support[method], target)
+                if ok and result == true then return true end
+            end
+        end
+    end
+
+    return false
+end
+
 function Actor.CanFire(owner, weapon)
     if not IsValidEntity(owner) then return false end
     if not IsValidEntity(weapon) then return true end
