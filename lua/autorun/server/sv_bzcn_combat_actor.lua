@@ -258,7 +258,13 @@ function Actor.UpdateAim(attacker, target, weapon)
     -- Face the actual visible body, and expose sensible aim pose parameters for
     -- Homigrad's NPC branch and the model animation layer.
     attacker:SetAngles(Angle(0, aimAngle.y, 0))
-    if attacker.SetEyeAngles then pcall(attacker.SetEyeAngles, attacker, Angle(aimAngle.p, aimAngle.y, 0)) end
+    local replicatedAim = Angle(aimAngle.p, aimAngle.y, 0)
+    if attacker.SetEyeAngles then pcall(attacker.SetEyeAngles, attacker, replicatedAim) end
+    -- Client TPIK cannot see the server-only BZCNCombatAimSolution table.
+    -- Replicate its angle briefly so the arm solver and displayed weapon keep
+    -- tracking between individual shots without leaving a stale aim forever.
+    if attacker.SetNW2Angle then attacker:SetNW2Angle("BZCNCombatAimAngle", replicatedAim) end
+    if attacker.SetNW2Float then attacker:SetNW2Float("BZCNCombatAimUntil", CurTime() + 0.35) end
     if attacker.SetEyeTarget then pcall(attacker.SetEyeTarget, attacker, predicted) end
     if attacker.SetPoseParameter then
         pcall(attacker.SetPoseParameter, attacker, "aim_yaw", 0.5)
