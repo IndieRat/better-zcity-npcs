@@ -328,6 +328,13 @@ function BZCN.InstallAdapter(ent)
     data.IsSprinting = function(self) return self.BZCN_Sprinting == true end
     data.InVehicle = function() return false end
     data.IsTyping = function() return false end
+    -- Managed NextBots can be resolved as owners of Z-City's temporary ragdolls.
+    -- The stock damage hook asks GetInfoNum("hg_deathfadeout", 1) on that owner,
+    -- but NextBots have no Player userinfo; disable that Player-only fade option.
+    data.GetInfoNum = function(self, key, default)
+        if key == "hg_deathfadeout" then return 0 end
+        return tonumber(default) or 0
+    end
     data.GetEntityInUse = function(self)
         return IsValid(self.BZCN_EntityInUse) and self.BZCN_EntityInUse or NULL
     end

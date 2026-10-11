@@ -72,6 +72,19 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     weapon:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
     weapon.BZCNRuntimeOwner = owner
     owner:DeleteOnRemove(weapon)
+
+    if not MEDICAL_WEAPONS[class] then
+        -- Runtime SWEPs only provide the selected weapon's stats, model and
+        -- optional fists state. BZCN drives all attacks through its own AI:
+        -- suppress native Think/NPCShoot callbacks so Player-oriented
+        -- homigrad_base FireLuaBullets hooks are never invoked for a NextBot.
+        weapon.Think = function() end
+        weapon.PrimaryAttack = function() end
+        weapon.SecondaryAttack = function() end
+        weapon.Reload = function() end
+        weapon.NPCShoot_Primary = function() end
+        weapon.NPCShoot_Secondary = function() end
+    end
     -- weapon_hands_sh initializes with fists lowered. Do not raise them here:
     -- Z-City furry grab/assimilation is bound to RMB with fists lowered.
     -- AttackRuntimeMelee raises them only during a punch action.
