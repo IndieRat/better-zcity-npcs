@@ -64,7 +64,7 @@ local function FindFakeRagdoll(owner)
     if owner.GetNW2Entity then
         candidates[#candidates + 1] = owner:GetNW2Entity("FakeRagdoll")
     end
-    for _, body in ipairs(candidates) do
+    for _, body in pairs(candidates) do
         if IsRagdollEntity(body) and NetworkOwner(body) == owner then return body end
     end
     if IsRagdollEntity(owner.FakeRagdoll) then return owner.FakeRagdoll end
@@ -240,7 +240,7 @@ function Actor.UpdateAim(attacker, target, weapon)
     local source = attacker.EyePos and attacker:EyePos() or attacker:WorldSpaceCenter()
     local delta = point - source
     local distance = delta:Length()
-    local ragdoll = IsRagdollEntity(body) and body ~= target
+    local ragdoll = IsRagdollEntity(body)
     local velocity = GetTargetVelocity(target, body)
     if not isvector(velocity) then velocity = vector_origin end
 
