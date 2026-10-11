@@ -269,10 +269,38 @@ function ENT:Initialize()
             BZCN.EquipRuntimeWeapon(self, self.BZCN_SelectedWeapon)
         end
         if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.Attach then
-            hg.BZCNNPCSupport.Attach(self)
+            local ok, err = pcall(hg.BZCNNPCSupport.Attach, self)
+            if not ok then
+                ErrorNoHalt("[BZCN] Could not attach organism support to NPC: " .. tostring(err) .. "\\n")
+            end
+        end
+
+        -- Attach can create the organism after Initialize's first profile pass.
+        -- Apply the class blood type after that table exists, not only before it.
+        local profile = self.BZCNClassProfile or self:GetBZCNProfile()
+        local organism = self.organism or self.BZCN_Organism
+        if not istable(organism) and hg and hg.BZCNNPCSupport
+            and isfunction(hg.BZCNNPCSupport.GetNPCHealthTable) then
+            local ok, healthState = pcall(hg.BZCNNPCSupport.GetNPCHealthTable, self)
+            if ok and istable(healthState) then
+                organism = healthState.organism or healthState
+            end
+        end
+        if istable(organism) then
+            self.BZCN_Organism = organism
+            if profile and profile.BloodType and organism.bloodtype == nil then
+                organism.bloodtype = profile.BloodType
+            end
         end
     end)
     hook.Run("BZCN_NPCSpawned", self, className, self.BZCNClassProfile)
+end
+
+-- Organism bone-input code may call Entity:Notify even for NextBots, but the
+-- player-only notification method is not inherited by scripted NPC entities.
+-- Keep that compatibility call harmless rather than aborting bullet-hit traces.
+function ENT:Notify(...)
+    return
 end
 
 function ENT:GetBZCNProfile()
