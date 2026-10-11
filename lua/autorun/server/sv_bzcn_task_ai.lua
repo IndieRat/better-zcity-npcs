@@ -987,10 +987,18 @@ function Tasks.RunIdleTask(ent)
                 end
             end
         end
+        local sitTimer = "BZCNRagdollSitPose_" .. ent:EntIndex() .. "_" .. math.floor(sitUntil * 1000)
+        timer.Create(sitTimer, 0.2, 0, function()
+            if not IsValid(ent) or ent.BZCNRagdollSitUntil ~= sitUntil
+                or CurTime() >= sitUntil then
+                timer.Remove(sitTimer)
+                return
+            end
+            TuckLegs(2)
+        end)
         timer.Simple(0.2, function() TuckLegs(1) end)
-        timer.Simple(0.7, function() TuckLegs(2) end)
-        timer.Simple(1.5, function() TuckLegs(2) end)
         timer.Simple(math.max(sitUntil - CurTime(), 0.1), function()
+            timer.Remove(sitTimer)
             if not IsValid(ent) or ent.BZCNRagdollSitUntil ~= sitUntil then return end
             ent.BZCNRagdollSitUntil = nil
             ent.BZCNRagdollSitPhase = nil
