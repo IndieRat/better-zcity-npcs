@@ -95,6 +95,14 @@ The `default` civilian first tries Z-City's `hg.Appearance.GetRandomAppearance()
 
 Managed NPCs classify native Z-City Combine/civilian NPCs, establish reciprocal entity relationships, and use a shared sensing context to follow visible allies. If a nearby ally or player has recently been attacked, that attacker is promoted to a temporary hostile even if it was normally the same faction, so the NPC can defend the victim. NPCs follow players and other allies when no visible hostile needs attention. This is cooperative AI for the managed NPCs; it cannot take over a real player's controls or guarantee that unrelated native NPC AI will actively follow the scripted NextBot.
 
+### Social phrases, gestures, and furry scanning
+
+The server social bridge observes Z-City voice phrases after they are emitted, including the furry class's native replacement sounds, and lets nearby managed NPCs respond with a suitable phrase and a model-supported gesture. NPCs can also make occasional ambient phrases/gestures while idle near players. The bridge observes animation events and supports common chat/act gesture aliases without rewriting ordinary chat. Furry NPCs run a recurring prey-location scan that tracks hostile players and NPCs even when they are not currently visible; visibility is still required for immediate attack, while pursuit can follow the scanned position.
+
+### Medical assistance
+
+Managed NPCs can use their available medical supplies on nearby allies, including players and managed NPCs. Native Source NPCs that have no usable Z-City organism table can receive basic health-based first aid instead of being ignored by the medical selector. Assistance remains faction-aware and is skipped while the medic is downed, getting up, treating someone already, or holding a furry-grab target.
+
 ## Injury signals and fake-ragdoll compatibility
 
 The injury bridge also uses the public [Z-City NPC Integration (zcnpci)](https://forge.owouw.us/ToasterPanic/zcnpci) addon as a design reference for damage-stage handling and ragdoll compatibility; this addon does not copy its active-ragdoll controller. For managed NextBots, it records available `ScaleNPCDamage` hitgroups and consumes `HomigradDamage` when present, then evaluates Z-City organism state after the damage tick. The incapacity checks include `otrub`, low consciousness, high pain, active stun/light-stun timers, serious leg damage/amputation, fire, and zcnpci-style leg-specific impact thresholds. These are server-side knockdown decisions layered over Z-City's native organism; they do not replace its wound calculation.
