@@ -20,6 +20,63 @@ local function HasSenseRecord(self, target, requireHostile)
     return false
 end
 
+local function GetWaterSurfacePosition(self)
+    local waterLevel = self:WaterLevel()
+    if waterLevel <= 0 then return nil end
+    local pos = self:WorldSpaceCenter()
+    local trace = util.TraceLine({
+        start = pos + Vector(0, 0, 16),
+        endpos = pos + Vector(0, 0, 768),
+        filter = self,
+        mask = MASK_WATER
+    })
+    if trace.Hit and isvector(trace.HitPos) then return trace.HitPos end
+    return nil
+end
+
+local function UpdateSwimState(self)
+    local waterLevel = self:WaterLevel()
+    local swimming = waterLevel >= 2
+    self.BZCNSwimming = swimming
+    if self.SetNW2Bool then self:SetNW2Bool("BZCNSwimming", swimming) end
+    if not swimming then
+        if self.BZCNSwimSequence and self.BZCNSwimSequence >= 0 then
+            self.BZCNSwimSequence = nil
+        end
+        return false
+    end
+
+    -- Keep the head above the surface where possible and relax the arms into
+    -- a swim pose. Models without a swim sequence simply keep moving; no
+    -- invalid sequence is forced on custom player models.
+    local surface = GetWaterSurfacePosition(self)
+    if surface and self.loco then
+        local current = self:GetPos()
+        local desiredZ = surface.z - 42
+        local verticalError = desiredZ - current.z
+        if math.abs(verticalError) > 8 then
+            self.loco:SetVelocity(self:GetVelocity() + Vector(0, 0, math.Clamp(verticalError * 1.4, -80, 95)))
+        end
+    end
+
+    if self.LookupSequence and self.ResetSequence then
+        local sequence = self:LookupSequence("swim_all")
+        if not sequence or sequence < 0 then sequence = self:LookupSequence("swim") end
+        if sequence and sequence >= 0 and self.BZCNSwimSequence ~= sequence then
+            self.BZCNSwimSequence = sequence
+            self:ResetSequence(sequence)
+            self:SetCycle(0)
+            self:SetPlaybackRate(1)
+        end
+    end
+    if self.SetPoseParameter then
+        pcall(self.SetPoseParameter, self, "aim_pitch", 0.5)
+        pcall(self.SetPoseParameter, self, "move_x", 0.5)
+        pcall(self.SetPoseParameter, self, "move_y", 0.5)
+    end
+    return true
+end
+
 local function UpdatePursuitStamina(self, wantsSprint)
     local now = CurTime()
     local last = tonumber(self.BZCNStaminaUpdatedAt) or now
@@ -915,6 +972,7 @@ function ENT:ChaseEnemy(target)
         local downed = self:GetNW2Bool("BZCNNPCDowned", false)
         local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
             and hg.BZCNNPCSupport.IsGettingUp(self)
+        local swimming = UpdateSwimState(self)
         if downed or gettingUp then
             self.loco:SetDesiredSpeed(0)
             coroutine.wait(0.1)
@@ -1093,6 +1151,31 @@ function ENT:RunBehaviour()
             and hg.BZCNNPCSupport.IsGettingUp(self)
         if downed or gettingUp then
             if self.loco then self.loco:SetDesiredSpeed(0) end
+            coroutine.wait(0.1)
+        elseif swimming then
+            local enemy = self:HaveEnemy()
+            local waterTarget
+            if IsValid(enemy) then
+                waterTarget = BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+                    and BZCNCombatActor.GetTargetPosition(enemy) or enemy:GetPos()
+            else
+                local surface = GetWaterSurfacePosition(self)
+                if surface then
+                    local away = self:GetPos() - surface
+                    away.z = 0
+                    if away:LengthSqr() < 1 then away = self:GetForward() end
+                    waterTarget = self:GetPos() + away:GetNormalized() * 180
+                end
+            end
+            if self.loco and isvector(waterTarget) then
+                self.loco:SetDesiredSpeed(math.max(tonumber(self.BZCNClassProfile and self.BZCNClassProfile.Speed) or 175, 140))
+                local path = Path("Follow")
+                path:SetMinLookAheadDistance(80)
+                path:SetGoalTolerance(40)
+                path:Compute(self, waterTarget)
+                if path:IsValid() then path:Update(self) end
+            end
+            UpdatePursuitStamina(self, false)
             coroutine.wait(0.1)
         elseif CurTime() < (self.BZCNMedicalUntil or 0) then
             if self.loco then
