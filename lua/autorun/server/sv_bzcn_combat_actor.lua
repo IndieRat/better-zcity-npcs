@@ -161,12 +161,11 @@ function Actor.GetTargetPosition(target)
 end
 
 function Actor.GetWeaponHoldType(owner, weapon, weaponClass)
-    local profile = IsValidEntity(owner) and (owner.BZCNClassProfile or {}) or {}
     weaponClass = weaponClass or (IsValidEntity(weapon) and weapon:GetClass())
         or (IsValidEntity(owner) and owner.BZCN_SelectedWeapon) or ""
 
-    -- Prefer the selected weapon's own pool, not the NPC class's default gun.
-    -- The AK-family Homigrad SWEPs use "rpg" as a grip hint despite being rifles.
+    -- Use weapon-specific animation pools before a class's default. Some
+    -- Homigrad SWEPs intentionally report an unusual HoldType for grip code.
     if weaponClass == "weapon_glock17" then return "pistol" end
     if weaponClass == "weapon_ak74" or weaponClass == "weapon_ak74u"
         or weaponClass == "weapon_akm" or weaponClass == "weapon_ak47"
@@ -185,6 +184,8 @@ function Actor.GetWeaponHoldType(owner, weapon, weaponClass)
         fist = "normal", melee2 = "melee", knife = "melee"
     }
     if hold and hold ~= "" then return translator[hold] or hold end
+
+    local profile = IsValidEntity(owner) and (owner.BZCNClassProfile or {}) or {}
     if isstring(profile.AnimationHoldType) and profile.AnimationHoldType ~= "" then
         return string.lower(profile.AnimationHoldType)
     end
