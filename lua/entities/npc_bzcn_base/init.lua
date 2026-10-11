@@ -1278,7 +1278,21 @@ function ENT:ChaseEnemy(target)
             local pounce = self.BZCNNPCPounce
             if IsValid(pounce.target) and now <= (pounce.expires or 0) then
                 local pounceTarget = pounce.target
-                if self:WorldSpaceCenter():DistToSqr(pounceTarget:WorldSpaceCenter()) <= 76 * 76 then
+                local pounceRag = IsValid(pounce.rag) and pounce.rag or nil
+                if not IsValid(pounceRag) then
+                    pounceRag = IsValid(self.BZCNNPCRagdoll) and self.BZCNNPCRagdoll
+                        or (IsValid(self.FakeRagdoll) and self.FakeRagdoll or nil)
+                    if not IsValid(pounceRag) and support and isfunction(support.GetNPCHealthTable) then
+                        local ok, healthState = pcall(support.GetNPCHealthTable, self)
+                        if ok and istable(healthState) and IsValid(healthState.ragdoll) then
+                            pounceRag = healthState.ragdoll
+                        end
+                    end
+                    pounce.rag = pounceRag
+                end
+                local attackerCenter = IsValid(pounceRag) and pounceRag:WorldSpaceCenter()
+                    or self:WorldSpaceCenter()
+                if attackerCenter:DistToSqr(pounceTarget:WorldSpaceCenter()) <= 76 * 76 then
                     local support = hg and hg.BZCNNPCSupport
                     local impactPos = pounceTarget:WorldSpaceCenter()
                     local direction = pounce.direction or self:GetForward()
@@ -1480,21 +1494,38 @@ function ENT:ChaseEnemy(target)
                         else
                             self:PlayBZCNAttackAnimation()
                         end
-                        -- The melee gesture keeps both arms reaching forward
-                        -- while the NextBot's physics velocity carries the leap.
-                        if isfunction(self.AddGesture) and ACT_GESTURE_RANGE_ATTACK_MELEE then
-                            pcall(self.AddGesture, self, ACT_GESTURE_RANGE_ATTACK_MELEE)
-                        end
                         self:EmitSound("npc_fastzombie.leap", 70, math.random(95, 105))
-                        -- A pounce is a short horizontal tackle, not a second
-                        -- jump impulse layered on top of the NextBot's locomotion.
-                        -- Clamp existing momentum so repeated sprint/jump frames
-                        -- cannot turn the launch into uncontrolled flight.
-                        local velocity = self:GetVelocity()
-                        local horizontal = Vector(velocity.x, velocity.y, 0)
-                        if horizontal:Length() > 260 then horizontal:Normalize() horizontal:Mul(260) end
-                        self.loco:Jump()
-                        self.loco:SetVelocity(horizontal + direction * 285 + Vector(0, 0, 115))
+                        -- Convert the launch itself into a physical fake-ragdoll
+                        -- lunge; the earlier version stayed upright until impact.
+                        local launchSupport = hg and hg.BZCNNPCSupport
+                        if launchSupport and isfunction(launchSupport.EnterDownedState)
+                            and not self:GetNW2Bool("BZCNNPCDowned", false) then
+                            local ok, result = pcall(launchSupport.EnterDownedState, self, "furry_pounce")
+                            if ok and result ~= false then
+                                timer.Simple(0.08, function()
+                                    if not IsValid(self) or not istable(self.BZCNNPCPounce) then return end
+                                    local rag = IsValid(self.BZCNNPCRagdoll) and self.BZCNNPCRagdoll
+                                        or (IsValid(self.FakeRagdoll) and self.FakeRagdoll or nil)
+                                    if not IsValid(rag) and launchSupport and isfunction(launchSupport.GetNPCHealthTable) then
+                                        local healthOK, healthState = pcall(launchSupport.GetNPCHealthTable, self)
+                                        if healthOK and istable(healthState) and IsValid(healthState.ragdoll) then
+                                            rag = healthState.ragdoll
+                                        end
+                                    end
+                                    if not IsValid(rag) then return end
+                                    self.BZCNNPCPounce.rag = rag
+                                    local bone = rag:LookupBone("ValveBiped.Bip01_Pelvis")
+                                        or rag:LookupBone("ValveBiped.Bip01_Spine1")
+                                    local physIndex = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or 0
+                                    local phys = rag:GetPhysicsObjectNum(physIndex)
+                                    if not IsValid(phys) then phys = rag:GetPhysicsObject() end
+                                    if IsValid(phys) then
+                                        phys:Wake()
+                                        phys:SetVelocity(direction * 285 + Vector(0, 0, 115))
+                                    end
+                                end)
+                            end
+                        end
                         hook.Run("BZCN_FurryPounce", self, target)
                         coroutine.wait(0.05)
                         continue
