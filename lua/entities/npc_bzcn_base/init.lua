@@ -582,20 +582,80 @@ function ENT:FollowAlly(target)
 end
 
 function ENT:PlayBZCNAttackAnimation()
-    local sequence = -1
     local profile = self:GetBZCNProfile()
+    local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
+    local ranged = profile.Ranged == true
+        and weaponClass ~= "weapon_hands_sh"
+        and weaponClass ~= "weapon_medkit_sh"
+        and weaponClass ~= "weapon_bandage_sh"
+
+    -- IXAnims' generic "attack" entry is often a full-body melee animation.
+    -- For guns, request the model's actual ranged-fire gesture instead, so the
+    -- legs/torso don't play an unrelated swipe while the engine bullet fires.
+    if ranged then
+        local className = self.GetBZCNAnimationClass and self:GetBZCNAnimationClass()
+        local animationClass = className and hg and hg.IXAnims and hg.IXAnims[className]
+        local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
+        local rawHoldType = profile.AnimationHoldType
+            or (istable(stored) and (stored.HoldType or stored.holdtype)) or "smg"
+        local holdType = string.lower(tostring(rawHoldType))
+        local translators = {
+            physgun = "smg", ar2 = "smg", crossbow = "shotgun", rpg = "grenade",
+            slam = "smg", revolver = "pistol", duel = "pistol"
+        }
+        holdType = translators[holdType] or holdType
+
+        local activityByHold = {
+            pistol = ACT_GESTURE_RANGE_ATTACK_PISTOL,
+            revolver = ACT_GESTURE_RANGE_ATTACK_PISTOL,
+            smg = ACT_GESTURE_RANGE_ATTACK_SMG1,
+            ar2 = ACT_GESTURE_RANGE_ATTACK_AR2,
+            shotgun = ACT_GESTURE_RANGE_ATTACK_SHOTGUN,
+            crossbow = ACT_GESTURE_RANGE_ATTACK_CROSSBOW,
+            rpg = ACT_GESTURE_RANGE_ATTACK_RPG
+        }
+        local activity = activityByHold[holdType] or ACT_GESTURE_RANGE_ATTACK_SMG1
+        local animationSet = istable(animationClass)
+            and (animationClass[holdType] or animationClass.normal or animationClass) or nil
+        local configured = istable(animationSet) and animationSet.attack or nil
+        local sequence = -1
+
+        -- Prefer the model/hold-type's configured range-attack activity only
+        -- when it is itself a gesture activity; otherwise use the engine's
+        -- standard weapon-fire gesture. Never fall back to a melee attack here.
+        if isnumber(configured) and configured == activity then
+            local ok, selected = pcall(self.SelectWeightedSequence, self, configured)
+            if ok and isnumber(selected) and selected >= 0 then sequence = selected end
+        end
+        if sequence < 0 and self.SelectWeightedSequence and isnumber(activity) then
+            local ok, selected = pcall(self.SelectWeightedSequence, self, activity)
+            if ok and isnumber(selected) and selected >= 0 then sequence = selected end
+        end
+        if sequence < 0 then
+            sequence = self:FindSequence({
+                "range_attack_" .. holdType, "shoot_" .. holdType,
+                "range_attack_smg1", "shoot_smg1", "fire"
+            })
+        end
+
+        if sequence >= 0 and isfunction(self.AddGestureSequence) then
+            local ok = pcall(self.AddGestureSequence, self, sequence)
+            if ok then return true end
+        end
+
+        -- A model without a ranged gesture should hold its current pose rather
+        -- than play an unrelated full-body melee attack while shooting.
+        return false
+    end
+
+    local sequence = -1
     local modelClass = self.GetBZCNAnimationClass and self:GetBZCNAnimationClass()
     local animationClass = modelClass and hg and hg.IXAnims and hg.IXAnims[modelClass]
     if istable(animationClass) then
-        local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass
-        local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
+        local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
         local holdType = profile.AnimationHoldType
-            or (istable(stored) and (stored.HoldType or stored.holdtype)) or nil
-        if not isstring(holdType) or holdType == "" then
-            holdType = profile.Ranged and (string.find(weaponClass or "", "pistol") and "pistol"
-                or (string.find(weaponClass or "", "smg") or string.find(weaponClass or "", "ar2")) and "smg"
-                or "normal") or "melee"
-        end
+            or (istable(stored) and (stored.HoldType or stored.holdtype)) or "melee"
+        holdType = string.lower(tostring(holdType))
         local translators = {
             physgun = "smg", ar2 = "smg", crossbow = "shotgun", rpg = "grenade",
             slam = "smg", fist = "normal", melee2 = "melee", knife = "melee",
@@ -620,20 +680,18 @@ function ENT:PlayBZCNAttackAnimation()
         })
     end
     if sequence < 0 and self.SelectWeightedSequence then
-        local ok, selected = pcall(self.SelectWeightedSequence, self,
-            profile.Ranged and ACT_GESTURE_RANGE_ATTACK_SMG1 or ACT_MELEE_ATTACK1)
+        local ok, selected = pcall(self.SelectWeightedSequence, self, ACT_MELEE_ATTACK1)
         if ok and isnumber(selected) and selected >= 0 then sequence = selected end
     end
     if sequence < 0 then return false end
 
-    -- Try the framework's gesture layer first so locomotion keeps animating.
     if isfunction(self.AddGestureSequence) then
         local ok = pcall(self.AddGestureSequence, self, sequence)
         if ok then return true end
     end
 
     self.BZCNActionSequence = sequence
-    local duration = 0.65
+    local duration = 0.7
     local ok, sequenceDuration = pcall(self.SequenceDuration, self, sequence)
     if ok and isnumber(sequenceDuration) and sequenceDuration > 0 then
         duration = math.Clamp(sequenceDuration, 0.3, 1.5)
@@ -644,7 +702,6 @@ function ENT:PlayBZCNAttackAnimation()
     self:SetPlaybackRate(1)
     return true
 end
-
 function ENT:AttackTarget(target)
     local profile = self:GetBZCNProfile()
     local now = CurTime()
