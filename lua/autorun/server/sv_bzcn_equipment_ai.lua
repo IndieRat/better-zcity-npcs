@@ -318,7 +318,7 @@ function BZCN.AttackRuntimeMelee(ent, target, trace)
     ent:EmitSound(profile.MeleeSound or "Flesh.ImpactHard", 72, math.random(92, 108), 0.8)
     hook.Run("BZCN_NPCMeleeWeaponAttack", ent, target, weapon, trace)
     return true
-}
+end
 
 local function GetFurryClass(target)
     if not IsValid(target) then return "" end
