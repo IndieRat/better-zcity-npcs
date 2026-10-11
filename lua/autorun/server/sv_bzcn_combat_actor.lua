@@ -324,6 +324,7 @@ function Actor.IsIncapacitated(target)
     local nwFlags = {"BZCNNPCDowned", "BZCNNPCGettingUp", "IsDowned", "Downed", "KnockedDown", "IsKnockedDown"}
     for _, key in ipairs(nwFlags) do
         if target.GetNW2Bool and target:GetNW2Bool(key, false) then return true end
+        if target.GetNWBool and target:GetNWBool(key, false) then return true end
     end
 
     local state = target.BZCNNPCOrg or target.BZCN_Organism or target.organism
