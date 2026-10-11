@@ -374,6 +374,29 @@ function ENT:IsBZCNEnemy(target)
     local profile = self:GetBZCNProfile()
     if self:HasRecentAllyThreat(target) then return true end
 
+    local ownClass = string.lower(tostring(self.BZCNClass or self.PlayerClassName or ""))
+    local function IsArmed(actor)
+        if not IsValid(actor) then return false end
+        local active = isfunction(actor.GetActiveWeapon) and actor:GetActiveWeapon() or nil
+        if not IsValid(active) and IsValid(actor.BZCNRuntimeWeapon) then active = actor.BZCNRuntimeWeapon end
+        local weaponClass = IsValid(active) and active:GetClass()
+            or actor.BZCN_SelectedWeapon
+            or (actor.GetNW2String and actor:GetNW2String("BZCNWeaponClass", ""))
+        weaponClass = string.lower(tostring(weaponClass or ""))
+        return weaponClass ~= "" and weaponClass ~= "weapon_hands_sh"
+            and weaponClass ~= "weapon_medkit_sh" and weaponClass ~= "weapon_bandage_sh"
+            and weaponClass ~= "weapon_bigbandage_sh"
+    end
+
+    -- Metro police have Combine training but human hesitation: an unarmed
+    -- civilian isn't a combat target unless they recently attacked the officer
+    -- or one of its allies. Insults and active threats still create hostility.
+    if ownClass == "metrocop" and self:GetBZCNEntityFaction(target) == "default" then
+        local recentlyHurtOfficer = self.BZCNLastAttacker == target
+            and CurTime() - (tonumber(self.BZCNLastDamageTime) or 0) <= 12
+        if not IsArmed(target) and not recentlyHurtOfficer then return false end
+    end
+
     if target:IsPlayer() then
         if not target:Alive() then return false end
         local targetClass = self:GetBZCNEntityFaction(target)
