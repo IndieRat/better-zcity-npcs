@@ -855,7 +855,7 @@ hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
             local ok, err = pcall(weapon.ApplyForce, weapon)
             if not ok then
                 ErrorNoHalt("[BZCN] furry carry update failed for NPC #"
-                    .. tostring(ent:EntIndex()) .. ": " .. tostring(err) .. "\\n")
+                    .. tostring(ent:EntIndex()) .. ": " .. tostring(err) .. "\n")
                 BZCN.StopFurryAssimilation(ent)
             end
         end
