@@ -43,9 +43,10 @@ BZCN.RegisterClass("default", {
     Model = "models/player/group03/male_07.mdl", Health = 100, Speed = 175,
     Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"Combine"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1200, HelpMemory = 10,
-    AnimationClass = nil, AnimationHoldType = "pistol", Ranged = true, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
-    MedicalRange = 320, WeaponClass = "weapon_glock17", WeaponModel = "models/weapons/w_pist_glock18.mdl",
-    Inventory = {Weapons = {weapon_glock17 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
+    CivilianStyle = true, MoodSystem = true, RareGunChance = 0.12,
+    AnimationClass = nil, AnimationHoldType = "normal", Ranged = false, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
+    MedicalRange = 320, WeaponClass = "weapon_hands_sh",
+    Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
 BZCN.RegisterClass("Combine", {
@@ -89,10 +90,63 @@ BZCN.RegisterClass("furry", {
     Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
     FollowAllies = true, FollowRange = 800, FollowDistance = 125, HelpRange = 1000, HelpMemory = 8,
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
+    SmartFurryChance = 0.22,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
     MedicalRange = 250, FurryStyle = true, FurryGrabRange = 86, Skin = 4, BloodType = "c-",
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
+})
+
+-- Companion profiles follow an interactively assigned player instead of a
+-- random ally; the server companion AI handles supplies, triage and orders.
+BZCN.RegisterClass("civilian_companion", {
+    Name = "Civilian Companion", PlayerClassName = "default",
+    Model = "models/player/group03/male_04.mdl", Health = 110, Speed = 180,
+    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"Combine"},
+    Companion = true, CivilianStyle = true, MoodSystem = true, RareGunChance = 0.08,
+    FollowAllies = true, FollowRange = 2400, FollowDistance = 130, HelpRange = 1800, HelpMemory = 15,
+    AnimationClass = "citizen_male", AnimationHoldType = "normal", Ranged = false,
+    WeaponDamage = 8, WeaponRange = 900, AttackDelay = 0.55, MedicalRange = 420,
+    CompanionAmmoStock = 90, WeaponClass = "weapon_hands_sh",
+    Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
+})
+
+BZCN.RegisterClass("furry_companion", {
+    Name = "Furry Companion", PlayerClassName = "furry",
+    Model = "models/eradium/protogen_player.mdl", Health = 135, Speed = 195,
+    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
+    Companion = true, FurryStyle = true, SmartFurry = true, CanScavengeWeapons = true,
+    FollowAllies = true, FollowRange = 2400, FollowDistance = 120, HelpRange = 1800, HelpMemory = 15,
+    Ranged = false, MeleeDamage = 16, MeleeRange = 74, AttackDelay = 0.72,
+    AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
+    WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
+    MedicalRange = 420, FurryGrabRange = 80, Skin = 4, BloodType = "c-",
+    CompanionAmmoStock = 120,
+    Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
+})
+
+BZCN.RegisterClass("headcrab", {
+    Name = "Headcrab", PlayerClassName = "headcrab",
+    Model = "models/headcrabclassic.mdl", ModelScale = 0.8, Health = 22, Speed = 230,
+    Faction = "headcrab", EnemyPlayers = true,
+    EnemyFactions = {"default", "Combine", "Metrocop", "Rebel", "furry", "zombie", "headcrab_zombie"},
+    FollowAllies = true, FollowRange = 750, FollowDistance = 80, HelpRange = 500, HelpMemory = 4,
+    HeadcrabStyle = true, Ranged = false, MeleeDamage = 9, MeleeRange = 38, AttackDelay = 0.62,
+    AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
+    Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {}},
+    HullMins = Vector(-10, -10, 0), HullMaxs = Vector(10, 10, 24)
+})
+
+BZCN.RegisterClass("headcrab_zombie", {
+    Name = "Headcrab Zombie", PlayerClassName = "headcrab_zombie",
+    Model = "models/zombie/classic.mdl", Health = 155, Speed = 132,
+    Faction = "zombie", EnemyPlayers = true,
+    EnemyFactions = {"default", "Combine", "Metrocop", "Rebel", "furry", "headcrab"},
+    FollowAllies = true, FollowRange = 850, FollowDistance = 80, HelpRange = 600, HelpMemory = 5,
+    ZombieStyle = true, Ranged = false, MeleeDamage = 22, MeleeRange = 55, AttackDelay = 1.18,
+    AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
+    MedicalRange = 0,
+    Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {}}
 })
 
 local function NetworkKey(key, kind)
@@ -698,6 +752,25 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     inventory.Weapons = inventory.Weapons or {}
     inventory.Items = inventory.Items or {}
     inventory.Armor = inventory.Armor or {}
+
+    if SERVER and profile.CivilianStyle == true and resetInventory then
+        if weapons and weapons.GetStored and weapons.GetStored("weapon_glock17")
+            and math.Rand(0, 1) <= math.Clamp(tonumber(profile.RareGunChance) or 0.12, 0, 0.35) then
+            inventory.Weapons.weapon_glock17 = true
+            profile.Ranged = true
+            profile.WeaponClass = "weapon_glock17"
+            profile.WeaponModel = "models/weapons/w_pist_glock18.mdl"
+            profile.WeaponDamage = 8
+            profile.WeaponRange = 900
+            profile.AnimationHoldType = "pistol"
+        end
+    end
+
+    if SERVER and profile.FurryStyle == true and not profile.SmartFurry
+        and math.Rand(0, 1) <= math.Clamp(tonumber(profile.SmartFurryChance) or 0, 0, 0.6) then
+        profile.SmartFurry = true
+    end
+    if profile.SmartFurry == true then profile.CanScavengeWeapons = true end
     ent:SetNetVar("Inventory", inventory)
     ent.Inventory = inventory
     ent.inventory = inventory
