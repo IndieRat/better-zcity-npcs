@@ -65,10 +65,10 @@ BZCN.RegisterClass("Metrocop", {
     Model = "models/player/police.mdl", Health = 115, Speed = 172,
     Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 160, HelpRange = 1350, HelpMemory = 10,
-    AnimationClass = "metrocop", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 10,
-    WeaponRange = 1150, AttackDelay = 0.38, MedicalRange = 320,
-    WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
-    Inventory = {Weapons = {weapon_mp7 = true, weapon_hk_usp = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
+    AnimationClass = "metrocop", AnimationHoldType = "smg", Ranged = false, WeaponDamage = 10,
+    WeaponRange = 1150, AttackDelay = 0.38, MedicalRange = 320, CanScavengeWeapons = true,
+    WeaponClass = "weapon_hands_sh",
+    Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
 BZCN.RegisterClass("Rebel", {
@@ -77,7 +77,7 @@ BZCN.RegisterClass("Rebel", {
     Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
     AnimationClass = "citizen_male", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
-    MedicalRange = 320, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
+    MedicalRange = 320, CanScavengeWeapons = true, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
     Inventory = {Weapons = {weapon_ak74 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
@@ -99,6 +99,62 @@ local function NetworkKey(key, kind)
     return "BZCN_NV_" .. kind .. "_" .. tostring(key)
 end
 
+local function EncodeNetworkTable(value, depth, seen)
+    if isentity(value) then
+        if not IsValid(value) then return nil end
+        return {__BZCNNetType = "Entity", index = value:EntIndex()}
+    end
+    if isvector(value) then
+        return {__BZCNNetType = "Vector", x = value.x, y = value.y, z = value.z}
+    end
+    if isangle(value) then
+        return {__BZCNNetType = "Angle", p = value.p, y = value.y, r = value.r}
+    end
+    if not istable(value) then return value end
+    depth = (depth or 0) + 1
+    if depth > 12 then return nil end
+    seen = seen or {}
+    if seen[value] then return nil end
+    seen[value] = true
+    local out = {}
+    for key, item in pairs(value) do
+        if (isstring(key) or isnumber(key)) and not isfunction(item) then
+            local encoded = EncodeNetworkTable(item, depth, seen)
+            if encoded ~= nil then out[key] = encoded end
+        end
+    end
+    seen[value] = nil
+    return out
+end
+
+local function DecodeNetworkTable(value, depth, seen)
+    if not istable(value) then return value end
+    if value.__BZCNNetType == "Entity" and isnumber(value.index) then
+        local ent = Entity(math.floor(value.index))
+        return IsValid(ent) and ent or nil
+    elseif value.__BZCNNetType == "Vector"
+        and isnumber(value.x) and isnumber(value.y) and isnumber(value.z) then
+        return Vector(value.x, value.y, value.z)
+    elseif value.__BZCNNetType == "Angle"
+        and isnumber(value.p) and isnumber(value.y) and isnumber(value.r) then
+        return Angle(value.p, value.y, value.r)
+    end
+    depth = (depth or 0) + 1
+    if depth > 12 then return nil end
+    seen = seen or {}
+    if seen[value] then return nil end
+    seen[value] = true
+    local out = {}
+    for key, item in pairs(value) do
+        if isstring(key) or isnumber(key) then
+            local decoded = DecodeNetworkTable(item, depth, seen)
+            if decoded ~= nil then out[key] = decoded end
+        end
+    end
+    seen[value] = nil
+    return out
+end
+
 local function SyncNetVar(ent, key, value)
     if not SERVER or not IsValid(ent) or not ent.SetNW2String then return end
     local kind = type(value)
@@ -113,7 +169,7 @@ local function SyncNetVar(ent, key, value)
     elseif kind == "string" then
         ent:SetNW2String(NetworkKey(key, "string"), value)
     elseif kind == "table" then
-        ent:SetNW2String(NetworkKey(key, "table"), util.TableToJSON(value, false) or "{}")
+        ent:SetNW2String(NetworkKey(key, "table"), util.TableToJSON(EncodeNetworkTable(value) or {}, false) or "{}")
     else
         ent:SetNW2String(NetworkKey(key, "string"), "")
     end
@@ -155,7 +211,9 @@ function BZCN.GetNetVar(ent, key, default)
     if kind == "table" then
         local raw = ent:GetNW2String(NetworkKey(key, "table"), "")
         local decoded = raw ~= "" and util.JSONToTable(raw) or nil
-        return istable(decoded) and decoded or default
+        if not istable(decoded) then return default end
+        local restored = DecodeNetworkTable(decoded)
+        return istable(restored) and restored or default
     end
     return default
 end
