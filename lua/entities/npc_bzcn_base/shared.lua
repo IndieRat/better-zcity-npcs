@@ -157,10 +157,24 @@ function ENT:UpdateBZCNMovementState(speed)
 end
 
 function ENT:GetBZCNMovementSequence(speed, state)
-    if not (hg and hg.IXAnims and istable(hg.IXAnims)) then return -1 end
+    local namedFallbacks = {
+        sitting = {"sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle", "sit_idle", "sit", "sitting", "idle_sit"},
+        crawling = {"crawl_all", "crawl_all_01", "crawl_forward", "crawl_loop", "crawl_prone", "crawl", "zombie_crawl", "crawl_idle"},
+        climbing = {"climb_up", "climb_ladder", "ladder_climb", "climb"},
+        sprinting = {"sprint_all", "sprint", "sprint_armed", "sprint_unarmed", "run_all", "run_all_01", "run_unarmed", "run"},
+        running = {"run_all", "run_all_01", "run_unarmed", "run", "walk_all"},
+        walking = {"walk_all", "walk_all_moderate", "walk_all_01", "walk_unarmed", "walk"},
+        airborne = {"jump_all", "jump", "jump_start", "jump_holding", "fall", "jump_fall", "run_all", "walk_all"},
+        standing = {"idle_all_01", "idle_all", "idle_unarmed", "idle", "idle01", "idle_subtle"}
+    }
+    if not (hg and hg.IXAnims and istable(hg.IXAnims)) then
+        return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
+    end
     local modelClass = self:GetBZCNAnimationClass()
     local animClass = hg.IXAnims[modelClass]
-    if not istable(animClass) then return -1 end
+    if not istable(animClass) then
+        return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
+    end
 
     local profile = self.BZCNClassProfile or {}
     local modelPath = string.lower(self:GetModel() or "")
