@@ -481,6 +481,109 @@ local function GetCurrentFurryRagdoll(target)
     return rag
 end
 
+local function ResolveManagedNPCFromFurryEntity(raw)
+    if not IsValid(raw) then return nil end
+    if BZCN.IsManaged(raw) then return raw end
+    local owner = raw.BZCNNPCOwner
+    if not IsValid(owner) and istable(raw.organism) then owner = raw.organism.owner end
+    if not IsValid(owner) and raw.GetNW2Entity then owner = raw:GetNW2Entity("BZCNNPCOwner") end
+    if not IsValid(owner) and raw.GetNWEntity then owner = raw:GetNWEntity("BZCNNPCOwner") end
+    if IsValid(owner) and BZCN.IsManaged(owner) then return owner end
+    for _, candidate in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if IsValid(candidate) and candidate.BZCNNPCRagdoll == raw then return candidate end
+    end
+    return nil
+end
+
+local function EnsureManagedNPCFurryOrganism(target, rag)
+    if not IsValid(target) or not BZCN.IsManaged(target) then return nil end
+    if not IsValid(rag) then rag = GetCurrentFurryRagdoll(target) end
+    local organ = target.organism or target.BZCN_Organism
+        or (IsValid(rag) and rag.organism or nil)
+    if not istable(organ) then return nil end
+    -- The hands SWEP advances assimilation on the carried ragdoll organism.
+    -- Keep it and the live NextBot on the same table so progress can't split.
+    if IsValid(rag) and istable(rag.organism) and rag.organism ~= organ then
+        organ.assimilated = math.max(
+            math.Clamp(tonumber(organ.assimilated) or 0, 0, 1),
+            math.Clamp(tonumber(rag.organism.assimilated) or 0, 0, 1)
+        )
+    end
+    target.BZCN_Organism = organ
+    organ.owner = target
+    organ.alive = target:Health() > 0
+    organ.assimilated = math.Clamp(tonumber(organ.assimilated) or 0, 0, 1)
+    if IsValid(rag) then
+        rag.organism = organ
+        rag.BZCNNPCOwner = target
+        if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", target) end
+        if rag.SetNWEntity then rag:SetNWEntity("BZCNNPCOwner", target) end
+    end
+    if target.SetNW2Float then target:SetNW2Float("BZCNAssimilation", organ.assimilated) end
+    return organ
+end
+
+local function ClearPlayerFurryAssimilationUI(ply)
+    if not IsValid(ply) then return end
+    if ply.SetNW2Bool then ply:SetNW2Bool("BZCNAssimilationActive", false) end
+    if ply.SetNW2Float then ply:SetNW2Float("BZCNAssimilation", 0) end
+    if isfunction(ply.SetLocalVar) then pcall(ply.SetLocalVar, ply, "assimilation", 0) end
+end
+
+local function ReleasePlayerFurryGrab(ply, recoverTarget)
+    if not IsValid(ply) then return end
+    local state = ply.BZCNPlayerFurryGrab
+    local weapon = IsValid(state and state.weapon) and state.weapon or ply:GetActiveWeapon()
+    local target = IsValid(state and state.target) and state.target or nil
+    local rag = IsValid(state and state.rag) and state.rag or nil
+    if IsValid(weapon) and isfunction(weapon.SetCarrying) then
+        local ok = pcall(weapon.SetCarrying, weapon)
+        if not ok then
+            ErrorNoHalt("[BZCN] Could not release player furry NPC grab for player #"
+                .. tostring(ply:EntIndex()) .. "\n")
+        end
+    end
+    ply.BZCNPlayerFurryGrab = nil
+    ClearPlayerFurryAssimilationUI(ply)
+    if recoverTarget and IsValid(target) and state and state.forcedDowned then
+        local support = hg and hg.BZCNNPCSupport
+        if target:GetNW2Bool("BZCNNPCDowned", false)
+            and support and isfunction(support.Recover) then
+            pcall(support.Recover, target, rag, false)
+        end
+    end
+end
+
+local function ReleasePlayersHoldingManagedRagdoll(target, rag)
+    for _, ply in ipairs(player.GetAll()) do
+        if not IsValid(ply) then continue end
+        local state = ply.BZCNPlayerFurryGrab
+        local weapon = ply:GetActiveWeapon()
+        local carried = IsValid(weapon) and weapon.CarryEnt or nil
+        if not IsValid(carried) and isfunction(ply.GetNetVar) then
+            local ok, value = pcall(ply.GetNetVar, ply, "carryent")
+            if ok then carried = value end
+        end
+        if (istable(state) and state.target == target) or (IsValid(rag) and carried == rag) then
+            if IsValid(weapon) and isfunction(weapon.SetCarrying) then
+                pcall(weapon.SetCarrying, weapon)
+            end
+            ply.BZCNPlayerFurryGrab = nil
+            ClearPlayerFurryAssimilationUI(ply)
+        end
+    end
+end
+
+local function RequestManagedNPCFurryConversion(target)
+    if not IsValid(target) or not BZCN.IsManaged(target) or IsFurryTarget(target) then return false end
+    local organ = EnsureManagedNPCFurryOrganism(target)
+    if not istable(organ) then return false end
+    organ.assimilated = 1
+    target.BZCNFurryConversionPending = true
+    if target.SetNW2Float then target:SetNW2Float("BZCNAssimilation", 1) end
+    return true
+end
+
 local function RestoreFurryRagdollOrganism(state)
     if not istable(state) or not state.ragOrganismOverridden then return end
     local rag = state.rag
@@ -634,14 +737,11 @@ local function TransformFurryTarget(attacker, target, state)
     end
 
     if BZCN.IsManaged(target) then
-        local support = hg and hg.BZCNNPCSupport
-        local rag = state and state.rag or target.BZCNNPCRagdoll
-        if target:GetNW2Bool("BZCNNPCDowned", false) and support and isfunction(support.Recover) then
-            pcall(support.Recover, target, rag, true)
-        end
-        local converted = BZCN.ChangeClass(target, "furry", false)
-        hook.Run("BZCN_NPCFurryAssimilationComplete", attacker, target, converted)
-        return converted == true
+        -- Commit completed progress first; the Think bridge releases the ragdoll
+        -- and waits for the recovery state machine before changing the model.
+        local requested = RequestManagedNPCFurryConversion(target)
+        hook.Run("BZCN_NPCFurryAssimilationComplete", attacker, target, requested)
+        return requested == true
     end
     return false
 end
@@ -762,6 +862,42 @@ function BZCN.TryFurryAssimilation(attacker, target)
     end
     return true
 end
+
+hook.Add("KeyPress", "BZCN_PlayerFurryManagedNPCGrab", function(ply, button)
+    if button ~= IN_ATTACK2 or not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return end
+    local playerClass = string.lower(tostring(ply.PlayerClassName
+        or (isfunction(ply.GetPlayerClass) and ply:GetPlayerClass()) or ""))
+    if playerClass ~= "furry" then return end
+    local weapon = ply:GetActiveWeapon()
+    if not IsValid(weapon) or weapon:GetClass() ~= "weapon_hands_sh" then return end
+    if istable(ply.BZCNPlayerFurryGrab) then return end
+    local startPos = ply:EyePos()
+    local trace = util.TraceLine({
+        start = startPos,
+        endpos = startPos + ply:GetAimVector() * 96,
+        filter = {ply, weapon},
+        mask = MASK_SHOT
+    })
+    if not trace or not IsValid(trace.Entity) then return end
+    local target = ResolveManagedNPCFromFurryEntity(trace.Entity)
+    if not IsValid(target) or target:Health() <= 0 or IsFurryTarget(target) then return end
+    if ply:WorldSpaceCenter():Distance(target:WorldSpaceCenter()) > 112 then return end
+    local support = hg and hg.BZCNNPCSupport
+    if not support or not isfunction(support.EnterDownedState) then return end
+    local alreadyDowned = target:GetNW2Bool("BZCNNPCDowned", false)
+    local state = {
+        target = target, weapon = weapon, started = CurTime(),
+        pendingUntil = CurTime() + 4, forcedDowned = not alreadyDowned, attached = false
+    }
+    ply.BZCNPlayerFurryGrab = state
+    if not alreadyDowned then
+        local ok, result = pcall(support.EnterDownedState, target, "player_furry_grab")
+        if not ok or result == false then
+            ply.BZCNPlayerFurryGrab = nil
+            ClearPlayerFurryAssimilationUI(ply)
+        end
+    end
+end)
 
 hook.Add("EntityRemoved", "BZCN_CleanupFurryAssimilation", function(ent)
     if not ent then return end
@@ -1107,35 +1243,104 @@ local function UpdateFurryCarryPhysics(owner, state)
 end
 
 hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
+    -- Bridge furry-player grabbing to managed NPCs, which the stock hands
+    -- SWEP otherwise rejects as NPC/NextBot pickup targets.
+    for _, ply in ipairs(player.GetAll()) do
+        local state = IsValid(ply) and ply.BZCNPlayerFurryGrab or nil
+        if not istable(state) then continue end
+        local target = state.target
+        local weapon = state.weapon
+        local playerClass = string.lower(tostring(ply.PlayerClassName or ""))
+        if not IsValid(target) or target:Health() <= 0 or IsFurryTarget(target)
+            or not IsValid(weapon) or ply:GetActiveWeapon() ~= weapon
+            or playerClass ~= "furry" then
+            ReleasePlayerFurryGrab(ply, true)
+            continue
+        end
+
+        local rag = GetCurrentFurryRagdoll(target)
+        if not IsValid(rag) then
+            if CurTime() > (state.pendingUntil or state.started + 4) then
+                ReleasePlayerFurryGrab(ply, true)
+            end
+            continue
+        end
+        local organ = EnsureManagedNPCFurryOrganism(target, rag)
+        if not istable(organ) then
+            ReleasePlayerFurryGrab(ply, true)
+            continue
+        end
+
+        if not state.attached or state.rag ~= rag then
+            local bone = rag:LookupBone("ValveBiped.Bip01_Spine2")
+                or rag:LookupBone("ValveBiped.Bip01_Spine1")
+                or rag:LookupBone("ValveBiped.Bip01_Pelvis")
+            local physBone = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or 1
+            local phys = rag:GetPhysicsObjectNum(physBone)
+            if not IsValid(phys) then
+                physBone = 0
+                phys = rag:GetPhysicsObjectNum(physBone)
+            end
+            if not IsValid(phys) then
+                ReleasePlayerFurryGrab(ply, true)
+                continue
+            end
+            local distance = (ply:WorldSpaceCenter() - phys:GetPos()):Length()
+            local ok, result = pcall(weapon.SetCarrying, weapon, rag, physBone, phys:GetPos(), distance)
+            if not ok or result == false then
+                ReleasePlayerFurryGrab(ply, true)
+                continue
+            end
+            state.rag = rag
+            state.organism = organ
+            state.attached = true
+            state.pendingUntil = nil
+        end
+
+        local progress = math.Clamp(tonumber(organ.assimilated) or 0, 0, 1)
+        local assimilating = ply:KeyDown(IN_ATTACK) and progress < 0.999
+        if ply.SetNW2Bool then ply:SetNW2Bool("BZCNAssimilationActive", assimilating) end
+        if ply.SetNW2Float then ply:SetNW2Float("BZCNAssimilation", progress) end
+        if isfunction(ply.SetLocalVar) then
+            pcall(ply.SetLocalVar, ply, "assimilation", progress)
+        end
+    end
+
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if not IsValid(ent) then continue end
+        local rag = GetCurrentFurryRagdoll(ent)
+        local organ = EnsureManagedNPCFurryOrganism(ent, rag)
 
-        -- Z-City's player assimilation path calls hg.Furrify(), which is
-        -- Player-only. If a player fills the meter on a managed civilian's
-        -- shared ragdoll organism, finish the equivalent NPC class conversion.
-        local organ = ent.organism or ent.BZCN_Organism
-        if not IsFurryTarget(ent) and not ent.BZCNFurryConversionPending
-            and istable(organ) and (tonumber(organ.assimilated) or 0) >= 0.999 then
+        -- Request recovery once: Recover() installs its own retry timer when
+        -- live organism stats still prohibit standing. Re-calling it per-frame
+        -- would continually reset that timer.
+        if not IsFurryTarget(ent) and istable(organ)
+            and (tonumber(organ.assimilated) or 0) >= 0.999 then
             ent.BZCNFurryConversionPending = true
-            timer.Simple(0, function()
-                if not IsValid(ent) then return end
-                local currentOrgan = ent.organism or ent.BZCN_Organism
-                if not IsFurryTarget(ent) and istable(currentOrgan)
-                    and (tonumber(currentOrgan.assimilated) or 0) >= 0.999 then
-                    local support = hg and hg.BZCNNPCSupport
-                    if ent:GetNW2Bool("BZCNNPCDowned", false)
-                        and support and isfunction(support.Recover) then
-                        pcall(support.Recover, ent, ent.BZCNNPCRagdoll, true)
-                    end
+            ReleasePlayersHoldingManagedRagdoll(ent, rag)
+            local support = hg and hg.BZCNNPCSupport
+            if ent:GetNW2Bool("BZCNNPCDowned", false) then
+                if not ent.BZCNFurryRecoveryRequested and support and isfunction(support.Recover) then
+                    ent.BZCNFurryRecoveryRequested = true
+                    pcall(support.Recover, ent, rag, false)
+                end
+            else
+                ent.BZCNFurryRecoveryRequested = nil
+                local gettingUp = support and isfunction(support.IsGettingUp) and support.IsGettingUp(ent)
+                if not gettingUp then
                     local converted = BZCN.ChangeClass(ent, "furry", false)
                     if converted then
                         local convertedOrgan = ent.organism or ent.BZCN_Organism
                         if istable(convertedOrgan) then convertedOrgan.assimilated = 0 end
+                        if ent.SetNW2Float then ent:SetNW2Float("BZCNAssimilation", 0) end
+                        ent.BZCNFurryConversionPending = nil
                         hook.Run("BZCN_NPCFurryAssimilationComplete", nil, ent, true)
                     end
                 end
-                if IsValid(ent) then ent.BZCNFurryConversionPending = nil end
-            end)
+            end
+        elseif IsFurryTarget(ent) then
+            ent.BZCNFurryConversionPending = nil
+            ent.BZCNFurryRecoveryRequested = nil
         end
 
         local state = ent.BZCNFurryGrab
