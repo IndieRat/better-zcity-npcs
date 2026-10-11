@@ -331,6 +331,7 @@ function Tasks.TryPickupWeapon(ent)
     local class = item:GetClass()
     local stored = weapons and weapons.GetStored and weapons.GetStored(class)
     if not istable(stored) then return false end
+    local droppedClip = isfunction(item.Clip1) and item:Clip1() or -1
     if BZCN.GiveWeapon and BZCN.SelectWeapon then
         if not BZCN.GiveWeapon(ent, class) then return false end
         if not BZCN.SelectWeapon(ent, class) then return false end
@@ -353,6 +354,15 @@ function Tasks.TryPickupWeapon(ent)
     ent.BZCN_SelectedWeapon = class
     ent:SetNW2String("BZCNWeaponClass", class)
     if BZCN.EquipRuntimeWeapon then BZCN.EquipRuntimeWeapon(ent, class) end
+    if IsValid(ent.BZCNRuntimeWeapon) and droppedClip and droppedClip >= 0
+        and isfunction(ent.BZCNRuntimeWeapon.SetClip1) then
+        local primary = istable(ent.BZCNRuntimeWeapon.Primary) and ent.BZCNRuntimeWeapon.Primary or {}
+        local clipSize = math.max(tonumber(primary.ClipSize) or droppedClip, 0)
+        ent.BZCNRuntimeWeapon:SetClip1(math.Clamp(droppedClip, 0, clipSize))
+        if ent.BZCNRuntimeWeapon.SetNWInt then
+            ent.BZCNRuntimeWeapon:SetNWInt("Clip1", ent.BZCNRuntimeWeapon:Clip1())
+        end
+    end
     item:Remove()
     ent:EmitSound("items/ammo_pickup.wav", 60, math.random(95, 105), 0.6)
     hook.Run("BZCN_NPCWeaponScavenged", ent, class)
