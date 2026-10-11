@@ -98,11 +98,20 @@ local function GetOrCreateHandWorldModel(weapon, definition)
     if not IsValid(weapon) then return nil end
     if isfunction(weapon.GetWM) then
         local ok, model = pcall(weapon.GetWM, weapon)
-        if ok and IsValid(model) then return model end
+        if ok and IsValid(model) then
+            weapon.BZCNHandWorldModel = model
+            return model
+        end
     end
-    if IsValid(weapon.worldModel) then return weapon.worldModel end
+    if IsValid(weapon.worldModel) then
+        weapon.BZCNHandWorldModel = weapon.worldModel
+        return weapon.worldModel
+    end
 
-    local modelPath = istable(definition) and (definition.WorldModelFake or definition.WorldModel) or nil
+    local modelPath = istable(definition) and definition.WorldModelFake or nil
+    if not isstring(modelPath) or modelPath == "" then
+        modelPath = istable(definition) and definition.WorldModel or nil
+    end
     if not isstring(modelPath) or modelPath == "" or modelPath == "models/weapons/c_arms.mdl" then return nil end
     local ok, model = pcall(ClientsideModel, modelPath, RENDERGROUP_OPAQUE)
     if not ok or not IsValid(model) then return nil end
