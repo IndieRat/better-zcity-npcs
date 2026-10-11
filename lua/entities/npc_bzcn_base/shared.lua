@@ -144,6 +144,12 @@ function ENT:GetBZCNMovementSequence(speed, state)
     if not istable(animClass) then return -1 end
 
     local profile = self.BZCNClassProfile or {}
+    local modelPath = string.lower(self:GetModel() or "")
+    if self.BZCNAnimCacheModel ~= modelPath then
+        self.BZCNAnimSequenceCache = {}
+        self.BZCNAnimCacheModel = modelPath
+    end
+
     local weaponClass = self.BZCN_SelectedWeapon or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
     local holdType = profile.AnimationHoldType
@@ -191,22 +197,36 @@ function ENT:GetBZCNMovementSequence(speed, state)
     end
 
     local selected = animationSet[activity]
+    local lowerClass = string.lower(tostring(weaponClass or ""))
+    local armed = profile.Ranged == true
+        or (weaponClass ~= nil and not string.find(lowerClass, "hands")
+            and not string.find(lowerClass, "melee") and not string.find(lowerClass, "bandage")
+            and not string.find(lowerClass, "medkit"))
     if istable(selected) then
-        local lowerClass = string.lower(tostring(weaponClass or ""))
-        local armed = profile.Ranged == true
-            or (weaponClass ~= nil and not string.find(lowerClass, "hands")
-                and not string.find(lowerClass, "melee") and not string.find(lowerClass, "bandage")
-                and not string.find(lowerClass, "medkit"))
         selected = selected[armed and 2 or 1] or selected[1]
     end
+
+    -- SelectWeightedSequence may choose between multiple valid sequences for
+    -- the same activity. Resolve once per model/hold/activity instead of on
+    -- every BodyUpdate, which otherwise makes animations pop between variants.
+    local cache = self.BZCNAnimSequenceCache or {}
+    self.BZCNAnimSequenceCache = cache
+    local cacheKey = table.concat({
+        modelClass, self.ixAnimHoldType, tostring(weaponClass or ""),
+        tostring(activity or "none"), armed and "armed" or "unarmed",
+        tostring(selected or "none")
+    }, "|")
+    if cache[cacheKey] ~= nil then return cache[cacheKey] end
+
+    local sequence = -1
     if isstring(selected) then
-        return self:LookupSequence(selected)
+        sequence = self:LookupSequence(selected)
+    elseif isnumber(selected) and self.SelectWeightedSequence then
+        local ok, result = pcall(self.SelectWeightedSequence, self, selected)
+        if ok and isnumber(result) and result >= 0 then sequence = result end
     end
-    if isnumber(selected) and self.SelectWeightedSequence then
-        local ok, sequence = pcall(self.SelectWeightedSequence, self, selected)
-        if ok and isnumber(sequence) and sequence >= 0 then return sequence end
-    end
-    return -1
+    cache[cacheKey] = sequence
+    return sequence
 end
 
 function ENT:TryBZCNClimb()
@@ -348,8 +368,15 @@ function ENT:BodyUpdate()
         elseif state == "running" then
             playbackRate = 1.12
         end
-        self:SetPlaybackRate(playbackRate)
-        self:FrameAdvance()
+        if state == "walking" or state == "running" or state == "crawling" or state == "climbing" then
+            -- BodyMoveXY sets move_x/move_y and advances the sequence once.
+            -- Only override its speed for the slower injury-crawl animation.
+            self:BodyMoveXY()
+            if state == "crawling" then self:SetPlaybackRate(playbackRate) end
+        else
+            self:SetPlaybackRate(playbackRate)
+            self:FrameAdvance()
+        end
         if self.loco and speed > 5 then self.loco:FaceTowards(self:GetPos() + velocity) end
         return
     end
