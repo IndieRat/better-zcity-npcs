@@ -177,13 +177,17 @@ function ENT:GetBZCNMovementSequence(speed, state)
     if not istable(animationSet) then return -1 end
 
     if state == "crawling" then
+        -- Prefer actual prone/crawl clips before generic locomotion. The
+        -- sequence is advanced directly in BodyUpdate below; BodyMoveXY can
+        -- replace the selected crawl clip with the model's normal walk cycle.
         local sequence = GetFirstSequence(self, {
-            "crawl_all", "crawl", "crawl_forward", "zombie_crawl", "crawl_idle"
+            "crawl_all", "crawl_all_01", "crawl_forward", "crawl_loop",
+            "crawl_prone", "crawl", "zombie_crawl", "crawl_idle"
         })
         if sequence >= 0 then return sequence end
-        -- Many player models have no suitable crawl sequence. Don't force a
-        -- crouch pose on a different rig; retain injury speed and use locomotion.
-        state = speed > 150 and "running" or "walking"
+        -- A model without a crawl clip cannot be made genuinely prone through
+        -- an activity translation alone. Keep a conservative walk fallback.
+        state = "walking"
     elseif state == "climbing" then
         local sequence = GetFirstSequence(self, {"climb_up", "climb_ladder", "ladder_climb", "climb"})
         if sequence >= 0 then return sequence end
@@ -424,12 +428,17 @@ function ENT:BodyUpdate()
         elseif state == "sprinting" then
             playbackRate = 1.35
         end
-        if state == "walking" or state == "running" or state == "sprinting"
-            or state == "crawling" or state == "climbing" then
+        if state == "crawling" then
+            -- Keep the model's prone clip intact. BodyMoveXY drives ordinary
+            -- walk/run pose parameters and can visually cancel a crawl sequence.
+            self:SetPlaybackRate(playbackRate)
+            self:FrameAdvance()
+        elseif state == "walking" or state == "running" or state == "sprinting"
+            or state == "climbing" then
             -- BodyMoveXY updates pose params; apply run/sprint playback after it
             -- so a sprint visibly moves faster than an ordinary run.
             self:BodyMoveXY()
-            if state == "crawling" or state == "running" or state == "sprinting" then
+            if state == "running" or state == "sprinting" then
                 self:SetPlaybackRate(playbackRate)
             end
         else
