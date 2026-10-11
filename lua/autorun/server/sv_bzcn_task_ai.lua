@@ -489,7 +489,8 @@ function Tasks.RunIdleTask(ent)
         return true
     end
 
-    if task == "squad" or task == "regroup" or task == "pack" or task == "cover" then
+    if task == "squad" or task == "regroup" or task == "pack"
+        or task == "cover" or task == "hunt" then
         local mate = FindMate(ent, kind == "furry" and 1000 or 900, false)
         if IsValid(mate) then
             local offset = Vector(math.Rand(-110, 110), math.Rand(-110, 110), 0)
@@ -501,6 +502,10 @@ function Tasks.RunIdleTask(ent)
                 ent.loco:FaceTowards(mate:GetPos())
                 coroutine.wait(0.6)
             end
+        elseif task == "hunt" and kind == "furry" then
+            -- A lone specimen still prowls the local area until it finds a
+            -- packmate or prey, while bonded specimens converge into a loose pack.
+            MoveTo(ent, ChooseHomePoint(ent, 850), 1.1, 0.85)
         else
             coroutine.wait(0.6)
         end
