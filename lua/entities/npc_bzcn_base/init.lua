@@ -498,6 +498,59 @@ function ENT:IsBZCNEnemy(target)
     return false
 end
 
+-- Advanced hostility memory for civilian gunfire: a shot aimed toward a
+-- MetroCop/Combine NPC is enough to alert that officer even when the shot misses.
+-- This is threat recognition only; it does not alter bullet damage or trajectories.
+hook.Add("EntityFireBullets", "BZCNNPCSupport_MetroCopHostileFire", function(shooter, bullet)
+    if not IsValid(shooter) or shooter:IsWorld() or not istable(bullet)
+        or not isvector(bullet.Src) or not isvector(bullet.Dir) then return end
+
+    local shooterFaction = string.lower(tostring(
+        (BZCN and BZCN.IsManaged and BZCN.IsManaged(shooter)
+            and ((shooter.BZCNClassProfile and shooter.BZCNClassProfile.Faction)
+                or shooter.BZCN_Faction or shooter.BZCNClass))
+        or (shooter.GetNW2String and shooter:GetNW2String("PlayerClassName", ""))
+        or shooter.PlayerClassName or "default"
+    ))
+    local isCivilian = shooterFaction == "default" or shooterFaction == "civilian"
+    if not isCivilian then return end
+
+    local direction = bullet.Dir:GetNormalized()
+    local now = CurTime()
+    for _, officer in ipairs(ents.FindInSphere(bullet.Src, 1800)) do
+        if not IsValid(officer) or officer == shooter or not BZCN.IsManaged(officer) then continue end
+        local profile = officer.BZCNClassProfile or BZCN.GetClass(officer.BZCNClass)
+        local className = string.lower(tostring(officer.BZCNClass or officer.PlayerClassName or ""))
+        if className ~= "metrocop" and className ~= "combine"
+            and string.lower(tostring(profile and profile.Faction or officer.BZCN_Faction or "")) ~= "combine" then
+            continue
+        end
+        if officer:Health() <= 0 then continue end
+
+        local targetPos = officer:WorldSpaceCenter()
+        local offset = targetPos - bullet.Src
+        local alongShot = offset:Dot(direction)
+        if alongShot <= 0 or alongShot > 1800 then continue end
+        local closest = bullet.Src + direction * alongShot
+        local radius = math.max(tonumber(officer.BoundingRadius and officer:BoundingRadius()) or 24, 24) + 42
+        if closest:DistToSqr(targetPos) > radius * radius then continue end
+
+        local trace = util.TraceLine({
+            start = bullet.Src,
+            endpos = targetPos,
+            filter = shooter,
+            mask = MASK_SHOT
+        })
+        if trace.Hit and trace.Entity ~= officer and trace.Fraction < 0.98 then continue end
+
+        officer.BZCNHostileOffender = shooter
+        officer.BZCNHostileOffenderUntil = now + 12
+        officer.BZCNOffendedAttackAt = now
+        if officer.SetNW2Entity then officer:SetNW2Entity("BZCNHostileOffender", shooter) end
+        hook.Run("BZCN_MetroCopHostileFireObserved", officer, shooter, bullet)
+    end
+end)
+
 function ENT:IsBZCNAlly(target)
     if not IsValid(target) or target == self or target:Health() <= 0 then return false end
     if target:IsPlayer() and not target:Alive() then return false end
