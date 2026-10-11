@@ -65,6 +65,8 @@ end
 
 local function IsUnavailableForSocial(ent)
     if not IsManagedNPC(ent) then return true end
+    if BZCNCombatActor and isfunction(BZCNCombatActor.IsIncapacitated)
+        and BZCNCombatActor.IsIncapacitated(ent) then return true end
     if ent:GetNW2Bool("BZCNNPCDowned", false) then return true end
     if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
         and hg.BZCNNPCSupport.IsGettingUp(ent) then return true end
