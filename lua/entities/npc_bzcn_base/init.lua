@@ -1278,12 +1278,13 @@ function ENT:ChaseEnemy(target)
             local pounce = self.BZCNNPCPounce
             if IsValid(pounce.target) and now <= (pounce.expires or 0) then
                 local pounceTarget = pounce.target
+                local pounceSupport = hg and hg.BZCNNPCSupport
                 local pounceRag = IsValid(pounce.rag) and pounce.rag or nil
                 if not IsValid(pounceRag) then
                     pounceRag = IsValid(self.BZCNNPCRagdoll) and self.BZCNNPCRagdoll
                         or (IsValid(self.FakeRagdoll) and self.FakeRagdoll or nil)
-                    if not IsValid(pounceRag) and support and isfunction(support.GetNPCHealthTable) then
-                        local ok, healthState = pcall(support.GetNPCHealthTable, self)
+                    if not IsValid(pounceRag) and pounceSupport and isfunction(pounceSupport.GetNPCHealthTable) then
+                        local ok, healthState = pcall(pounceSupport.GetNPCHealthTable, self)
                         if ok and istable(healthState) and IsValid(healthState.ragdoll) then
                             pounceRag = healthState.ragdoll
                         end
