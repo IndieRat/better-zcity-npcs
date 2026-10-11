@@ -93,13 +93,20 @@ local function GetInventory(ent, profile)
     inventory = SafeCopy(inventory) or {}
     inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
     inventory.Items = istable(inventory.Items) and inventory.Items or {}
+    inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+    inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
 
-    -- Z-City player inventories store live SWEP entities as values. The NPC
-    -- facade must not retain another player's weapon entity, so translate
-    -- ownership to a virtual item flag while preserving the weapon class key.
+    -- Z-City uses a live SWEP entity for a weapon currently owned by this
+    -- actor. Preserve that identity; only foreign weapon references become
+    -- virtual inventory entries, otherwise pickpocket/loot code sees a gun
+    -- that is no longer part of this actor's inventory.
     for weaponClass, weaponValue in pairs(inventory.Weapons) do
         if isentity(weaponValue) then
-            inventory.Weapons[weaponClass] = true
+            local belongsToActor = IsValid(weaponValue)
+                and (weaponValue == ent.BZCNRuntimeWeapon
+                    or SafeCall(weaponValue, "GetOwner") == ent
+                    or SafeCall(weaponValue, "GetParent") == ent)
+            if not belongsToActor then inventory.Weapons[weaponClass] = true end
         end
     end
 
@@ -440,9 +447,17 @@ function BZCN.ApplyPlayerWriteback(npc, patch, reason)
         local normalized = SafeCopy(inventory) or {}
         normalized.Weapons = istable(normalized.Weapons) and normalized.Weapons or {}
         normalized.Items = istable(normalized.Items) and normalized.Items or {}
+        normalized.Ammo = istable(normalized.Ammo) and normalized.Ammo or {}
+        normalized.Attachments = istable(normalized.Attachments) and normalized.Attachments or {}
         normalized.Armor = istable(normalized.Armor) and normalized.Armor or {}
         for weaponClass, weaponValue in pairs(normalized.Weapons) do
-            if isentity(weaponValue) then normalized.Weapons[weaponClass] = true end
+            if isentity(weaponValue) then
+                local belongsToNPC = IsValid(weaponValue)
+                    and (weaponValue == npc.BZCNRuntimeWeapon
+                        or SafeCall(weaponValue, "GetOwner") == npc
+                        or SafeCall(weaponValue, "GetParent") == npc)
+                if not belongsToNPC then normalized.Weapons[weaponClass] = true end
+            end
         end
         BZCN.SetNetVar(npc, "Inventory", normalized)
         BZCN.SetNetVar(npc, "Armor", normalized.Armor)
