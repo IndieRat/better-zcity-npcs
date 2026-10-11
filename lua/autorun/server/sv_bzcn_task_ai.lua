@@ -11,7 +11,7 @@ local TASK_POOLS = {
         {"stay", 3}, {"crowd", 4}, {"talk", 4}, {"wander", 2}, {"look", 2}, {"sit", 1}
     },
     furry = {
-        {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"hold", 1}
+        {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"comfort", 2}, {"hold", 1}
     },
     combine = {
         {"squad", 4}, {"patrol", 3}, {"hold", 3}, {"cover", 3}, {"pickup", 2}, {"rescue", 2}, {"sit", 1}
@@ -642,6 +642,61 @@ function Tasks.RunIdleTask(ent)
             MoveTo(ent, NavPoint(ent, centroid + offset, 220), 1.1, 0.45)
         else
             coroutine.wait(0.65)
+        end
+        return true
+    end
+
+    if task == "comfort" and kind == "furry" then
+        local best, bestScore
+        for _, other in ipairs(ents.FindInSphere(ent:GetPos(), 480)) do
+            if other == ent or not IsValid(other) then continue end
+            local furryMate = other:IsPlayer()
+                and string.lower(tostring(other.PlayerClassName
+                    or (other.GetNW2String and other:GetNW2String("PlayerClassName", "")))) == "furry"
+            if IsManaged(other) then
+                local otherProfile = other.BZCNClassProfile or {}
+                furryMate = otherProfile.FurryStyle == true
+                    or string.lower(tostring(other.BZCNClass or other.PlayerClassName or "")) == "furry"
+                    or string.lower(tostring(other.BZCNClass or "")) == "furry_companion"
+            end
+            if not furryMate then continue end
+            if isfunction(ent.IsBZCNEnemy) then
+                local ok, enemy = pcall(ent.IsBZCNEnemy, ent, other)
+                if ok and enemy then continue end
+            end
+            local organism = other.organism or other.BZCN_Organism
+            if not istable(organism) and IsValid(other.BZCNNPCRagdoll) then
+                organism = other.BZCNNPCRagdoll.organism
+            end
+            local pain = istable(organism)
+                and (math.max(tonumber(organism.avgpain) or 0, 0)
+                    + math.max(tonumber(organism.painadd) or 0, 0)
+                    + math.max(tonumber(organism.pain) or 0, 0))
+                or 0
+            local recentlyHurt = CurTime() - (tonumber(other.BZCNLastDamageTime) or 0) < 10
+            if pain <= 0 and not recentlyHurt then continue end
+            local score = pain * 2 + (recentlyHurt and 8 or 0)
+                - ent:GetPos():Distance(other:GetPos()) * 0.02
+            if not bestScore or score > bestScore then best, bestScore = other, score end
+        end
+        if IsValid(best) then
+            local distance = ent:GetPos():Distance(best:GetPos())
+            if distance > 58 then
+                local offset = ent:GetPos() - best:GetPos()
+                offset.z = 0
+                if offset:LengthSqr() < 1 then offset = ent:GetForward() end
+                offset:Normalize()
+                MoveTo(ent, best:GetPos() + offset * 42, 1.0, 0.48)
+            elseif BZCN.TryFurryLick then
+                BZCN.TryFurryLick(ent, best)
+                ent.loco:SetDesiredSpeed(0)
+                ent.loco:FaceTowards(best:WorldSpaceCenter())
+                coroutine.wait(0.8)
+            else
+                coroutine.wait(0.5)
+            end
+        else
+            coroutine.wait(0.55)
         end
         return true
     end
