@@ -775,6 +775,12 @@ local function ReleasePlayerFurryGrab(ply, recoverTarget)
         end
     end
     ply.BZCNPlayerFurryGrab = nil
+    if IsValid(target) then
+        local organ = target.organism or target.BZCN_Organism or {}
+        if not target.BZCNFurryConversionPending and (tonumber(organ.assimilated) or 0) < 0.999 then
+            SetFurryAssimilationLock(target, ply, false)
+        end
+    end
     ClearPlayerFurryAssimilationUI(ply)
     if recoverTarget and IsValid(target) and state and state.forcedDowned then
         local support = hg and hg.BZCNNPCSupport
@@ -825,10 +831,27 @@ local function RestoreFurryRagdollOrganism(state)
     state.originalRagOrganism = nil
 end
 
+local function SetFurryAssimilationLock(target, controller, locked)
+    if not IsValid(target) then return end
+    if locked then
+        target.BZCNAssimilationLocked = true
+        target.BZCNAssimilationLockOwner = controller
+        if target.SetNW2Bool then target:SetNW2Bool("BZCNAssimilationLocked", true) end
+        return
+    end
+
+    if controller ~= nil and target.BZCNAssimilationLockOwner ~= controller then return end
+    target.BZCNAssimilationLocked = nil
+    target.BZCNAssimilationLockOwner = nil
+    if target.SetNW2Bool then target:SetNW2Bool("BZCNAssimilationLocked", false) end
+end
+
 function BZCN.StopFurryAssimilation(owner, restoreTarget)
     if not IsValid(owner) then return end
     local state = owner.BZCNFurryGrab
     if not istable(state) then
+        local target = owner.BZCNFurryGrabTarget
+        if IsValid(target) then SetFurryAssimilationLock(target, owner, false) end
         owner.BZCN_SimulatedButtons = 0
         return
     end
@@ -847,8 +870,11 @@ function BZCN.StopFurryAssimilation(owner, restoreTarget)
     owner.BZCNCombatTarget = nil
     owner.BZCN_SimulatedButtons = 0
 
-    if restoreTarget == false then return end
     local target = state.target
+    if restoreTarget ~= false and IsValid(target) then
+        SetFurryAssimilationLock(target, owner, false)
+    end
+    if restoreTarget == false then return end
     if not IsValid(target) or target:Health() <= 0 then return end
 
     if target:IsPlayer() then
@@ -864,7 +890,9 @@ function BZCN.StopFurryAssimilation(owner, restoreTarget)
         local support = hg and hg.BZCNNPCSupport
         if target:GetNW2Bool("BZCNNPCDowned", false)
             and support and isfunction(support.Recover) then
-            pcall(support.Recover, target, state.rag, true)
+            -- Recheck the organism rulebook; releasing a grab must not
+            -- bypass blood, consciousness, spine, leg or stun restrictions.
+            pcall(support.Recover, target, state.rag, false)
         end
         if support and isfunction(support.GetNPCHealthTable) then
             local ok, healthState = pcall(support.GetNPCHealthTable, target)
@@ -940,6 +968,7 @@ local function TransformFurryTarget(attacker, target, state)
     -- Player-held assimilation and NPC-driven assimilation can reach the
     -- threshold during the same frame. Avoid applying the class/model reset twice.
     if IsFurryTarget(target) then
+        SetFurryAssimilationLock(target, attacker, false)
         hook.Run("BZCN_NPCFurryAssimilationComplete", attacker, target, true)
         return true
     end
@@ -955,6 +984,7 @@ local function TransformFurryTarget(attacker, target, state)
             converted = ok
         end
 
+        SetFurryAssimilationLock(target, attacker, false)
         if converted then
             timer.Simple(0.25, function()
                 if not IsValid(target) or not target:Alive() then return end
@@ -1093,6 +1123,7 @@ function BZCN.TryFurryAssimilation(attacker, target)
         weapon = ConfigureWeaponEntity(attacker, "weapon_hands_sh", "BZCNRuntimeWeapon")
     end
     if not IsValid(weapon) then return false end
+    SetFurryAssimilationLock(target, attacker, true)
     if state then
         state.weapon = weapon
         -- The grab is a physical hold, not target-lock through geometry. Stop
@@ -1238,10 +1269,12 @@ hook.Add("KeyPress", "BZCN_PlayerFurryManagedNPCGrab", function(ply, button)
         pendingUntil = CurTime() + 4, forcedDowned = not alreadyDowned, attached = false
     }
     ply.BZCNPlayerFurryGrab = state
+    SetFurryAssimilationLock(target, ply, true)
     if not alreadyDowned then
         local ok, result = pcall(support.EnterDownedState, target, "player_furry_grab")
         if not ok or result == false then
             ply.BZCNPlayerFurryGrab = nil
+            SetFurryAssimilationLock(target, ply, false)
             ClearPlayerFurryAssimilationUI(ply)
         end
     end
@@ -1805,6 +1838,7 @@ hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
                         if istable(convertedOrgan) then convertedOrgan.assimilated = 0 end
                         if ent.SetNW2Float then ent:SetNW2Float("BZCNAssimilation", 0) end
                         ent.BZCNFurryConversionPending = nil
+                        SetFurryAssimilationLock(ent, nil, false)
                         hook.Run("BZCN_NPCFurryAssimilationComplete", nil, ent, true)
                     end
                 end
@@ -1812,6 +1846,7 @@ hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
         elseif IsFurryTarget(ent) then
             ent.BZCNFurryConversionPending = nil
             ent.BZCNFurryRecoveryRequested = nil
+            SetFurryAssimilationLock(ent, nil, false)
         end
 
         local state = ent.BZCNFurryGrab
