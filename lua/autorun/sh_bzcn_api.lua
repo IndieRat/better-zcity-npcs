@@ -48,13 +48,26 @@ BZCN.RegisterClass("default", {
 })
 
 BZCN.RegisterClass("Combine", {
-    Name = "Combine Soldier", PlayerClassName = "Combine",
+    Name = "Combine Soldier", PlayerClassName = "Combine", TeamName = "Combine",
     Model = "models/player/combine_soldier.mdl", Health = 140, Speed = 180,
     Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
     AnimationClass = "overwatch", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
     MedicalRange = 300, WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
     Inventory = {Weapons = {weapon_mp7 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "combine_helmet"}}
+})
+
+-- Z-City has a separate Metrocop player class, but it belongs to the same
+-- Combine faction for friendliness and targeting.
+BZCN.RegisterClass("Metrocop", {
+    Name = "Metro Police", PlayerClassName = "Metrocop", TeamName = "Combine",
+    Model = "models/player/police.mdl", Health = 115, Speed = 172,
+    Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
+    FollowAllies = true, FollowRange = 1100, FollowDistance = 160, HelpRange = 1350, HelpMemory = 10,
+    AnimationClass = "metrocop", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 10,
+    WeaponRange = 1150, AttackDelay = 0.38, MedicalRange = 320,
+    WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
+    Inventory = {Weapons = {weapon_mp7 = true, weapon_hk_usp = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
 })
 
 BZCN.RegisterClass("Rebel", {
@@ -75,7 +88,7 @@ BZCN.RegisterClass("furry", {
     Faction = "furry", EnemyPlayers = false, EnemyFactions = {"Combine", "default", "Rebel"},
     FollowAllies = true, FollowRange = 800, FollowDistance = 125, HelpRange = 1000, HelpMemory = 8,
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
-    AnimationClass = "player", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
+    AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
     MedicalRange = 250, FurryStyle = true, Skin = 4, BloodType = "c-",
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
