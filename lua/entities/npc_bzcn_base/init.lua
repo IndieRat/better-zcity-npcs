@@ -1751,7 +1751,9 @@ function ENT:RunBehaviour()
             end
             coroutine.wait(0.1)
         elseif IsValid(self.BZCNFleeThreat) and (self.BZCNFleeUntil or 0) > CurTime()
-            and not (self:GetBZCNProfile().Faction == "civilian"
+            and not ((self:GetBZCNProfile().Faction == "civilian"
+                    or self:GetBZCNProfile().Faction == "default"
+                    or self.BZCNClass == "default" or self.BZCNClass == "civilian")
                 and (self:GetBZCNProfile().Ranged == true
                     or (isstring(self.BZCN_SelectedWeapon) and self.BZCN_SelectedWeapon ~= ""
                         and self.BZCN_SelectedWeapon ~= "weapon_hands_sh"
