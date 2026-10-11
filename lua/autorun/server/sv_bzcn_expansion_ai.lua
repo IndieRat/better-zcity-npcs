@@ -194,6 +194,38 @@ local function ActiveAmmoInfo(ply)
     return name, ammoID, clip
 end
 
+-- Companions provide finite supply support when their assigned player is
+-- truly empty for the currently held weapon. Update the native inventory too.
+timer.Create("BZCN_CompanionSupport", 1, 0, function()
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not Managed(ent) or not Profile(ent).Companion then continue end
+        local owner = GetCompanionOwner(ent)
+        if not IsValid(owner) or not owner:Alive() then continue end
+        local distanceSquared = ent:GetPos():DistToSqr(owner:GetPos())
+        if distanceSquared > 420 * 420 then continue end
+
+        -- The equipment AI owns the actual medkit action and its cooldown. This
+        -- hook gives the companion a visible preference to look after its owner.
+        if distanceSquared <= 340 * 340 and BZCN.TryUseMedicalItem
+            and CurTime() >= (ent.BZCNCompanionNextMedicalAt or 0) then
+            if BZCN.TryUseMedicalItem(ent) then ent.BZCNCompanionNextMedicalAt = CurTime() + 5 end
+        end
+
+        if CurTime() < (ent.BZCNCompanionNextAmmoAt or 0) then continue end
+        local ammoName, ammoID, clipSize = ActiveAmmoInfo(owner)
+        if not ammoName or owner:GetAmmoCount(ammoID) > 0 then continue end
+        local stock = tonumber(ent.BZCNCompanionAmmoStock) or tonumber(Profile(ent).CompanionAmmoStock) or 0
+        if stock <= 0 then continue end
+        local amount = math.min(math.max(clipSize, 12), stock)
+        owner:GiveAmmo(amount, ammoName, true)
+        if hg and isfunction(hg.RenewInv) then pcall(hg.RenewInv, owner) end
+        ent.BZCNCompanionAmmoStock = stock - amount
+        ent.BZCNCompanionNextAmmoAt = CurTime() + 30
+        Companion.Say(ent, "mood", owner)
+        hook.Run("BZCN_CompanionSharedAmmo", ent, owner, ammoName, amount)
+    end
+end)
+
 local function CanHelp(ent, target)
     if not Managed(ent) or not IsValid(target) then return false end
     local kind = LineKind(ent)
