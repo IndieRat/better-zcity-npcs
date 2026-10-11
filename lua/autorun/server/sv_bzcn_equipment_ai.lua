@@ -42,6 +42,10 @@ end
 local function RemoveRuntimeWeapon(ent, key)
     local weapon = ent[key]
     ent[key] = nil
+    if key == "BZCNRuntimeWeapon" and IsValid(ent) and ent.SetNW2Entity
+        and (not IsValid(weapon) or ent:GetNW2Entity("BZCNRuntimeWeapon") == weapon) then
+        ent:SetNW2Entity("BZCNRuntimeWeapon", NULL)
+    end
     if IsValid(weapon) then weapon:Remove() end
 end
 
@@ -163,6 +167,9 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     end
 
     owner[slotKey] = weapon
+    if slotKey == "BZCNRuntimeWeapon" and owner.SetNW2Entity then
+        owner:SetNW2Entity("BZCNRuntimeWeapon", weapon)
+    end
     return weapon
 end
 
@@ -357,15 +364,24 @@ function BZCN.FireRuntimeWeapon(ent, target)
         weapon.drawBullet = true
         local ok, err = pcall(weapon.BZCNNativePrimaryAttack, weapon)
         weapon.BZCNActorTrigger = nil
-        -- A native Homigrad attack can deliberately decline to spawn a bullet
-        -- (dry fire, blank ammo, or weapon-specific gating). Treat a clean native
-        -- call as handled instead of bypassing that behavior with generic damage.
-        nativeHandled = ok or weapon.BZCNNativeFireWasCalled == true
-        fired = weapon.BZCNNativeFireWasCalled == true
+        -- PrimaryAttack can return successfully without firing (its SWEP gates
+        -- include Player-only state and hidden viewmodel flags). Only consider
+        -- the native path handled when FireBullet actually completed. Otherwise
+        -- use the selected weapon's stats through the managed-NPC bullet adapter.
+        nativeHandled = weapon.BZCNNativeFireWasCalled == true
             and weapon.BZCNNativeFireSucceeded == true
+        fired = nativeHandled
         if not ok then
             ErrorNoHalt("[BZCN] Native Homigrad PrimaryAttack failed for "
-                .. tostring(class) .. ": " .. tostring(err) .. "\\n")
+                .. tostring(class) .. ": " .. tostring(err) .. "\n")
+        elseif not nativeHandled and (weapon.BZCNNativeFireError or weapon.BZCNNativeFireWasCalled) then
+            local logAt = tonumber(ent.BZCNNativeFireFallbackLogAt) or 0
+            if now >= logAt then
+                ent.BZCNNativeFireFallbackLogAt = now + 5
+                ErrorNoHalt("[BZCN] Native fire did not complete for " .. tostring(class)
+                    .. "; using stat-based bullet fallback. "
+                    .. tostring(weapon.BZCNNativeFireError or "PrimaryAttack skipped FireBullet") .. "\n")
+            end
         end
         if nativeHandled then
             -- Homigrad already consumed ammo and ran its ammo-type bullet path.
@@ -381,6 +397,14 @@ function BZCN.FireRuntimeWeapon(ent, target)
 
     if not nativeHandled then
         fired = FireStatBasedShot(ent, target, weapon)
+        if not fired then
+            local logAt = tonumber(ent.BZCNNoShotLogAt) or 0
+            if now >= logAt then
+                ent.BZCNNoShotLogAt = now + 5
+                ErrorNoHalt("[BZCN] No bullet emitted by NPC #" .. tostring(ent:EntIndex())
+                    .. " with " .. tostring(class) .. " at target #" .. tostring(target:EntIndex()) .. "\n")
+            end
+        end
         if fired and clipSize > 0 and beforeClip > 0 and weapon.SetClip1 then
             local remaining = math.max(beforeClip - 1, 0)
             weapon:SetClip1(remaining)
