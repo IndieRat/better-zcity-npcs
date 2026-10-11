@@ -1301,6 +1301,21 @@ end
 local function IsAllyToHealer(healer, target)
     if healer == target then return true end
     if not IsValid(healer) or not IsValid(target) then return false end
+
+    -- A rare Good Cop may treat a civilian hurt by an accidental shot even
+    -- though that officer's normal threat policy would not classify them ally.
+    local copMood = healer.BZCNCopMood
+        or (healer.GetNW2String and healer:GetNW2String("BZCNCopMood", ""))
+    local crossfireUntil = target.BZCNAccidentalCrossfireUntil
+    if copMood == "good" and tonumber(crossfireUntil) and crossfireUntil > CurTime()
+        and (target:IsPlayer() or target:IsNPC() or (BZCN.IsManaged and BZCN.IsManaged(target))) then
+        local faction = isfunction(healer.GetBZCNEntityFaction)
+            and healer:GetBZCNEntityFaction(target) or nil
+        local targetClass = string.lower(tostring(target.PlayerClassName
+            or (target.GetNW2String and target:GetNW2String("PlayerClassName", "")) or ""))
+        if faction == "default" or faction == "civilian" or targetClass == "default" then return true end
+    end
+
     if isfunction(healer.IsBZCNAlly) then
         local ok, result = pcall(healer.IsBZCNAlly, healer, target)
         if ok then return result == true end
