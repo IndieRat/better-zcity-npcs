@@ -440,16 +440,38 @@ function BZCN.InstallAdapter(ent)
     end
     data.GetShootPos = function(self) return self:EyePos() end
     data.GetAimVector = function(self)
+        local solution = self.BZCNCombatAimSolution
+        if istable(solution) and isvector(solution.point) then
+            local origin = self:EyePos()
+            local aim = solution.point - origin
+            if aim:LengthSqr() > 0 then return aim:GetNormalized() end
+        end
+
         local target = self.BZCNCombatTarget
         if IsValid(target) then
+            local point
+            if BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint then
+                point = BZCNCombatActor.GetTargetAimPoint(target)
+            end
+            point = isvector(point) and point or target:WorldSpaceCenter()
             local origin = self:EyePos()
-            return (target:WorldSpaceCenter() - origin):GetNormalized()
+            local aim = point - origin
+            if aim:LengthSqr() > 0 then return aim:GetNormalized() end
         end
         return self:GetForward()
     end
     data.EyeAngles = function(self)
+        local solution = self.BZCNCombatAimSolution
+        if istable(solution) and isangle(solution.angle) then return solution.angle end
         local target = self.BZCNCombatTarget
-        if IsValid(target) then return (target:WorldSpaceCenter() - self:EyePos()):Angle() end
+        if IsValid(target) then
+            local point
+            if BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint then
+                point = BZCNCombatActor.GetTargetAimPoint(target)
+            end
+            point = isvector(point) and point or target:WorldSpaceCenter()
+            return (point - self:EyePos()):Angle()
+        end
         return self:GetAngles()
     end
     data.GetEyeTrace = function(self)
