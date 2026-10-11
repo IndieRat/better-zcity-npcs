@@ -678,10 +678,12 @@ end)
 -- A small fraction of genuinely well-intentioned MetroCops mistake a
 -- civilian for a threat during a chaotic fight. When one does crossfire a
 -- civilian, it may apologize through its behavior and attempt first aid.
-hook.Add("BZCN_EntityDamaged", "BZCN_GoodCopCrossfireAid", function(victim, attacker, damageInfo)
+local function TryGoodCopCrossfireAid(victim, attacker, damageInfo)
     if not Managed(attacker) or LineKind(attacker) ~= "metrocop" then return end
-    if (attacker.BZCNCopMood or (attacker.GetNW2String and attacker:GetNW2String("BZCNCopMood", ""))) ~= "good" then return end
+    if (attacker.BZCNCopMood
+        or (attacker.GetNW2String and attacker:GetNW2String("BZCNCopMood", ""))) ~= "good" then return end
     if not IsValid(victim) or victim == attacker or victim:Health() <= 0 then return end
+    if (victim.BZCNAccidentalCrossfireUntil or 0) > CurTime() then return end
 
     local faction = isfunction(attacker.GetBZCNEntityFaction)
         and attacker:GetBZCNEntityFaction(victim) or nil
@@ -700,6 +702,17 @@ hook.Add("BZCN_EntityDamaged", "BZCN_GoodCopCrossfireAid", function(victim, atta
     attacker.BZCNNextMedicalUse = CurTime()
     if attacker.SetNW2Entity then attacker:SetNW2Entity("BZCNHelpTarget", victim) end
     hook.Run("BZCN_GoodCopCrossfireApology", attacker, victim, damageInfo)
+end
+
+hook.Add("BZCN_EntityDamaged", "BZCN_GoodCopCrossfireAid", function(victim, attacker, damageInfo)
+    if not Managed(victim) then return end
+    TryGoodCopCrossfireAid(victim, attacker, damageInfo)
+end)
+
+hook.Add("PostEntityTakeDamage", "BZCN_GoodCopPlayerCrossfireAid", function(victim, damageInfo, tookDamage)
+    if not tookDamage or Managed(victim) or not IsValid(victim) then return end
+    local attacker = damageInfo and isfunction(damageInfo.GetAttacker) and damageInfo:GetAttacker() or nil
+    TryGoodCopCrossfireAid(victim, attacker, damageInfo)
 end)
 
 local function GiveItemIfMissing(ply, class)
