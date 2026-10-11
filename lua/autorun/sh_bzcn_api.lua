@@ -658,34 +658,71 @@ function BZCN.ChangeClass(ent, className, heal)
             if healthState then
                 healthState.maxHealth = profile.Health or 100
                 healthState.health = ent:Health()
-                healthState.pain = 0
-                healthState.shock = 0
-                healthState.skull = 0
-                healthState.brain = 0
-                healthState.chest = 0
-                healthState.pelvis = 0
-                healthState.stomach = 0
-                healthState.spine1 = 0
-                healthState.spine2 = 0
-                healthState.spine3 = 0
-                healthState.larm = 0
-                healthState.rarm = 0
-                healthState.lleg = 0
-                healthState.rleg = 0
-                healthState.heart = 0
-                healthState.liver = 0
-                healthState.intestines = 0
-                healthState.lungsL = {0, 0}
-                healthState.lungsR = {0, 0}
-                healthState.blood = healthState.maxBlood or 5000
-                healthState.partDamage = {head = 0, chest = 0, abdomen = 0, pelvis = 0, leftarm = 0, rightarm = 0, leftleg = 0, rightleg = 0}
-                healthState.crawling = false
-                if healthState.wounds then table.Empty(healthState.wounds) end
-                if healthState.arterialwounds then table.Empty(healthState.arterialwounds) end
+                -- A class conversion (heal=false) must not erase injuries that
+                -- accumulated while standing, crawling, or ragdolled. Only an
+                -- explicit healing class change resets the injury table.
+                if heal ~= false then
+                    healthState.pain = 0
+                    healthState.shock = 0
+                    healthState.skull = 0
+                    healthState.brain = 0
+                    healthState.chest = 0
+                    healthState.pelvis = 0
+                    healthState.stomach = 0
+                    healthState.spine1 = 0
+                    healthState.spine2 = 0
+                    healthState.spine3 = 0
+                    healthState.larm = 0
+                    healthState.rarm = 0
+                    healthState.lleg = 0
+                    healthState.rleg = 0
+                    healthState.heart = 0
+                    healthState.liver = 0
+                    healthState.intestines = 0
+                    healthState.lungsL = {0, 0}
+                    healthState.lungsR = {0, 0}
+                    healthState.blood = healthState.maxBlood or 5000
+                    healthState.partDamage = {head = 0, chest = 0, abdomen = 0, pelvis = 0, leftarm = 0, rightarm = 0, leftleg = 0, rightleg = 0}
+                    healthState.crawling = false
+                    if healthState.wounds then table.Empty(healthState.wounds) end
+                    if healthState.arterialwounds then table.Empty(healthState.arterialwounds) end
+                end
             end
         end
         if istable(ent.organism) then
             ent.organism.bloodtype = profile.BloodType or ent.organism.bloodtype
+            if heal ~= false then
+                ent.organism.pain = 0
+                ent.organism.shock = 0
+                ent.organism.wounds = istable(ent.organism.wounds) and ent.organism.wounds or {}
+                ent.organism.arterialwounds = istable(ent.organism.arterialwounds) and ent.organism.arterialwounds or {}
+                table.Empty(ent.organism.wounds)
+                table.Empty(ent.organism.arterialwounds)
+                ent.organism.bulletwounds = 0
+                ent.organism.stabwounds = 0
+                ent.organism.slashwounds = 0
+                ent.organism.bruises = 0
+                ent.organism.burns = 0
+                ent.organism.explosionwounds = 0
+                ent.organism.blood = ent.organism.maxBlood or 5000
+                ent.organism.skull = 0
+                ent.organism.brain = 0
+                ent.organism.chest = 0
+                ent.organism.pelvis = 0
+                ent.organism.stomach = 0
+                ent.organism.spine1 = 0
+                ent.organism.spine2 = 0
+                ent.organism.spine3 = 0
+                ent.organism.larm = 0
+                ent.organism.rarm = 0
+                ent.organism.lleg = 0
+                ent.organism.rleg = 0
+                ent.organism.heart = 0
+                ent.organism.liver = 0
+                ent.organism.intestines = 0
+                ent.organism.lungsL = {0, 0}
+                ent.organism.lungsR = {0, 0}
+            end
             ent.organism.otrub = false
             ent.organism.needotrub = false
             ent.organism.fake = false
