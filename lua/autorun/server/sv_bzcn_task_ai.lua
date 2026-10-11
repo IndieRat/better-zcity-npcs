@@ -151,24 +151,45 @@ local function NavPoint(ent, desired, radius)
 end
 
 local function TryOpenTaskDoor(ent, destination)
-    if not IsValid(ent) or not isvector(destination)
-        or CurTime() < (ent.BZCNNextTaskDoorAt or 0) then return false end
-    local trace = util.TraceLine({
-        start = ent:WorldSpaceCenter(), endpos = destination,
+    if not IsValid(ent) or not isvector(destination) then return false end
+    local startPos = ent:WorldSpaceCenter()
+    local trace = util.TraceHull({
+        start = startPos, endpos = destination,
+        mins = Vector(-12, -12, -8), maxs = Vector(12, 12, 8),
         filter = {ent}, mask = MASK_SOLID
     })
     local door = IsValid(trace.Entity) and trace.Entity or nil
+    if not IsValid(door) then
+        local midpoint = (startPos + destination) * 0.5
+        local bestDist
+        for _, candidate in ipairs(ents.FindInSphere(midpoint, startPos:Distance(destination) * 0.5 + 48)) do
+            if not IsValid(candidate) then continue end
+            local name = string.lower(candidate:GetClass() or "")
+            if not string.find(name, "door", 1, true) and name ~= "func_movelinear" then continue end
+            local d = candidate:WorldSpaceCenter():DistToSqr(midpoint)
+            if not bestDist or d < bestDist then door, bestDist = candidate, d end
+        end
+    end
     if not IsValid(door) then return false end
     local class = string.lower(door:GetClass() or "")
     if not string.find(class, "door", 1, true) and class ~= "func_movelinear" then return false end
-    ent.BZCNNextTaskDoorAt = CurTime() + 0.9
-    pcall(door.Fire, door, "Unlock", "", 0, ent, ent)
+
+    local mode = string.lower(tostring(ent.BZCNDoorMode
+        or (ent.BZCNClassProfile and ent.BZCNClassProfile.DoorMode) or "normal"))
+    if mode ~= "fast_loud" and mode ~= "slow_quiet" then mode = "normal" end
+    local now = CurTime()
+    if now < (ent.BZCNNextTaskDoorAt or 0) then return false end
+    local delay = mode == "slow_quiet" and 0.25 or 0
+    ent.BZCNNextTaskDoorAt = now + (mode == "slow_quiet" and 1.6 or 0.9)
+    pcall(door.Fire, door, "Unlock", "", delay, ent, ent)
     if class == "func_movelinear" then
-        pcall(door.Fire, door, "Toggle", "", 0, ent, ent)
+        pcall(door.Fire, door, "Toggle", "", delay, ent, ent)
     else
-        pcall(door.Fire, door, "Open", "", 0, ent, ent)
+        pcall(door.Fire, door, "Open", "", delay, ent, ent)
     end
     if isfunction(door.Use) then pcall(door.Use, door, ent, ent, USE_ON, 1) end
+    if mode == "fast_loud" then ent:EmitSound("doors/door_metal_large_open1.wav", 72, 100, 0.8) end
+    hook.Run("BZCN_NPCOpenedDoor", ent, door, mode)
     return true
 end
 
