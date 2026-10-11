@@ -607,10 +607,9 @@ function ENT:AttackTarget(target)
         self.LastAttack = now + (profile.AttackDelay or 0.3)
         self:PlayBZCNAttackAnimation()
 
-        -- Prefer a real Z-City/Homigrad SWEP. Its own NPCShoot_Primary path
-        -- preserves the weapon's timing, ammo, sound, spread and damage code.
-        -- The equipment adapter falls back to that SWEP's stat fields if a
-        -- Player-only method prevents native firing on a NextBot owner.
+        -- The equipment adapter fires engine bullets from the selected SWEP's
+        -- damage/spread/sound settings instead of relying on Player-oriented
+        -- NPCShoot_Primary callbacks that can consume a cooldown without firing.
         if BZCN and isfunction(BZCN.FireRuntimeWeapon)
             and BZCN.FireRuntimeWeapon(self, target) then
             hook.Run("BZCN_NPCFiredFakeWeapon", self, target, nil)

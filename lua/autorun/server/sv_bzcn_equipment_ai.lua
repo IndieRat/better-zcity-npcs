@@ -224,7 +224,9 @@ function BZCN.FireRuntimeWeapon(ent, target)
     PlaceRuntimeWeapon(ent, weapon)
     local primary = istable(weapon.Primary) and weapon.Primary or {}
     local entityNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
-    local scriptNext = math.max(tonumber(primary.Next) or 0, tonumber(primary.NextFire) or 0)
+    -- Keep the fallback cooldown on the weapon entity. primary.Next may be a
+    -- shared SWEP definition table, which can incorrectly lock every NPC together.
+    local scriptNext = tonumber(weapon.BZCNNextFire) or 0
     local beforeNext = math.max(entityNext, scriptNext)
     if beforeNext > now then return true end
 
@@ -249,7 +251,8 @@ function BZCN.FireRuntimeWeapon(ent, target)
         weapon:SetClip1(math.Clamp(defaultClip, 1, clipSize))
         if weapon.SetNWInt then weapon:SetNWInt("Clip1", weapon:Clip1()) end
         weapon.drawBullet = true
-        primary.Next = now + 0.2
+        weapon.BZCNNextFire = now + 0.2
+        if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(weapon.BZCNNextFire) end
         weapon.BZCNReloadUntil = nil
         return true
     end
@@ -268,8 +271,8 @@ function BZCN.FireRuntimeWeapon(ent, target)
         local currentNext = weapon:GetNextPrimaryFire()
         if currentNext <= now then
             local nextFire = now + math.max(tonumber(profile.AttackDelay) or 0.35, 0.08)
+            weapon.BZCNNextFire = nextFire
             weapon:SetNextPrimaryFire(nextFire)
-            if istable(weapon.Primary) then weapon.Primary.Next = nextFire end
         end
     end
 
