@@ -229,6 +229,9 @@ function BZCN.SetNetVar(ent, key, value)
         or key == "BZCNFaction" or key == "BZCNClassName" then
         SyncNetVar(ent, key, value)
     end
+    if key == "Inventory" and SERVER then
+        hook.Run("BZCN_InventorySet", ent, value)
+    end
     return value
 end
 
