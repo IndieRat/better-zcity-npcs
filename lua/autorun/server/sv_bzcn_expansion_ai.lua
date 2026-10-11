@@ -178,6 +178,34 @@ end
 hook.Add("PlayerUse", "BZCN_CompanionInteraction", function(ply, ent)
     if not Managed(ent) or not Profile(ent).Companion then return end
     if not IsValid(ply) or ply:GetPos():DistToSqr(ent:GetPos()) > 160 * 160 then return false end
+
+    if ply:Crouching() then
+        local current = GetCompanionOwner(ent)
+        if IsValid(current) and current ~= ply then return false end
+        if current == ply and ent.BZCNCompanionOrder == "sit" then
+            SetOrder(ent, "follow")
+            ent.BZCNSittingUntil = 0
+            ent.BZCNSitSequence = nil
+            Companion.Say(ent, "greeting", ply)
+            return false
+        end
+        if not IsValid(current) then AssignOwner(ply, ent) end
+        local sequence = ent:FindSequence({
+            "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
+            "sit_idle", "sit", "sitting", "idle_sit"
+        })
+        if isnumber(sequence) and sequence >= 0 then
+            ent.BZCNSitSequence = sequence
+            ent.BZCNSittingUntil = CurTime() + 18
+            SetOrder(ent, "sit")
+            if ent.SetNW2Float then ent:SetNW2Float("BZCNSittingUntil", ent.BZCNSittingUntil) end
+            if ent.loco then ent.loco:SetDesiredSpeed(0); ent.loco:FaceTowards(ply:GetPos()) end
+        else
+            SetOrder(ent, "hold")
+        end
+        return false
+    end
+
     AssignOwner(ply, ent)
     return false
 end)
