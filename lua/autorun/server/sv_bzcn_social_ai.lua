@@ -39,7 +39,9 @@ local GESTURE_ALIASES = {
     cheer = {"cheer", "taunt_cheer"},
     laugh = {"laugh", "taunt_laugh"},
     dance = {"dance", "taunt_dance"},
-    taunt = {"taunt", "muscle"}
+    taunt = {"taunt", "muscle"},
+    thumbsup = {"thumbsup", "thumbs_up", "thumbs-up", "gesture_thumbsup"},
+    flipoff = {"flipoff", "flip_off", "middlefinger", "middle_finger", "flippingoff"}
 }
 
 local activityGesture = {}
@@ -277,8 +279,8 @@ local function FleeFromFurry(civilian, furry)
         or civilian == furry or not CanUseSocialEmote(civilian) then return false end
     if civilian.BZCNFleeUntil and civilian.BZCNFleeUntil > CurTime() then return true end
     -- Only run away when the furry is actually an enemy to this civilian.
-    local enemy = EntityIsHostileTo(civilian, furry)
-    if not enemy then return false end
+    -- Fear is not the same as faction hostility: civilians try to escape a
+    -- nearby furry without necessarily selecting it as a target to attack.
     civilian.BZCNFleeThreat = furry
     civilian.BZCNFleeUntil = CurTime() + math.Rand(4.5, 7.5)
     civilian.BZCNFleeNextCallout = CurTime() + 2
@@ -394,14 +396,34 @@ local function ReactToGesture(playerEnt, gesture)
         npc.BZCNNextSocialReactionAt = now + 2.5
 
         local hostile = EntityIsHostileTo(npc, playerEnt)
-        local answer = hostile and "disagree" or
-            (gesture == "wave" and "wave" or gesture == "salute" and "salute" or
-            gesture == "disagree" and "agree" or gesture == "agree" and "agree" or "wave")
-        PlayNPCGesture(npc, answer)
-        if gesture == "wave" or gesture == "salute" then
-            PlayNPCPhrase(npc, "greeting", hostile and "Scared" or "Satisfied")
-        elseif gesture == "agree" or gesture == "disagree" then
+        if gesture == "flipoff" then
+            -- A rude gesture is remembered briefly. The NPC has a short beat
+            -- to return the insult, then treats the player as a real combat
+            -- threat through ENT:IsBZCNEnemy rather than a cosmetic emote only.
+            npc.BZCNHostileOffender = playerEnt
+            npc.BZCNHostileOffenderUntil = now + 18
+            npc.BZCNOffendedAttackAt = now + (hostile and 0.15 or 1.0)
+            npc.BZCNEnemy = nil
+            if npc.BZCNBefriendedPlayers then npc.BZCNBefriendedPlayers[playerEnt] = nil end
+            PlayNPCGesture(npc, "flipoff")
+            PlayNPCPhrase(npc, "answer", "Yell")
+            hook.Run("BZCN_NPCOffended", npc, playerEnt, gesture)
+            continue
+        end
+
+        if gesture == "thumbsup" then
+            PlayNPCGesture(npc, "agree")
             PlayNPCPhrase(npc, "affirm", hostile and "Scared" or "Satisfied")
+        else
+            local answer = hostile and "disagree" or
+                (gesture == "wave" and "wave" or gesture == "salute" and "salute" or
+                gesture == "disagree" and "agree" or gesture == "agree" and "agree" or "wave")
+            PlayNPCGesture(npc, answer)
+            if gesture == "wave" or gesture == "salute" then
+                PlayNPCPhrase(npc, "greeting", hostile and "Scared" or "Satisfied")
+            elseif gesture == "agree" or gesture == "disagree" then
+                PlayNPCPhrase(npc, "affirm", hostile and "Scared" or "Satisfied")
+            end
         end
     end
 end
@@ -453,4 +475,66 @@ timer.Create("BZCN_Social_IdleActivity", 3, 0, function()
         end
         PlayNPCPhrase(npc, "ambient", IsFurry(npc) and nil or "Satisfied")
     end
+end)
+
+-- Publish the safe local emote helpers for the task director's turn-taking
+-- conversations. Keeping these wrappers here preserves the existing cooldowns.
+BZCN.Social = BZCN.Social or {}
+BZCN.Social.PlayGesture = PlayNPCGesture
+BZCN.Social.PlayPhrase = PlayNPCPhrase
+
+local function RestoreTrustAfterHealing(healer, target, itemClass)
+    if not IsValid(healer) or not IsManagedNPC(target) then return end
+    target.BZCNBefriendedPlayers = target.BZCNBefriendedPlayers or setmetatable({}, {__mode = "k"})
+    target.BZCNBefriendedPlayers[healer] = CurTime() + 120
+    if target.BZCNHostileOffender == healer then
+        target.BZCNHostileOffender = nil
+        target.BZCNHostileOffenderUntil = nil
+        target.BZCNOffendedAttackAt = nil
+    end
+    if target.BZCNEnemy == healer then target.BZCNEnemy = nil end
+    hook.Run("BZCN_NPCTrustRestored", target, healer, itemClass)
+    if not IsUnavailableForSocial(target) then
+        PlayNPCGesture(target, "agree")
+        PlayNPCPhrase(target, "affirm", "Satisfied")
+    end
+end
+
+hook.Add("BZCN_NPCUsedMedicalItem", "BZCN_Social_HealingTrust", RestoreTrustAfterHealing)
+hook.Add("BZCN_NPCHealed", "BZCN_Social_HealingTrustFromSWEP", RestoreTrustAfterHealing)
+
+-- Z-City's bandage/medkit SWEPs heal through SWEP:Heal(target, ...). Wrap the
+-- entity method once so successful treatment of a managed NextBot can restore
+-- trust just as treatment of native NPCs/players does.
+local function AttachHealingTrust(weapon)
+    if not IsValid(weapon) or weapon.BZCNHealingTrustWrapped then return end
+    local class = weapon:GetClass()
+    if class ~= "weapon_bandage_sh" and class ~= "weapon_medkit_sh"
+        and class ~= "weapon_bigbandage_sh" then return end
+    if not isfunction(weapon.Heal) then return end
+    local originalHeal = weapon.Heal
+    weapon.BZCNHealingTrustWrapped = true
+    weapon.Heal = function(self, target, ...)
+        local ok, result = pcall(originalHeal, self, target, ...)
+        if not ok then
+            ErrorNoHalt("[BZCN] Medical SWEP Heal wrapper failed: " .. tostring(result) .. "\n")
+            return nil
+        end
+        if result and IsValid(target) and IsManagedNPC(target) then
+            local owner = self:GetOwner()
+            if IsValid(owner) then hook.Run("BZCN_NPCHealed", owner, target, self:GetClass()) end
+        end
+        return result
+    end
+end
+
+hook.Add("OnEntityCreated", "BZCN_Social_WrapHealingSWEPs", function(ent)
+    timer.Simple(0, function()
+        if IsValid(ent) then AttachHealingTrust(ent) end
+    end)
+end)
+hook.Add("InitPostEntity", "BZCN_Social_WrapExistingHealingSWEPs", function()
+    timer.Simple(0.1, function()
+        for _, ent in ipairs(ents.GetAll()) do AttachHealingTrust(ent) end
+    end)
 end)
