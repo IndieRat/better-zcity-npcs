@@ -152,7 +152,7 @@ local function PlayNPCPhrase(ent, kind, context, bypassCooldown)
     end
     ent.BZCNNextSocialPhraseAt = now + math.Clamp(duration > 0 and duration or 2.2, 1.4, 5.5)
     ent.BZCNLastSocialPhrase = soundPath
-    if context == "Yell" or context == "Panic" or context == "Scared" then
+    if context == "Yell" or context == "Panic" then
         hook.Run("BZCN_NPCYell", ent, context, soundPath)
     elseif context == "Help" or context == "YellForHelp" then
         hook.Run("BZCN_NPCYellForHelp", ent, context, soundPath)
