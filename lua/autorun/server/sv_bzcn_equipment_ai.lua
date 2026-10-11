@@ -1250,7 +1250,8 @@ hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
         if not istable(state) then continue end
         local target = state.target
         local weapon = state.weapon
-        local playerClass = string.lower(tostring(ply.PlayerClassName or ""))
+        local playerClass = string.lower(tostring(ply.PlayerClassName
+            or (isfunction(ply.GetPlayerClass) and ply:GetPlayerClass()) or ""))
         if not IsValid(target) or target:Health() <= 0 or IsFurryTarget(target)
             or not IsValid(weapon) or ply:GetActiveWeapon() ~= weapon
             or playerClass ~= "furry" then
