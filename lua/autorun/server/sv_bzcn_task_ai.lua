@@ -511,6 +511,34 @@ hook.Add("BZCN_NPCSpawned", "BZCN_TaskDirectorHome", function(ent)
     end
 end)
 
+hook.Add("BZCN_EntityDamaged", "BZCN_CombatProneResponse", function(victim, attacker, damageInfo)
+    if not IsManaged(victim) then return end
+    local kind = GetKind(victim)
+    if kind ~= "combine" and kind ~= "metrocop" and kind ~= "rebel" then return end
+    if victim:GetNW2Bool("BZCNNPCDowned", false)
+        or CurTime() < (victim.BZCNCombatProneCooldownAt or 0) then return end
+
+    local weaponClass = tostring(victim.BZCN_SelectedWeapon
+        or (victim.BZCNClassProfile and victim.BZCNClassProfile.WeaponClass) or "")
+    if weaponClass == "" or weaponClass == "weapon_hands_sh" then return end
+    if not isfunction(victim.FindSequence) then return end
+    local sequence = victim:FindSequence({
+        "prone_aim", "prone_aim_smg1", "prone", "crouch_aim",
+        "crouch_idle", "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"
+    })
+    if not isnumber(sequence) or sequence < 0 then return end
+
+    local chance = kind == "combine" and 0.2 or kind == "rebel" and 0.32 or 0.22
+    if math.Rand(0, 1) > chance then return end
+    victim.BZCNCombatProneSequence = sequence
+    victim.BZCNCombatProneUntil = CurTime() + math.Rand(1.4, 2.8)
+    victim.BZCNCombatProneCooldownAt = CurTime() + math.Rand(5.5, 9.0)
+    if victim.SetNW2Float then
+        victim:SetNW2Float("BZCNCombatProneUntil", victim.BZCNCombatProneUntil)
+    end
+    hook.Run("BZCN_NPCCombatProne", victim, attacker, kind)
+end)
+
 hook.Add("BZCN_EntityDamaged", "BZCN_MetroCopMoraleDamage", function(victim, attacker, damageInfo)
     if not IsManaged(victim) or GetKind(victim) ~= "metrocop" then return end
     if not IsValid(attacker) or attacker == victim then return end
