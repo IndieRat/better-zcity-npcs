@@ -45,7 +45,11 @@ local function RemoveRuntimeWeapon(ent, key)
     if key == "BZCNRuntimeWeapon" and IsValid(ent) and IsValid(weapon) then
         local inventory = GetInventory(ent)
         if istable(inventory.Weapons) and inventory.Weapons[weapon:GetClass()] == weapon then
-            inventory.Weapons[weapon:GetClass()] = true
+            -- Keep clip state and attachments when holstering a weapon. A
+            -- class-only 'true' entry would reset it to a full default clip.
+            local ok, info = false, nil
+            if isfunction(weapon.GetInfo) then ok, info = pcall(weapon.GetInfo, weapon) end
+            inventory.Weapons[weapon:GetClass()] = ok and istable(info) and info or true
             if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
         end
     end
