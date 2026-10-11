@@ -88,3 +88,16 @@ function TOOL:Reload(trace)
     BZCNRoads:RemoveNearest(trace.HitPos, ply)
     return true
 end
+
+if SERVER then
+    hook.Add("PlayerInitialSpawn", "BZCN_RoadNodeGraphSync", function(ply)
+        timer.Simple(3, function()
+            if IsValid(ply) and BZCNRoads then
+                local json = util.TableToJSON(BZCNRoads:Snapshot(), false) or "{}"
+                net.Start("BZCN_RoadNodes")
+                net.WriteString(json)
+                net.Send(ply)
+            end
+        end)
+    end)
+end
