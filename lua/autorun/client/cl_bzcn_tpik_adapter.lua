@@ -29,6 +29,22 @@ local function GetWeaponDefinition(ent)
     return weapons and weapons.GetStored and weapons.GetStored(class) or nil, class
 end
 
+local function IsHomigradWeaponClass(class)
+    local current, seen = class, {}
+    for _ = 1, 12 do
+        if not isstring(current) or current == "" or seen[current] then return false end
+        if current == "homigrad_base" or current == "weapon_tpik1_base" or current == "weapon_tpik_base" then
+            return true
+        end
+        seen[current] = true
+        local stored = weapons and weapons.GetStored and weapons.GetStored(current)
+        if not istable(stored) then return false end
+        if stored.ishgwep == true or stored.ishgweapon == true then return true end
+        current = stored.Base
+    end
+    return false
+end
+
 local function WantsGunTPIK(ent, class)
     if class == "" or class == "weapon_hands_sh"
         or class == "weapon_medkit_sh" or class == "weapon_bandage_sh" then
@@ -186,11 +202,12 @@ local function ApplyTPIK(ent)
     weapon.setrhik = weapon.rhandik
     weapon.setlhik = weapon.lhandik
 
-    -- Runtime SWEP instances are not active Player weapons, so Homigrad never
-    -- initializes their player-only hand target state for NextBots. Run the
-    -- weapon-specific setup with temporary compatibility flags, then provide
-    -- a generic two-hand target only when a required target is missing.
-    TryPlayerStyleHandSetup(ent, weapon, definition)
+    -- Don't fake Player identity for arbitrary third-party SWEPs. Only
+    -- Homigrad's player-style SetHandPos implementations are bridged this way.
+    ent.rhold, ent.lhold = nil, nil
+    if IsHomigradWeaponClass(class) then
+        TryPlayerStyleHandSetup(ent, weapon, definition)
+    end
 
     -- A one-handed weapon may intentionally disable the left hand; preserve
     -- its native choice but never leave the right-hand target stale or absent.
