@@ -231,6 +231,54 @@ function BZCN.EquipRuntimeWeapon(ent, class)
     return true
 end
 
+hook.Add("BZCN_InventorySet", "BZCN_RuntimeWeaponInventorySync", function(ent, inventory)
+    if not IsValid(ent) or not BZCN.IsManaged(ent) or not istable(inventory) then return end
+    local weapon = ent.BZCNRuntimeWeapon
+    if not IsValid(weapon) then return end
+
+    local activeClass = weapon:GetClass()
+    local owned = istable(inventory.Weapons) and inventory.Weapons[activeClass] ~= nil
+    local weaponOwner = weapon:GetOwner()
+    local transferred = IsValid(weaponOwner) and weaponOwner ~= ent
+    if owned and not transferred then return end
+
+    -- Z-City's TakeItem handler removes the item from ent.inventory and hands
+    -- the very same SWEP entity to the looter. Drop our runtime pointer without
+    -- deleting that weapon, then select a remaining entry in the NPC inventory.
+    ent.BZCNRuntimeWeapon = nil
+    ent.BZCNRuntimeWeaponClass = nil
+    if ent.SetNW2Entity then ent:SetNW2Entity("BZCNRuntimeWeapon", NULL) end
+    if not transferred and IsValid(weapon) then weapon:Remove() end
+
+    timer.Simple(0, function()
+        if not IsValid(ent) or not BZCN.IsManaged(ent) then return end
+        local current = GetInventory(ent)
+        local weaponsOwned = istable(current.Weapons) and current.Weapons or {}
+        local preferred = ent.BZCNClassProfile and ent.BZCNClassProfile.WeaponClass
+        local candidate
+        if isstring(preferred) and preferred ~= activeClass and weaponsOwned[preferred] ~= nil then
+            candidate = preferred
+        elseif weaponsOwned.weapon_hands_sh ~= nil then
+            candidate = "weapon_hands_sh"
+        else
+            for class, value in pairs(weaponsOwned) do
+                if class ~= activeClass and value ~= nil and isstring(class)
+                    and not MEDICAL_WEAPONS[class] and GetStored(class) then
+                    candidate = class
+                    break
+                end
+            end
+        end
+        if candidate and BZCN.SelectWeapon then
+            BZCN.SelectWeapon(ent, candidate)
+        else
+            ent.BZCN_SelectedWeapon = nil
+            if ent.SetNW2String then ent:SetNW2String("BZCNWeaponClass", "") end
+            if BZCN.HideHeldWeapon then BZCN.HideHeldWeapon(ent) end
+        end
+    end)
+end)
+
 local function GetDamageFromWeapon(weapon, profile, weaponClass)
     local stored = IsValid(weapon) and GetStored(weapon:GetClass()) or GetStored(weaponClass)
     local primary = IsValid(weapon) and istable(weapon.Primary) and weapon.Primary
