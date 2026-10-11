@@ -1846,18 +1846,53 @@ hook.Add("HomigradDamage", "BZCNNPCSupport_ZCityIncapacity", function(ent, damag
     if downReason then QueueZCityDowned(ent, downReason, hitReason ~= nil) end
 end)
 
-hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", function(ent)
+local function AttachManagedOrganism(ent)
+    if not IsValid(ent) or not IsSupportedNPC(ent) then return false end
+
+    local state = Support.Attach(ent)
+    if not state then return false end
+
+    -- Support.Attach installs the entity in hg.organism.list and marks its
+    -- organism fakePlayer=true, which is how Z-City runs native blood modules
+    -- for non-player bodies. Verify the registry now points at this exact table.
+    local organismAPI = hg and hg.organism
+    local organism = ent.organism
+    local registry = organismAPI and organismAPI.list
+    local registered = istable(organism) and organism.owner == ent
+        and organism.fakePlayer == true
+        and istable(registry) and registry[ent] == organism
+    if not registered then
+        -- Retry after class setup completes; OnEntityCreated can fire before
+        -- BZCNManaged / BZCNClassProfile exist on scripted NextBots.
+        return false
+    end
+
+    ent.BZCNNPCNativeBloodRegistered = true
+    return true
+end
+
+local function QueueManagedOrganismAttach(ent)
+    if not IsValid(ent) then return end
     timer.Simple(0, function()
-        if IsSupportedNPC(ent) then Support.Attach(ent) end
+        if not IsValid(ent) then return end
+        AttachManagedOrganism(ent)
     end)
-end)
+end
+
+hook.Add("OnEntityCreated", "BZCNNPCSupport_Attach", QueueManagedOrganismAttach)
+
+-- This is the reliable late path: class application marks the entity as
+-- managed, so organism registration cannot be lost to entity-creation timing.
+hook.Add("BZCN_NPCClassApplied", "BZCNNPCSupport_RegisterNativeOrganism", QueueManagedOrganismAttach)
+hook.Add("BZCN_NPCClassChanged", "BZCNNPCSupport_ReregisterNativeOrganism", QueueManagedOrganismAttach)
+hook.Add("BZCN_NPCSpawned", "BZCNNPCSupport_RegisterSpawnedOrganism", QueueManagedOrganismAttach)
 
 local InstallPhysicsShockCallback
 
 hook.Add("InitPostEntity", "BZCNNPCSupport_Existing", function()
     timer.Simple(0.1, function()
         for _, ent in ipairs(ents.GetAll()) do
-            if IsSupportedNPC(ent) then Support.Attach(ent) end
+            if IsSupportedNPC(ent) then AttachManagedOrganism(ent) end
             if IsValid(ent) then InstallPhysicsShockCallback(ent) end
         end
     end)
