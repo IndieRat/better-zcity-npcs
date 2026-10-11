@@ -249,7 +249,7 @@ function Actor.UpdateAim(attacker, target, weapon)
     if not isvector(velocity) then velocity = vector_origin end
 
     local leadTime = GetLeadTime(attacker, target, weapon, distance, ragdoll)
-    local lead = ClampVectorLength(velocity * leadTime, ragdoll and 42 or 96)
+    local lead = ClampVectorLength(velocity * leadTime, ragdoll and 24 or 96)
     local predicted = point + lead
     local direction = predicted - source
     if direction:LengthSqr() < 1 then direction = attacker:GetForward() end
