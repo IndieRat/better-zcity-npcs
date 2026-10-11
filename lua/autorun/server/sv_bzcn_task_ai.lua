@@ -238,6 +238,43 @@ local function FindDroppedWeapon(ent)
     return best
 end
 
+function Tasks.TryPickupAmmo(ent)
+    if not IsAvailable(ent) then return false end
+    local profile = ent.BZCNClassProfile or {}
+    if profile.CanScavengeWeapons ~= true then return false end
+
+    for _, item in ipairs(ents.FindInSphere(ent:GetPos(), 92)) do
+        if not IsValid(item) then continue end
+        local owner = item.GetOwner and item:GetOwner() or nil
+        if IsValid(owner) then continue end
+        local entry = AMMO_PICKUPS[item:GetClass()]
+        if not entry or not game or not game.GetAmmoID then continue end
+        local ammoName, amount = entry[1], entry[2]
+        local ammoID = game.GetAmmoID(ammoName)
+        if not isnumber(ammoID) or ammoID < 0 then continue end
+
+        local inventory = BZCN.GetNetVar and BZCN.GetNetVar(ent, "Inventory", {}) or ent.inventory or {}
+        inventory = istable(inventory) and inventory or {}
+        inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+        inventory.Items = istable(inventory.Items) and inventory.Items or {}
+        inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+        inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
+        local current = tonumber(inventory.Ammo[ammoID] or inventory.Ammo[tostring(ammoID)]) or 0
+        inventory.Ammo[ammoID] = math.Clamp(current + amount, 0, 999)
+        inventory.Ammo[tostring(ammoID)] = nil
+        if BZCN.SetNetVar then
+            BZCN.SetNetVar(ent, "Inventory", inventory)
+        else
+            ent.inventory, ent.Inventory = inventory, inventory
+        end
+        item:Remove()
+        ent:EmitSound("items/ammo_pickup.wav", 58, math.random(95, 105), 0.55)
+        hook.Run("BZCN_NPCAmmoScavenged", ent, ammoName, amount)
+        return true
+    end
+    return false
+end
+
 function Tasks.TryPickupWeapon(ent)
     if not IsAvailable(ent) then return false end
     local item = FindDroppedWeapon(ent)
