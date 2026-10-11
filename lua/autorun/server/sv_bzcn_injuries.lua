@@ -763,7 +763,11 @@ local function CanRecoverFromZCityOrganism(owner, state)
     -- Match Z-City's own fake-up restrictions. If physiology still says the
     -- body is unconscious, unable to move, critically blood-depleted, or fake-
     -- ragdolled, keep it down rather than looping up/down every tick.
-    if org.otrub or org.needotrub or org.fake or org.needfake then return false end
+    if org.otrub or org.needotrub or org.fake or org.needfake
+        or owner.otrub or owner.needotrub or owner.fake or owner.needfake
+        or owner.neednpcfake then
+        return false
+    end
     local thresholds = hg and hg.organism or {}
     if (tonumber(org.spine1) or 0) >= (tonumber(thresholds.fake_spine1) or math.huge)
         or (tonumber(org.spine2) or 0) >= (tonumber(thresholds.fake_spine2) or math.huge)
@@ -1073,6 +1077,12 @@ end
 
 Support.EnterDownedState = EnterDownedState
 Support.Recover = Recover
+Support.CanRecover = function(owner)
+    if not IsAlive(owner) then return false end
+    local state = owner.BZCNNPCOrg
+    return state ~= nil and state.downed == true
+        and CanRecoverFromZCityOrganism(owner, state)
+end
 
 InstallManagedTakeDamageInfoGuard = function(owner)
     if not IsValid(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return false end
