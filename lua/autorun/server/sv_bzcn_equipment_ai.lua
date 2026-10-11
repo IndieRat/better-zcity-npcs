@@ -868,9 +868,75 @@ timer.Create("BZCN_MedicalAI", 1, 0, function()
     end
 end)
 
--- NextBots don't receive Z-City's Player active-weapon Think/input loop.
--- Pump its native carry function every server frame while a furry grab is active.
--- This is what applies the force and advances the actual SWEP assimilation code.
+-- Z-City's SWEP ApplyForce calls hg.eye(owner), a Player-only helper.
+-- A NextBot has EyePos/GetAimVector but hg.eye() can return nil; solve the
+-- carry force here without calling that Player-oriented implementation.
+local function UpdateFurryCarryPhysics(owner, state)
+    local weapon = state and state.weapon
+    local rag = state and state.rag
+    if not IsValid(owner) or not IsValid(weapon) or not IsValid(rag)
+        or weapon.CarryEnt ~= rag then
+        return false
+    end
+
+    local eye = owner:EyePos()
+    local aim = owner:GetAimVector()
+    if not isvector(eye) or not isvector(aim) then return false end
+
+    local bone = math.max(math.floor(tonumber(weapon.CarryBone) or 0), 0)
+    local count = rag.GetPhysicsObjectCount and rag:GetPhysicsObjectCount() or 0
+    if count > 0 then bone = math.min(bone, count - 1) end
+    local phys = rag:GetPhysicsObjectNum(bone)
+    if not IsValid(phys) then return false end
+
+    local carryDistance = math.Clamp(tonumber(weapon.CarryDist) or 42, 24, 64)
+    local desired = eye + aim * carryDistance
+    local forcePosition = phys:GetPos()
+    if isvector(weapon.CarryPos) then
+        local ok, position = pcall(LocalToWorld, weapon.CarryPos, angle_zero, phys:GetPos(), phys:GetAngles())
+        if ok and isvector(position) then forcePosition = position end
+    end
+
+    local difference = desired - forcePosition
+    local distance = difference:Length()
+    if distance > 180 then return false end
+    local direction = distance > 0.001 and difference:GetNormalized() or vector_origin
+    local velocity = phys:GetVelocity()
+    local desiredForce = difference * 8 - velocity
+    local magnitude = math.min(desiredForce:Length(), 3000)
+        / math.max(velocity:Dot(direction) / 25, 1)
+    local force = desiredForce:LengthSqr() > 0.001
+        and desiredForce:GetNormalized() * magnitude or vector_origin
+
+    phys:Wake()
+    rag:SetPhysicsAttacker(owner, 15)
+    if isvector(weapon.CarryPos) then
+        phys:ApplyForceOffset(force, forcePosition)
+    else
+        phys:ApplyForceCenter(force)
+    end
+    phys:ApplyForceCenter(Vector(0, 0, phys:GetMass()))
+
+    -- Preserve native Z-City assimilation semantics while avoiding the invalid
+    -- hg.eye() vector addition in ApplyForce.
+    local organ = state.organism or rag.organism or state.target.organism
+    if istable(organ) and organ.alive ~= false and not IsFurryTarget(organ.owner or state.target) then
+        organ.assimilated = math.Approach(tonumber(organ.assimilated) or 0, 1, FrameTime() / 6)
+        organ.lightstun = CurTime() + 1
+        if isfunction(owner.SetLocalVar) then
+            pcall(owner.SetLocalVar, owner, "assimilation", organ.assimilated)
+        end
+        if owner.SetNW2Float then owner:SetNW2Float("BZCNAssimilation", organ.assimilated) end
+        if IsValid(organ.owner) and organ.owner.SetNW2Float then
+            organ.owner:SetNW2Float("BZCNAssimilation", organ.assimilated)
+        end
+        if IsValid(organ.owner) and organ.owner:IsPlayer() and hg and isfunction(hg.LightStunPlayer) then
+            pcall(hg.LightStunPlayer, organ.owner, 1)
+        end
+    end
+    return true
+end
+
 hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         local state = IsValid(ent) and ent.BZCNFurryGrab or nil
@@ -882,17 +948,17 @@ hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
             continue
         end
         ent.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, IN_ATTACK2)
-        if isfunction(weapon.ApplyForce) then
-            local ok, err = pcall(weapon.ApplyForce, weapon)
+        local ok, carried = pcall(UpdateFurryCarryPhysics, ent, state)
+        if not ok or carried ~= true then
             if not ok then
                 ErrorNoHalt("[BZCN] furry carry update failed for NPC #"
-                    .. tostring(ent:EntIndex()) .. ": " .. tostring(err) .. "\n")
-                BZCN.StopFurryAssimilation(ent)
+                    .. tostring(ent:EntIndex()) .. ": " .. tostring(carried) .. "\n")
             end
+            BZCN.StopFurryAssimilation(ent)
         end
     end
 end)
-
+hook.Add("EntityRemoved", "BZCN_CleanupRuntimeSWEPs"
 hook.Add("EntityRemoved", "BZCN_CleanupRuntimeSWEPs", function(ent)
     if not IsValid(ent) then return end
     RemoveRuntimeWeapon(ent, "BZCNRuntimeWeapon")

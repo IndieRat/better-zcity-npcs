@@ -135,6 +135,8 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "crawling"
     elseif not self:OnGround() then
         state = "airborne"
+    elseif self.BZCN_Sprinting and speed > 20 then
+        state = "sprinting"
     elseif speed > 150 then
         state = "running"
     elseif speed > 8 then
@@ -202,7 +204,13 @@ function ENT:GetBZCNMovementSequence(speed, state)
         -- citizen/Combine models. Use their run activity in air as the safe
         -- fallback, rather than dropping into BodyMoveXY mid-jump.
         activity = ACT_MP_RUN
-    elseif state == "running" then
+    elseif state == "running" or state == "sprinting" then
+        if state == "sprinting" then
+            local sprintSequence = GetFirstSequence(self, {
+                "sprint_all", "sprint", "run_all", "run_all_01", "run_unarmed"
+            })
+            if sprintSequence >= 0 then return sprintSequence end
+        end
         activity = ACT_MP_RUN
     elseif state == "walking" then
         activity = ACT_MP_WALK
@@ -413,12 +421,17 @@ function ENT:BodyUpdate()
             playbackRate = 0.58
         elseif state == "running" then
             playbackRate = 1.12
+        elseif state == "sprinting" then
+            playbackRate = 1.35
         end
-        if state == "walking" or state == "running" or state == "crawling" or state == "climbing" then
-            -- BodyMoveXY sets move_x/move_y and advances the sequence once.
-            -- Only override its speed for the slower injury-crawl animation.
+        if state == "walking" or state == "running" or state == "sprinting"
+            or state == "crawling" or state == "climbing" then
+            -- BodyMoveXY updates pose params; apply run/sprint playback after it
+            -- so a sprint visibly moves faster than an ordinary run.
             self:BodyMoveXY()
-            if state == "crawling" then self:SetPlaybackRate(playbackRate) end
+            if state == "crawling" or state == "running" or state == "sprinting" then
+                self:SetPlaybackRate(playbackRate)
+            end
         else
             self:SetPlaybackRate(playbackRate)
             self:FrameAdvance()

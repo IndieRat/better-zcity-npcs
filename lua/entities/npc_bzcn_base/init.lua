@@ -20,6 +20,42 @@ local function HasSenseRecord(self, target, requireHostile)
     return false
 end
 
+local function UpdatePursuitStamina(self, wantsSprint)
+    local now = CurTime()
+    local last = tonumber(self.BZCNStaminaUpdatedAt) or now
+    local dt = math.Clamp(now - last, 0, 0.2)
+    self.BZCNStaminaUpdatedAt = now
+
+    local profile = self.BZCNClassProfile or {}
+    local stamina = math.Clamp(tonumber(self.BZCNStamina) or 100, 0, 100)
+    local support = hg and hg.BZCNNPCSupport
+    local crawling = support and isfunction(support.ShouldCrawl) and support.ShouldCrawl(self)
+    local disabled = crawling or self:GetNW2Bool("BZCNNPCDowned", false)
+        or now < (self.BZCNMedicalUntil or 0) or istable(self.BZCNFurryGrab)
+
+    wantsSprint = wantsSprint == true and not disabled
+    local exhaustedUntil = tonumber(self.BZCNStaminaExhaustedUntil) or 0
+    local alreadySprinting = self.BZCN_Sprinting == true
+    local canStart = now >= exhaustedUntil and stamina >= (tonumber(profile.SprintResumeStamina) or 30)
+    local sprinting = wantsSprint and stamina > 0 and (alreadySprinting or canStart)
+
+    if sprinting then
+        stamina = math.max(stamina - (tonumber(profile.SprintStaminaDrain) or 24) * dt, 0)
+        if stamina <= 0 then
+            sprinting = false
+            self.BZCNStaminaExhaustedUntil = now + (tonumber(profile.SprintExhaustionPause) or 1.5)
+        end
+    else
+        stamina = math.min(stamina + (wantsSprint and 9 or (tonumber(profile.SprintStaminaRecovery) or 18)) * dt, 100)
+    end
+
+    self.BZCNStamina = stamina
+    self.BZCN_Sprinting = sprinting
+    if self.SetNW2Bool then self:SetNW2Bool("BZCNSprinting", sprinting) end
+    if self.SetNW2Float then self:SetNW2Float("BZCNStamina", stamina) end
+    return sprinting, stamina
+end
+
 function ENT:Initialize()
     local className = self.BZCNClass or "default"
     local profile = BZCN.GetClass(className) or GetProfile(self)
@@ -35,6 +71,11 @@ function ENT:Initialize()
     self.LoseTargetDist = profile.SenseRange or profile.WeaponRange or 1400
     self.LastAttack = 0
     self.BZCNCurrentSequence = -1
+    self.BZCNStamina = 100
+    self.BZCNStaminaUpdatedAt = CurTime()
+    self.BZCNStaminaExhaustedUntil = 0
+    self.BZCN_Sprinting = false
+    if self.SetNW2Float then self:SetNW2Float("BZCNStamina", 100) end
     self:SetCollisionGroup(COLLISION_GROUP_NPC)
     if self.SetUseType then self:SetUseType(SIMPLE_USE) end
 
@@ -435,6 +476,7 @@ function ENT:FollowAlly(target)
             continue
         end
 
+        UpdatePursuitStamina(self, false)
         if IsValid(self:FindEnemy()) then return end
         local distanceSquared = self:GetPos():DistToSqr(target:GetPos())
         if distanceSquared > (tonumber(profile.FollowRange) or 900)^2 then return end
@@ -689,7 +731,19 @@ function ENT:ChaseEnemy(target)
         local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
             and hg.BZCNNPCSupport.ShouldCrawl(self)
         local profile = self:GetBZCNProfile()
-        self.loco:SetDesiredSpeed((self:GetRunSpeed() or profile.Speed or self.MoveSpeed or 175) * (crawling and 0.42 or 1))
+        local baseSpeed = self:GetRunSpeed() or profile.Speed or self.MoveSpeed or 175
+        local distance = self:GetPos():Distance(target:GetPos())
+        local sprintStart = tonumber(profile.SprintStartRange) or 275
+        local sprinting, stamina = UpdatePursuitStamina(self, distance > sprintStart and not crawling)
+        local desiredSpeed = baseSpeed
+        if crawling then
+            desiredSpeed = baseSpeed * 0.42
+        elseif sprinting then
+            desiredSpeed = baseSpeed * (tonumber(profile.SprintSpeedMultiplier) or 1.45)
+        elseif distance > sprintStart and stamina <= 8 then
+            desiredSpeed = baseSpeed * 0.78
+        end
+        self.loco:SetDesiredSpeed(desiredSpeed)
         path:Update(self)
         if self:GetPos():DistToSqr(target:GetPos()) < (profile.WeaponRange or 900)^2 then
             self:AttackTarget(target)
@@ -704,25 +758,58 @@ function ENT:ChaseEnemy(target)
 end
 
 function ENT:Wander()
-    if not self.loco then coroutine.wait(1) return end
+    if not self.loco then coroutine.wait(0.2) return end
     if CurTime() < (self.BZCNMedicalUntil or 0) then
         self.loco:SetDesiredSpeed(0)
+        UpdatePursuitStamina(self, false)
         coroutine.wait(0.1)
         return
     end
+
     local areas = navmesh.GetAllNavAreas()
     local destination
     if #areas > 0 then
         local area = areas[math.random(1, #areas)]
         if IsValid(area) then destination = area:GetRandomPoint() end
     end
-    if not destination then destination = self:GetPos() + Vector(math.Rand(-1, 1), math.Rand(-1, 1), 0) * 350 end
-    local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
-        and hg.BZCNNPCSupport.ShouldCrawl(self)
-    local profile = self:GetBZCNProfile()
-    self.loco:SetDesiredSpeed((self:GetRunSpeed() or profile.Speed or 175) * (crawling and 0.42 or 0.68))
-    self:MoveToPos(destination, {tolerance = 60})
-    coroutine.wait(0.35)
+    if not destination then
+        destination = self:GetPos() + Vector(math.Rand(-1, 1), math.Rand(-1, 1), 0) * 350
+    end
+
+    local path = Path("Follow")
+    path:SetMinLookAheadDistance(125)
+    path:SetGoalTolerance(60)
+    path:Compute(self, destination)
+    if not path:IsValid() then
+        UpdatePursuitStamina(self, false)
+        coroutine.wait(0.1)
+        return
+    end
+
+    -- Unlike MoveToPos, this loop yields and checks for newly visible hostiles.
+    -- The NPC reacts on the next adapter sense cycle instead of completing a
+    -- potentially long wander path before it is allowed to search again.
+    local stopAt = CurTime() + 5
+    while path:IsValid() and CurTime() < stopAt do
+        if self:GetNW2Bool("BZCNNPCDowned", false)
+            or CurTime() < (self.BZCNMedicalUntil or 0) then
+            self.loco:SetDesiredSpeed(0)
+            UpdatePursuitStamina(self, false)
+            return
+        end
+        UpdatePursuitStamina(self, false)
+        if IsValid(self:FindEnemy()) then return end
+
+        if self:GetPos():DistToSqr(destination) <= 60 * 60 then break end
+        if path:GetAge() > 0.35 then path:Compute(self, destination) end
+        if path:IsValid() then path:Update(self) end
+        if self.loco:IsStuck() then
+            self.loco:ClearStuck()
+            if not (self.TryBZCNClimb and self:TryBZCNClimb()) then self.loco:Jump() end
+            return
+        end
+        coroutine.wait(0.1)
+    end
 end
 
 function ENT:RunBehaviour()

@@ -733,14 +733,19 @@ local function Recover(owner, rag, removedExternally)
 
     local getUp = -1
     local getUpName
+    -- Prefer model-specific get-up clips. The zombie slump-rise animation
+    -- tends to transition these player models straight back into idle.
     for _, name in ipairs({
-        "zombie_slump_rise_01",
-        "getup",
-        "get_up",
         "getup_from_back",
         "getup_from_front",
-        "stand",
-        "idle"
+        "getup_from_ground",
+        "getup",
+        "get_up",
+        "getup_from_prone",
+        "stand_up",
+        "standup",
+        "wake_up",
+        "wake"
     }) do
         local sequence = owner:LookupSequence(name)
         if sequence and sequence >= 0 then
@@ -750,7 +755,7 @@ local function Recover(owner, rag, removedExternally)
         end
     end
 
-    state.gettingUp = getUp >= 0 and getUpName ~= "idle"
+    state.gettingUp = getUp >= 0
     if getUp >= 0 then
         owner:ResetSequence(getUp)
         owner:SetCycle(0)
