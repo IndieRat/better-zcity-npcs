@@ -900,6 +900,23 @@ function BZCN.StopFurryAssimilation(owner, restoreTarget)
                 healthState.crawling = state.previousCrawling
             end
         end
+        -- Recover may legitimately defer while the organism is still stunned
+        -- or injured. Retry after the grab lock is cleared instead of leaving
+        -- a released victim dependent on another AI event to request recovery.
+        if state.forcedDowned then
+            local retryDelays = {0.25, 0.9, 2.0}
+            for _, delay in ipairs(retryDelays) do
+                timer.Simple(delay, function()
+                    if not IsValid(target) or target:Health() <= 0
+                        or not target:GetNW2Bool("BZCNNPCDowned", false)
+                        or target.BZCNFurryConversionPending then return end
+                    local currentSupport = hg and hg.BZCNNPCSupport
+                    if currentSupport and isfunction(currentSupport.Recover) then
+                        pcall(currentSupport.Recover, target, state.rag, false)
+                    end
+                end)
+            end
+        end
     end
 end
 
