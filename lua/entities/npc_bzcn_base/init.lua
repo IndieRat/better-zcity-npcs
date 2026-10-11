@@ -816,10 +816,12 @@ function ENT:AttackTarget(target)
         local weapon = self.BZCNRuntimeWeapon
         local fireReady = not (BZCNCombatActor and BZCNCombatActor.CanFire)
             or BZCNCombatActor.CanFire(self, weapon)
+        -- Refresh the aim every combat tick, not only when the gun can
+        -- fire. Cooldown frames still need a valid NW2 aim angle for client TPIK.
+        if BZCNCombatActor and BZCNCombatActor.UpdateAim then
+            BZCNCombatActor.UpdateAim(self, target, weapon)
+        end
         if fireReady then
-            if BZCNCombatActor and BZCNCombatActor.UpdateAim then
-                BZCNCombatActor.UpdateAim(self, target, weapon)
-            end
             self:PlayBZCNAttackAnimation()
         end
 
