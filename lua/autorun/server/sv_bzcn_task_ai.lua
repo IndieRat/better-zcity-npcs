@@ -388,6 +388,21 @@ hook.Add("BZCN_EntityDamaged", "BZCN_MetroCopMoraleDamage", function(victim, att
     hook.Run("BZCN_MetroCopMoraleChanged", victim, victim.BZCNMorale, -loss, "injured")
 end)
 
+timer.Create("BZCN_MetroCopMoraleRecovery", 2, 0, function()
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not IsManaged(ent) or GetKind(ent) ~= "metrocop" then continue end
+        if CurTime() - (tonumber(ent.BZCNLastDamageTime) or 0) < 8 then continue end
+        local enemy = ent.BZCNEnemy
+        if IsValid(enemy) and ent.IsBZCNEnemy and ent:IsBZCNEnemy(enemy) then continue end
+        local morale = math.Clamp((tonumber(ent.BZCNMorale) or 100) + 2, 0, 100)
+        if morale ~= ent.BZCNMorale then
+            ent.BZCNMorale = morale
+            if ent.SetNW2Float then ent:SetNW2Float("BZCNMorale", morale) end
+            hook.Run("BZCN_MetroCopMoraleChanged", ent, morale, 2, "recovered")
+        end
+    end
+end)
+
 hook.Add("BZCN_NPCKilled", "BZCN_MetroCopAllyCasualtyMorale", function(victim)
     if not IsValid(victim) then return end
     local deadKind = GetKind(victim)
