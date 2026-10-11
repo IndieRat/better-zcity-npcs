@@ -182,6 +182,36 @@ hook.Add("PlayerUse", "BZCN_CompanionInteraction", function(ply, ent)
     return false
 end)
 
+-- Crouch + use asks an ordinary NPC to sit for a while. Companion owners
+-- can also use this; their assigned follow/hold logic remains available by
+-- tapping use again while standing.
+hook.Add("PlayerUse", "BZCN_CrouchUseSit", function(ply, ent)
+    if not IsValid(ply) or not ply:IsPlayer() or not ply:Crouching()
+        or not Managed(ent) or Profile(ent).Companion then return end
+    if ply:GetPos():DistToSqr(ent:GetPos()) > 150 * 150 then return end
+
+    local existing = tonumber(ent.BZCNSittingUntil) or 0
+    if existing > CurTime() then
+        ent.BZCNSittingUntil = 0
+        ent.BZCNSitSequence = nil
+        if ent.SetNW2Float then ent:SetNW2Float("BZCNSittingUntil", 0) end
+        hook.Run("BZCN_NPCSittingCommand", ply, ent, false)
+        return false
+    end
+
+    local sequence = ent:FindSequence({
+        "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
+        "sit_idle", "sit", "sitting", "idle_sit"
+    })
+    if not isnumber(sequence) or sequence < 0 then return end
+    ent.BZCNSitSequence = sequence
+    ent.BZCNSittingUntil = CurTime() + 18
+    if ent.SetNW2Float then ent:SetNW2Float("BZCNSittingUntil", ent.BZCNSittingUntil) end
+    if ent.loco then ent.loco:SetDesiredSpeed(0); ent.loco:FaceTowards(ply:GetPos()) end
+    hook.Run("BZCN_NPCSittingCommand", ply, ent, true)
+    return false
+end)
+
 local function ActiveAmmoInfo(ply)
     if not IsValid(ply) then return nil end
     local weapon = ply:GetActiveWeapon()
