@@ -719,7 +719,9 @@ function ENT:AttackTarget(target)
 
     if not self:IsBZCNEnemy(target) or not HasSenseRecord(self, target, true)
         or CurTime() < (self.BZCNMedicalUntil or 0) then return end
-    local distance = self:GetPos():Distance(target:GetPos())
+    local aimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+        and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+    local distance = self:WorldSpaceCenter():Distance(aimPoint)
 
     if profile.FurryStyle and BZCN and isfunction(BZCN.TryFurryAssimilation)
         and distance <= (tonumber(profile.FurryGrabRange) or 86)
@@ -738,7 +740,10 @@ function ENT:AttackTarget(target)
     local ranged = profile.Ranged == true and not meleeOnlyWeapon
         and distance <= (tonumber(profile.WeaponRange) or 1100)
     if ranged then
-        self.LastAttack = now + (profile.AttackDelay or 0.3)
+        local retryDelay = BZCNCombatActor and BZCNCombatActor.GetFireDelay
+            and BZCNCombatActor.GetFireDelay(self, self.BZCNRuntimeWeapon)
+            or math.max(tonumber(profile.AttackDelay) or 0.3, 0.06)
+        self.LastAttack = now + math.min(retryDelay, 0.10)
         self:PlayBZCNAttackAnimation()
 
         -- The equipment adapter fires engine bullets from the selected SWEP's
@@ -751,7 +756,8 @@ function ENT:AttackTarget(target)
         end
 
         local source = self:WorldSpaceCenter() + Vector(0, 0, 8)
-        local destination = target:WorldSpaceCenter()
+        local destination = (BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+        and BZCNCombatActor.GetTargetAimPoint(target)) or target:WorldSpaceCenter()
         local trace = util.TraceLine({start = source, endpos = destination, filter = {self}, mask = MASK_SHOT})
         self:EmitSound(profile.FireSound or "Weapon_SMG1.Single", 72, math.random(95, 105), 0.7)
         if trace.Hit and trace.Entity == target then
@@ -836,7 +842,8 @@ function ENT:ChaseEnemy(target)
     path:SetMinLookAheadDistance(250)
     path:SetGoalTolerance(45)
 
-    local lastSeenPos = target:GetPos()
+    local lastSeenPos = ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos())
     local lastSeenAt = CurTime()
     local pathGoal
     local nextPathCompute = 0
@@ -853,7 +860,8 @@ function ENT:ChaseEnemy(target)
         local now = CurTime()
         local visible = HasSenseRecord(self, target, true)
         if visible or impulseTracking then
-            lastSeenPos = target:GetPos()
+            lastSeenPos = ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos())
             lastSeenAt = now
             self.BZCNEnemyMemory = {
                 Entity = target,
@@ -871,7 +879,8 @@ function ENT:ChaseEnemy(target)
             end
         end
 
-        local goalPos = (visible or impulseTracking) and target:GetPos() or lastSeenPos
+        local goalPos = (visible or impulseTracking) and ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos()) or lastSeenPos
         local loseDistance = tonumber(self.LoseTargetDist) or 1400
         if not impulseTracking and self:GetPos():DistToSqr(goalPos) > loseDistance * loseDistance then return end
         if not visible and not impulseTracking
@@ -926,7 +935,8 @@ function ENT:ChaseEnemy(target)
             desiredSpeed = baseSpeed * 0.78
         end
 
-        local actualDistance = visible and self:GetPos():Distance(target:GetPos()) or math.huge
+        local actualDistance = visible and self:GetPos():Distance(((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos())) or math.huge
         local engageDistance = 32
         if hasRangedWeapon then
             engageDistance = math.Clamp((tonumber(profile.WeaponRange) or 900) * 0.35, 220, 360)
@@ -938,7 +948,8 @@ function ENT:ChaseEnemy(target)
         -- the same position as the target. Face the enemy while attacking.
         if visible and actualDistance <= engageDistance then
             self.loco:SetDesiredSpeed(0)
-            self.loco:FaceTowards(target:WorldSpaceCenter())
+            self.loco:FaceTowards(((BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+            and BZCNCombatActor.GetTargetAimPoint(target)) or target:WorldSpaceCenter()))
             self.BZCNEnemy = target
             self:AttackTarget(target)
             coroutine.wait(0.1)
@@ -966,10 +977,12 @@ function ENT:ChaseEnemy(target)
         else
             self.loco:Approach(goalPos, 1)
         end
-        self.loco:FaceTowards(visible and target:GetPos() or goalPos)
+        self.loco:FaceTowards(visible and ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos()) or goalPos)
 
         local range = tonumber(profile.WeaponRange) or 900
-        if visible and self:GetPos():DistToSqr(target:GetPos()) <= range * range then
+        if visible and self:GetPos():DistToSqr(((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos())) <= range * range then
             self.BZCNEnemy = target
             self:AttackTarget(target)
         end
