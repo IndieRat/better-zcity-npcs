@@ -129,8 +129,6 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "grabbing"
     elseif CurTime() < (self.BZCNMedicalUntil or 0) then
         state = "treating"
-    elseif CurTime() < (self.BZCNSittingUntil or 0) and self:OnGround() then
-        state = "sitting"
     elseif CurTime() < (self.BZCNClimbUntil or 0) then
         state = "climbing"
     elseif support and support.ShouldCrawl and support.ShouldCrawl(self) then
@@ -160,7 +158,6 @@ end
 
 function ENT:GetBZCNMovementSequence(speed, state)
     local namedFallbacks = {
-        sitting = {"sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle", "sit_idle", "sit", "sitting", "idle_sit"},
         combat_prone = {"prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle", "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"},
         crawling = {"crawl_all", "crawl_all_01", "crawl_forward", "crawl_loop", "crawl_prone", "crawl", "zombie_crawl", "crawl_idle"},
         climbing = {"climb_up", "climb_ladder", "ladder_climb", "climb"},
@@ -216,17 +213,6 @@ function ENT:GetBZCNMovementSequence(speed, state)
             if ok and isnumber(selected) and selected >= 0 then return selected end
         end
         state = "running"
-    elseif state == "sitting" then
-        local sequence = self.BZCNSitSequence
-        if not isnumber(sequence) or sequence < 0 then
-            sequence = GetFirstSequence(self, {
-                "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
-                "sit_idle", "sit", "sitting", "idle_sit"
-            })
-            self.BZCNSitSequence = sequence
-        end
-        if sequence >= 0 then return sequence end
-        state = "standing"
     elseif state == "combat_prone" then
         local sequence = GetFirstSequence(self, {
             "prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle",
@@ -398,25 +384,6 @@ function ENT:BodyUpdate()
                 "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"
             })
             self.BZCNCombatProneSequence = sequence
-        end
-        if sequence >= 0 and self:GetSequence() ~= sequence then
-            self:ResetSequence(sequence)
-            self:SetCycle(0)
-        end
-        self:SetPlaybackRate(1)
-        self:FrameAdvance()
-        return
-    end
-
-    if state == "sitting" then
-        if self.loco then self.loco:SetDesiredSpeed(0) end
-        local sequence = self.BZCNSitSequence
-        if not isnumber(sequence) or sequence < 0 then
-            sequence = GetFirstSequence(self, {
-                "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
-                "sit_idle", "sit", "sitting", "idle_sit"
-            })
-            self.BZCNSitSequence = sequence
         end
         if sequence >= 0 and self:GetSequence() ~= sequence then
             self:ResetSequence(sequence)
