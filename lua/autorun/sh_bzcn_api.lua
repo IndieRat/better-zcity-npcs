@@ -829,12 +829,14 @@ if SERVER then
         end
         if not isvector(handPos) or not isangle(handAng) then return false end
 
-        -- Mirror Homigrad's own WorldModel_Transform world-position and angle
-        -- offsets, including its final 180-degree forward-axis rotation. The
-        -- regular Homigrad transform returns early for NPC owners, so the
-        -- lightweight BZCN proxy has to do this work explicitly.
+        -- Match Homigrad's NPC transform branch. Its player/fake-ragdoll
+        -- branch adds a 180-degree correction, but its NPC branch deliberately
+        -- adds zero; applying the player correction here is the observed roll bug.
         local pos, ang = LocalToWorld(worldPos, worldAng, handPos, handAng)
-        ang:RotateAroundAxis(ang:Forward(), 180)
+        local npcOwner = ent.IsNPC and ent:IsNPC()
+        if not npcOwner then
+            ang:RotateAroundAxis(ang:Forward(), 180)
+        end
         proxy:SetPos(pos)
         proxy:SetAngles(ang)
         return true
