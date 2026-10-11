@@ -1244,6 +1244,18 @@ function ENT:ChaseEnemy(target)
     while IsValid(target) and self:IsBZCNEnemy(target) do
         local now = CurTime()
         local visible = HasSenseRecord(self, target, true)
+
+        -- Preserve the launch velocity until the pounce contacts its target or
+        -- expires; normal Follow-path steering must not cancel the leap.
+        if istable(self.BZCNNPCPounce) then
+            local pounce = self.BZCNNPCPounce
+            if IsValid(pounce.target) and now <= (pounce.expires or 0) then
+                self.loco:SetDesiredSpeed(0)
+                coroutine.wait(0.05)
+                continue
+            end
+            self.BZCNNPCPounce = nil
+        end
         if visible or impulseTracking then
             lastSeenPos = ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
             and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos())
@@ -1311,7 +1323,6 @@ function ENT:ChaseEnemy(target)
             local support = hg and hg.BZCNNPCSupport
             if support and isfunction(support.TryFurryPounce)
                 and support.TryFurryPounce(self, target) then
-                self.BZCNNextPounceAt = now + 0.5
                 coroutine.wait(0.05)
                 continue
             end
