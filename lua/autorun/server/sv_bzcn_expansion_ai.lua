@@ -675,6 +675,33 @@ hook.Add("BZCN_NPCInjured", "BZCN_InjuryYellAndHelp", function(victim, damageInf
     end
 end)
 
+-- A small fraction of genuinely well-intentioned MetroCops mistake a
+-- civilian for a threat during a chaotic fight. When one does crossfire a
+-- civilian, it may apologize through its behavior and attempt first aid.
+hook.Add("BZCN_EntityDamaged", "BZCN_GoodCopCrossfireAid", function(victim, attacker, damageInfo)
+    if not Managed(attacker) or LineKind(attacker) ~= "metrocop" then return end
+    if (attacker.BZCNCopMood or (attacker.GetNW2String and attacker:GetNW2String("BZCNCopMood", ""))) ~= "good" then return end
+    if not IsValid(victim) or victim == attacker or victim:Health() <= 0 then return end
+
+    local faction = isfunction(attacker.GetBZCNEntityFaction)
+        and attacker:GetBZCNEntityFaction(victim) or nil
+    local targetClass = string.lower(tostring(victim.PlayerClassName
+        or (victim.GetNW2String and victim:GetNW2String("PlayerClassName", "")) or ""))
+    local civilian = faction == "default" or faction == "civilian" or targetClass == "default"
+    if not civilian or math.random(1, 100) > 28 then return end
+
+    local forgiveness = CurTime() + 40
+    victim.BZCNAccidentalCrossfireUntil = forgiveness
+    attacker.BZCNBefriendedPlayers = attacker.BZCNBefriendedPlayers
+        or setmetatable({}, {__mode = "k"})
+    attacker.BZCNBefriendedPlayers[victim] = forgiveness
+    attacker.BZCNHelpTarget = victim
+    attacker.BZCNHelpUntil = forgiveness
+    attacker.BZCNNextMedicalUse = CurTime()
+    if attacker.SetNW2Entity then attacker:SetNW2Entity("BZCNHelpTarget", victim) end
+    hook.Run("BZCN_GoodCopCrossfireApology", attacker, victim, damageInfo)
+end)
+
 local function GiveItemIfMissing(ply, class)
     if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive()
         or not weapons or not weapons.GetStored or not weapons.GetStored(class) then return false end
