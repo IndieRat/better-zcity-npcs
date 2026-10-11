@@ -643,8 +643,16 @@ hook.Add("BZCN_NPCYell", "BZCN_PanicPropagation", function(source, context)
     if not Managed(source) then return end
     local threat = source.BZCNLastAttacker
     if not IsValid(threat) then threat = source.BZCNEnemy end
-    BeginPanic(source, threat, 5)
+    local sourceKind = LineKind(source)
+
+    -- Combine and Rebel doctrine does not become frightened just because the
+    -- unit shouts. Their voice line still warns nearby civilians/furries, but
+    -- only civilian, furry and morale-driven MetroCop sources enter flee state.
+    if sourceKind ~= "combine" and sourceKind ~= "rebel" then
+        BeginPanic(source, threat, 5)
+    end
     Companion.Say(source, "panic")
+
     for _, other in ipairs(ents.FindInSphere(source:GetPos(), 720)) do
         if other == source or not Managed(other) then continue end
         local kind = LineKind(other)
