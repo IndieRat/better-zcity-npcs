@@ -99,6 +99,20 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
             weapon.BZCNNativePrimaryAttack = weapon.PrimaryAttack
             local nativeFireBullet = weapon.FireBullet
             weapon.BZCNNativeFireBullet = nativeFireBullet
+            local nativeGetTrace = weapon.GetTrace
+            if isfunction(nativeGetTrace) then
+                weapon.BZCNNativeGetTrace = nativeGetTrace
+                weapon.GetTrace = function(self, ...)
+                    local trace, pos, ang, extra = nativeGetTrace(self, ...)
+                    local weaponOwner = self:GetOwner()
+                    local solution = self.BZCNCombatAimSolution
+                        or (IsValid(weaponOwner) and weaponOwner.BZCNCombatAimSolution)
+                    if solution and isangle(solution.angle) and isvector(pos) then
+                        return trace, pos, solution.angle, extra
+                    end
+                    return trace, pos, ang, extra
+                end
+            end
             weapon.FireBullet = function(self, ...)
                 self.BZCNNativeFireWasCalled = true
                 local ok, a, b, c, d = pcall(nativeFireBullet, self, ...)
@@ -333,9 +347,9 @@ function BZCN.FireRuntimeWeapon(ent, target)
     local nativeHandled = false
 
     if weapon.BZCNNativeHomigradFire and isfunction(weapon.BZCNNativePrimaryAttack) then
-        if BZCNCombatActor and BZCNCombatActor.UpdateAim then
-            BZCNCombatActor.UpdateAim(ent, target, weapon)
-        end
+        local solution = BZCNCombatActor and BZCNCombatActor.UpdateAim
+            and BZCNCombatActor.UpdateAim(ent, target, weapon) or nil
+        weapon.BZCNCombatAimSolution = solution
         weapon.BZCNNativeFireWasCalled = false
         weapon.BZCNNativeFireSucceeded = false
         weapon.BZCNNativeFireError = nil
@@ -383,6 +397,8 @@ function BZCN.FireRuntimeWeapon(ent, target)
 
     ent.BZCN_SimulatedButtons = 0
     ent.BZCNCombatTarget = nil
+    weapon.BZCNCombatAimSolution = nil
+    if BZCNCombatActor and BZCNCombatActor.ClearAim then BZCNCombatActor.ClearAim(ent) end
     return fired or nativeHandled
 end
 
