@@ -381,6 +381,14 @@ end
 
 function BZCN.FireRuntimeWeapon(ent, target)
     if not IsValid(ent) or not IsValid(target) or not BZCN.IsManaged(ent) then return false end
+    if BZCNCombatActor and BZCNCombatActor.IsIncapacitated
+        and BZCNCombatActor.IsIncapacitated(target) then
+        -- Claim the attack cycle but deliberately emit no bullet. Returning
+        -- false would let the stat-based fallback shoot the same downed target.
+        ent.BZCNCombatTarget = nil
+        ent.BZCN_SimulatedButtons = 0
+        return true
+    end
     local profile = ent.BZCNClassProfile or {}
     local class = ent.BZCN_SelectedWeapon or profile.WeaponClass
     if not isstring(class) or class == "" or MEDICAL_WEAPONS[class] then return false end
