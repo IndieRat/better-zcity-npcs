@@ -676,15 +676,27 @@ end
 local function NeedsMedicalAttention(target)
     if not IsValid(target) or target:Health() <= 0 then return false, 0 end
     local org = target.organism or target.BZCN_Organism
-    if not istable(org) then return false, 0 end
+    local hasOrganism = istable(org)
+    if not hasOrganism then org = {} end
 
     local wounds = WoundCount(org.wounds) + WoundCount(org.arterialwounds)
     local blood = tonumber(org.blood) or 5000
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
     local shock = tonumber(org.shock) or 0
     local pain = tonumber(org.pain) or 0
-    local recentlyHurt = CurTime() - (tonumber(target.BZCNLastDamageTime) or 0) < 8
-    local lowHealth = target:Health() < math.max(tonumber(target:GetMaxHealth()) or 100, 100) * 0.7
+    local recentlyHurt = CurTime() - (tonumber(target.BZCNLastDamageTime) or 0) < 12
+    local maxHealth = math.max(tonumber(target:GetMaxHealth()) or 100, 100)
+    local healthFraction = math.Clamp(target:Health() / maxHealth, 0, 1)
+    local lowHealth = target:Health() < maxHealth * 0.7
+
+    -- Native NPCs outside the organism system still need basic first aid when
+    -- they have taken recent damage and lost meaningful health.
+    if not hasOrganism then
+        if lowHealth and recentlyHurt then
+            return true, 4 + (1 - healthFraction) * 8
+        end
+        return false, 0
+    end
 
     local urgent = (internalBleed > 0) or blood < 4200 or wounds > 0
         or (shock > 80 and recentlyHurt) or (lowHealth and recentlyHurt)
@@ -747,30 +759,48 @@ local function UseMedicalItem(healer, target, class)
         and med.modeValues[2] > 0 then
         actions[#actions + 1] = 2
     end
-    if #actions == 0 then return false end
 
     local applied = false
-    for _, mode in ipairs(actions) do
-        if not IsValid(med) then break end
-        med.mode = mode
-        local fn = med.Heal
-        if isfunction(fn) then
-            -- Third-party SWEP hooks can leave a malformed scalar behind;
-            -- normalise immediately before every medicine operation.
-            if not istable(med.modeValues) then
-                med.modeValues = {[1] = 80, [2] = 1, [3] = 10, [4] = 1, [5] = 1}
+    local targetOrg = target.organism or target.BZCN_Organism
+    if not istable(targetOrg) then
+        -- Fallback first aid for ordinary Source NPCs that have no Z-City
+        -- organism table: improve their engine health instead of trying to run
+        -- the organism-only medkit implementation on an empty table.
+        local currentHealth = math.max(tonumber(target:Health()) or 0, 0)
+        local maxHealth = math.max(tonumber(target:GetMaxHealth()) or 100, 1)
+        local healAmount = hasMedkit and 24 or 12
+        local newHealth = math.min(maxHealth, currentHealth + healAmount)
+        if newHealth > currentHealth then
+            target:SetHealth(newHealth)
+            if istable(med.modeValues) then
+                med.modeValues[1] = math.max((tonumber(med.modeValues[1]) or 0) - 8, 0)
             end
-            local beforeSupply = tonumber(med.modeValues[mode]) or 0
-            local beforeAnalgesia = tonumber(org.analgesiaAdd) or 0
-            local beforeInternalHeal = tonumber(org.internalBleedHeal) or 0
-            local ok = pcall(fn, med, target, mode)
-            if ok then
-                local afterSupply = tonumber(med.modeValues and med.modeValues[mode]) or beforeSupply
-                local afterAnalgesia = tonumber(org.analgesiaAdd) or beforeAnalgesia
-                local afterInternalHeal = tonumber(org.internalBleedHeal) or beforeInternalHeal
-                if afterSupply < beforeSupply or afterAnalgesia > beforeAnalgesia
-                    or afterInternalHeal > beforeInternalHeal or mode == 1 or mode == 4 then
-                    applied = true
+            applied = true
+        end
+    else
+        if #actions == 0 then return false end
+        for _, mode in ipairs(actions) do
+            if not IsValid(med) then break end
+            med.mode = mode
+            local fn = med.Heal
+            if isfunction(fn) then
+                -- Third-party SWEP hooks can leave a malformed scalar behind;
+                -- normalise immediately before every medicine operation.
+                if not istable(med.modeValues) then
+                    med.modeValues = {[1] = 80, [2] = 1, [3] = 10, [4] = 1, [5] = 1}
+                end
+                local beforeSupply = tonumber(med.modeValues[mode]) or 0
+                local beforeAnalgesia = tonumber(org.analgesiaAdd) or 0
+                local beforeInternalHeal = tonumber(org.internalBleedHeal) or 0
+                local ok = pcall(fn, med, target, mode)
+                if ok then
+                    local afterSupply = tonumber(med.modeValues and med.modeValues[mode]) or beforeSupply
+                    local afterAnalgesia = tonumber(org.analgesiaAdd) or beforeAnalgesia
+                    local afterInternalHeal = tonumber(org.internalBleedHeal) or beforeInternalHeal
+                    if afterSupply < beforeSupply or afterAnalgesia > beforeAnalgesia
+                        or afterInternalHeal > beforeInternalHeal or mode == 1 or mode == 4 then
+                        applied = true
+                    end
                 end
             end
         end
