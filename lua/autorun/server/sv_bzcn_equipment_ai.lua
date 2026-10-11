@@ -1826,7 +1826,34 @@ hook.Add("Think", "BZCN_CompanionCarryRuntimeThink", function()
     end
 end)
 
+local BZCNWrappedFakeUp
+local function EnsureFurryGrabFakeUpBridge()
+    if not hg or not isfunction(hg.FakeUp) or hg.FakeUp == BZCNWrappedFakeUp then return end
+
+    local originalFakeUp = hg.FakeUp
+    BZCNWrappedFakeUp = function(ply, ...)
+        if IsValid(ply) and ply:IsPlayer() then
+            -- The getup command calls hg.FakeUp directly. Release any NPC carry
+            -- first, otherwise its per-frame carry Think keeps the ragdoll held
+            -- and can immediately undo the player's recovery attempt.
+            for _, npc in ipairs(ents.FindByClass("npc_bzcn_*")) do
+                if not IsValid(npc) then continue end
+                local state = npc.BZCNFurryGrab
+                if istable(state) and state.target == ply then
+                    -- Do not schedule a second FakeUp from the release helper;
+                    -- the original getup call below is the recovery request.
+                    BZCN.StopFurryAssimilation(npc, false)
+                end
+            end
+        end
+
+        return originalFakeUp(ply, ...)
+    end
+    hg.FakeUp = BZCNWrappedFakeUp
+end
+
 hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
+    EnsureFurryGrabFakeUpBridge()
     -- Bridge furry-player grabbing to managed NPCs, which the stock hands
     -- SWEP otherwise rejects as NPC/NextBot pickup targets.
     for _, ply in ipairs(player.GetAll()) do
