@@ -294,11 +294,24 @@ local function EnsureZCityOrganism(owner)
         current.fakePlayer = true
         current.alive = owner:Health() > 0
         current.entindex = owner:EntIndex()
+        current.health = math.max(owner:Health(), 0)
+        current.maxHealth = math.max(tonumber(owner:GetMaxHealth()) or tonumber(owner.MaxHealthLimit) or 1, 1)
+        current.blood = tonumber(current.blood) or 5000
+        current.maxBlood = tonumber(current.maxBlood) or 5000
+        current.wounds = istable(current.wounds) and current.wounds or {}
+        current.arterialwounds = istable(current.arterialwounds) and current.arterialwounds or {}
+        current.dmgstack = istable(current.dmgstack) and current.dmgstack or {}
         owner.BZCN_Organism = current
-        local nativeList = hg.organism and hg.organism.list
+
+        -- This helper may have run before Z-City finished loading. Reassert the
+        -- native registry entry on every safeguard pass, but only claim native
+        -- initialization when the registry and its lifecycle API are available.
+        local organismAPI = hg.organism
+        local nativeList = istable(organismAPI) and organismAPI.list or nil
         if istable(nativeList) then nativeList[owner] = current end
-        local nativeAvailable = hg.organism and isfunction(hg.organism.Add)
-            and isfunction(hg.organism.Clear) and true or false
+        local nativeAvailable = istable(nativeList)
+            and isfunction(organismAPI.Add)
+            and isfunction(organismAPI.Clear) or false
         owner.BZCN_ZCityOrgInitialized = nativeAvailable
         return current, nativeAvailable
     end
@@ -352,11 +365,17 @@ local function EnsureZCityOrganism(owner)
     current.explosionwounds = tonumber(current.explosionwounds) or 0
     owner.organism = current
     owner.BZCN_Organism = current
-    owner.BZCN_ZCityOrgInitialized = true
 
-    local nativeList = hg.organism and hg.organism.list
+    local organismAPI = hg.organism
+    local nativeList = istable(organismAPI) and organismAPI.list or nil
     if istable(nativeList) then nativeList[owner] = current end
-    return current, addedNative
+    local nativeReady = istable(nativeList)
+        and isfunction(organismAPI.Add)
+        and isfunction(organismAPI.Clear) or false
+    -- Do not mark a fallback-only organism as natively initialized. The
+    -- recurring Attach/Sync safeguard will retry registry integration later.
+    owner.BZCN_ZCityOrgInitialized = nativeReady
+    return current, nativeReady
 end
 
 local function SyncEntity(ent, state)
