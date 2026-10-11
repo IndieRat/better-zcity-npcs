@@ -245,13 +245,16 @@ end
 local function IsVoiceSound(soundPath)
     if not isstring(soundPath) then return false end
     local path = string.lower(soundPath)
-    return string.StartWith(path, "vo/")
-        or string.StartWith(path, "zbattle/furry/")
-        or string.StartWith(path, "zcitysnd/")
-        or string.StartWith(path, "mercenary/")
-        or string.StartWith(path, "specops/")
-        or string.StartWith(path, "national_guard/")
-        or string.StartWith(path, "n51/")
+    local function startsWith(prefix)
+        return string.sub(path, 1, #prefix) == prefix
+    end
+    return startsWith("vo/")
+        or startsWith("zbattle/furry/")
+        or startsWith("zcitysnd/")
+        or startsWith("mercenary/")
+        or startsWith("specops/")
+        or startsWith("national_guard/")
+        or startsWith("n51/")
 end
 
 -- Observe the final sound rather than intercepting Z-City's net receivers.
