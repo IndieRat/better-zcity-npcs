@@ -149,13 +149,60 @@ local function NavPoint(ent, desired, radius)
     return desired
 end
 
+local function TryOpenTaskDoor(ent, destination)
+    if not IsValid(ent) or not isvector(destination)
+        or CurTime() < (ent.BZCNNextTaskDoorAt or 0) then return false end
+    local trace = util.TraceLine({
+        start = ent:WorldSpaceCenter(), endpos = destination,
+        filter = {ent}, mask = MASK_SOLID
+    })
+    local door = IsValid(trace.Entity) and trace.Entity or nil
+    if not IsValid(door) then return false end
+    local class = string.lower(door:GetClass() or "")
+    if not string.find(class, "door", 1, true) and class ~= "func_movelinear" then return false end
+    ent.BZCNNextTaskDoorAt = CurTime() + 0.9
+    for _, input in ipairs({"Unlock", "Open", "Toggle"}) do pcall(door.Fire, door, input, "", 0, ent, ent) end
+    if isfunction(door.Use) then pcall(door.Use, door, ent, ent, USE_ON, 1) end
+    return true
+end
+
+local function ComputeNearbyTaskPath(path, ent, destination)
+    local candidates, seen = {destination}, {}
+    local function add(point)
+        if not isvector(point) then return end
+        local area = navmesh.GetNearestNavArea(point, false, 320, false, true)
+        if not IsValid(area) then return end
+        local id = isfunction(area.GetID) and area:GetID() or tostring(area)
+        if seen[id] then return end
+        seen[id] = true
+        local candidate = area:GetClosestPointOnArea(point)
+        if isvector(candidate) then candidates[#candidates + 1] = candidate end
+    end
+    add(destination)
+    for _, radius in ipairs({80, 150, 230}) do
+        add(destination + Vector(radius, 0, 0))
+        add(destination + Vector(-radius, 0, 0))
+        add(destination + Vector(0, radius, 0))
+        add(destination + Vector(0, -radius, 0))
+        if #candidates >= 7 then break end
+    end
+    for _, candidate in ipairs(candidates) do
+        local ok = pcall(path.Compute, path, ent, candidate)
+        if ok and path:IsValid() then return true end
+    end
+    return false
+end
+
 local function MoveTo(ent, destination, duration, speedScale)
     if not IsAvailable(ent) or not isvector(destination) then return false end
     local path = Path("Follow")
     path:SetMinLookAheadDistance(100)
     path:SetGoalTolerance(45)
-    path:Compute(ent, destination)
-    if not path:IsValid() then return false end
+    if not ComputeNearbyTaskPath(path, ent, destination) then
+        TryOpenTaskDoor(ent, destination)
+        if ent.TryBZCNClimb then pcall(ent.TryBZCNClimb, ent) end
+        return false
+    end
 
     local profile = ent.BZCNClassProfile or {}
     local speed = tonumber(profile.Speed) or 175
