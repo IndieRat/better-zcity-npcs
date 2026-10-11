@@ -26,7 +26,8 @@ local ACTIVITY_FOR_GESTURE = {
     cheer = "ACT_GMOD_GESTURE_TAUNT_CHEER",
     laugh = "ACT_GMOD_GESTURE_TAUNT_LAUGH",
     dance = "ACT_GMOD_GESTURE_TAUNT_DANCE",
-    taunt = "ACT_GMOD_GESTURE_TAUNT_MUSCLE"
+    taunt = "ACT_GMOD_GESTURE_TAUNT_MUSCLE",
+    point = "ACT_GMOD_GESTURE_POINT"
 }
 
 local GESTURE_ALIASES = {
@@ -41,7 +42,8 @@ local GESTURE_ALIASES = {
     dance = {"dance", "taunt_dance"},
     taunt = {"taunt", "muscle"},
     thumbsup = {"thumbsup", "thumbs_up", "thumbs-up", "gesture_thumbsup"},
-    flipoff = {"flipoff", "flip_off", "middlefinger", "middle_finger", "flippingoff"}
+    flipoff = {"flipoff", "flip_off", "middlefinger", "middle_finger", "flippingoff"},
+    point = {"point", "gesture_point", "pointing", "point_forward"}
 }
 
 local activityGesture = {}
@@ -150,6 +152,11 @@ local function PlayNPCPhrase(ent, kind, context, bypassCooldown)
     end
     ent.BZCNNextSocialPhraseAt = now + math.Clamp(duration > 0 and duration or 2.2, 1.4, 5.5)
     ent.BZCNLastSocialPhrase = soundPath
+    if context == "Yell" or context == "Panic" or context == "Scared" then
+        hook.Run("BZCN_NPCYell", ent, context, soundPath)
+    elseif context == "Help" or context == "YellForHelp" then
+        hook.Run("BZCN_NPCYellForHelp", ent, context, soundPath)
+    end
     return true
 end
 
@@ -179,6 +186,7 @@ local function PlayNPCGesture(ent, gesture)
     if ok then
         ent.BZCNLastSocialGesture = gesture
         ent.BZCNLastSocialGestureAt = CurTime()
+        hook.Run("BZCN_NPCGesture", ent, gesture)
         return true
     end
     return false
@@ -200,6 +208,7 @@ local function ReactToPhrase(playerEnt, soundPath, context)
     playerEnt.BZCNLastSocialReactionAt = now
 
     local signal = string.lower(tostring(context or soundPath or ""))
+    hook.Run("BZCN_PlayerPhrase", playerEnt, signal, soundPath)
     local kind, gesture = "answer", "agree"
     local responseContext
 
@@ -287,6 +296,20 @@ local function FleeFromFurry(civilian, furry)
     if not IsCivilianNPC(civilian) or not IsFurryThreat(furry)
         or civilian == furry or not CanUseSocialEmote(civilian) then return false end
     if civilian.BZCNFleeUntil and civilian.BZCNFleeUntil > CurTime() then return true end
+
+    if civilian.BZCNCuriosity == nil then civilian.BZCNCuriosity = math.random(1, 4) == 1 end
+    if civilian.BZCNCuriosity == true then
+        civilian.BZCNCuriousTarget = furry
+        civilian.BZCNCuriousUntil = CurTime() + math.Rand(5, 12)
+        civilian.BZCNCurrentTask = "curious"
+        civilian.BZCNTaskUntil = civilian.BZCNCuriousUntil
+        civilian.BZCNNextSocialReactionAt = CurTime() + 4
+        PlayNPCGesture(civilian, "agree")
+        PlayNPCPhrase(civilian, "answer", "question")
+        hook.Run("BZCN_CivilianCurious", civilian, furry)
+        return true
+    end
+
     -- Fear is not faction hostility: civilians escape a nearby furry without
     -- necessarily selecting it as a target to attack.
     civilian.BZCNFleeThreat = furry
@@ -411,6 +434,7 @@ local function ReactToGesture(playerEnt, gesture)
     local now = CurTime()
     if now - (playerEnt.BZCNLastSocialGestureReactionAt or 0) < 1.25 then return end
     playerEnt.BZCNLastSocialGestureReactionAt = now
+    hook.Run("BZCN_PlayerGesture", playerEnt, gesture)
 
     for _, npc in ipairs(ents.FindInSphere(playerEnt:GetPos(), 700)) do
         if not IsManagedNPC(npc) or IsUnavailableForSocial(npc) then continue end
