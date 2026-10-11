@@ -714,9 +714,9 @@ local function TryOpenDoorToward(bot, destination)
     bot.BZCNNextDoorUseAt = now + (mode == "slow_quiet" and 1.6 or 0.85)
 
     local delay = mode == "slow_quiet" and 0.25 or 0
-    if mode ~= "slow_quiet" then
-        pcall(door.Fire, door, "Unlock", "", delay, bot, bot)
-    end
+    -- Unlock is a state change, not an audible action; keep it in every
+    -- mode so quiet NPCs can still pass locked doors.
+    pcall(door.Fire, door, "Unlock", "", delay, bot, bot)
     if class == "func_movelinear" then
         pcall(door.Fire, door, "Toggle", "", delay, bot, bot)
     else
