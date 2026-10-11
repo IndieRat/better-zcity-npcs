@@ -164,6 +164,32 @@ function BZCN.InstallAdapter(ent)
     local data = ent:GetTable()
     data.BZCN_NetVars = data.BZCN_NetVars or {}
 
+    -- Z-City's organism damage hook assumes Player.AddForceRag is always a
+    -- per-physics-bone table, even after hg.AddForceRag correctly rejects a
+    -- NextBot. Provide inert entries so that Player-only impact bookkeeping
+    -- cannot throw while the NPC's own physics/damage path continues.
+    if not data.BZCNAddForceRagInitialized then
+        local forceState = istable(data.AddForceRag) and data.AddForceRag or {}
+        for bone = 0, 255 do
+            if not istable(forceState[bone]) then forceState[bone] = {} end
+            if not isvector(forceState[bone][2]) then forceState[bone][2] = Vector(0, 0, 0) end
+        end
+        data.AddForceRag = forceState
+        data.BZCNAddForceRagInitialized = true
+    end
+
+    -- The game's fake-ragdoll routine is player-only. Organism timers can fire
+    -- after an NPC/owner has been removed; guard those calls at the boundary
+    -- without changing how real players enter or leave fake state.
+    if SERVER and hg and isfunction(hg.Fake) and not hg.BZCNFakeGuardInstalled then
+        local nativeFake = hg.Fake
+        hg.Fake = function(ply, ...)
+            if not IsValid(ply) or not ply:IsPlayer() then return end
+            return nativeFake(ply, ...)
+        end
+        hg.BZCNFakeGuardInstalled = true
+    end
+
     -- Preserve the original Z-City netvar functions. Many organism modules
     -- use SetNetVar for wounds/armor/name sync; a BZCN-only replacement makes
     -- those changes invisible to Project Homogen and other client consumers.
@@ -337,10 +363,35 @@ function BZCN.InstallAdapter(ent)
         return BZCN.SelectWeapon(self, weaponClass)
     end
     data.KeyDown = function(self, key)
-        return bit.band(tonumber(self.BZCN_SimulatedButtons) or 0, tonumber(key) or 0) ~= 0
+        local down = bit.band(tonumber(self.BZCN_SimulatedButtons) or 0, tonumber(key) or 0) ~= 0
+        -- Clear the pressed latch on the released frame. Z-City repeatedly
+        -- polls KeyPressed from weapon Think paths; aliasing it to KeyDown made
+        -- a held button look like a fresh press every server tick.
+        if not down and istable(self.BZCN_KeyPressedLatch) then
+            self.BZCN_KeyPressedLatch[key] = nil
+        end
+        return down
     end
-    data.KeyPressed = data.KeyDown
-    data.KeyReleased = function() return false end
+    data.KeyPressed = function(self, key)
+        if not self:KeyDown(key) then return false end
+        self.BZCN_KeyPressedLatch = self.BZCN_KeyPressedLatch or {}
+        if self.BZCN_KeyPressedLatch[key] then return false end
+        self.BZCN_KeyPressedLatch[key] = true
+        return true
+    end
+    data.KeyReleased = function(self, key)
+        local down = bit.band(tonumber(self.BZCN_SimulatedButtons) or 0, tonumber(key) or 0) ~= 0
+        local latch = self.BZCN_KeyReleasedLatch or {}
+        self.BZCN_KeyReleasedLatch = latch
+        if down then
+            latch[key] = true
+            return false
+        end
+        local wasDown = latch[key] == true
+        latch[key] = nil
+        if istable(self.BZCN_KeyPressedLatch) then self.BZCN_KeyPressedLatch[key] = nil end
+        return wasDown
+    end
     data.GetLocalVar = function(self, key, default)
         local vars = self.BZCN_LocalVars
         if istable(vars) and vars[key] ~= nil then return vars[key] end

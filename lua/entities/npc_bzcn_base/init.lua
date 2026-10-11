@@ -588,12 +588,42 @@ function ENT:AttackTarget(target)
         return
     end
 
-    local meleeRange = profile.MeleeRange or self.AttackRange or 78
-    if distance > meleeRange then return end
+    local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
+    local maxReach = weaponClass == "weapon_hands_sh" and 40 or 55
+    local meleeRange = math.min(tonumber(profile.MeleeRange) or self.AttackRange or 78, maxReach)
+    local source = self:WorldSpaceCenter()
+    local destination = target:WorldSpaceCenter()
+    local delta = destination - source
+    local distanceToCenter = delta:Length()
+    if distanceToCenter > meleeRange then return end
+
+    -- Short hull trace must hit the target (or their Z-City fake ragdoll);
+    -- distance alone was applying damage through empty space and walls.
+    local trace = util.TraceHull({
+        start = source,
+        endpos = destination + (distanceToCenter > 0 and delta:GetNormalized() * 2 or vector_origin),
+        mins = Vector(-6, -6, -6),
+        maxs = Vector(6, 6, 6),
+        filter = self,
+        mask = MASK_SHOT
+    })
+    local hitTarget = trace.Entity == target
+    if not hitTarget and IsValid(trace.Entity) and hg and isfunction(hg.RagdollOwner) then
+        local ok, ragOwner = pcall(hg.RagdollOwner, trace.Entity)
+        hitTarget = ok and ragOwner == target
+    end
+    if not hitTarget then
+        self.LastAttack = now + math.max(tonumber(profile.AttackDelay) or 1, 0.35)
+        self:PlayBZCNAttackAnimation()
+        self:EmitSound(profile.MeleeMissSound or "weapons/slam/throw.wav", 62, math.random(96, 104), 0.65)
+        hook.Run("BZCN_NPCAttackMissed", self, target, trace)
+        return
+    end
+
     self.LastAttack = now + (profile.AttackDelay or 1)
     self:PlayBZCNAttackAnimation()
     if BZCN and isfunction(BZCN.AttackRuntimeMelee)
-        and BZCN.AttackRuntimeMelee(self, target) then
+        and BZCN.AttackRuntimeMelee(self, target, trace) then
         hook.Run("BZCN_NPCAttack", self, target, nil)
         return
     end
@@ -604,8 +634,8 @@ function ENT:AttackTarget(target)
     damage:SetInflictor(self)
     damage:SetDamage(profile.MeleeDamage or 12)
     damage:SetDamageType(DMG_CLUB)
-    damage:SetDamagePosition(target:WorldSpaceCenter())
-    damage:SetDamageForce((target:GetPos() - self:GetPos()):GetNormalized() * 900)
+    damage:SetDamagePosition(trace.HitPos or destination)
+    damage:SetDamageForce(delta:GetNormalized() * 600)
     target:TakeDamageInfo(damage)
     hook.Run("BZCN_NPCAttack", self, target, damage)
 end

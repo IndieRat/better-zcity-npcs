@@ -13,10 +13,25 @@ ENT.Model = "models/player/group03/male_07.mdl"
 ENT.MoveSpeed = 175
 ENT.AttackRange = 78
 
+local function IsUsableSequence(ent, sequence)
+    if not isnumber(sequence) or sequence < 0 then return false end
+    if ent.GetSequenceName then
+        local ok, name = pcall(ent.GetSequenceName, ent, sequence)
+        if ok and isstring(name) then
+            name = string.lower(name)
+            if name == "reference" or name == "bind_pose" or name == "bindpose"
+                or name == "static_pose" then
+                return false
+            end
+        end
+    end
+    return true
+end
+
 function ENT:FindSequence(names)
     for _, name in ipairs(names) do
         local sequence = self:LookupSequence(name)
-        if sequence and sequence >= 0 then return sequence end
+        if IsUsableSequence(self, sequence) then return sequence end
     end
     return -1
 end
@@ -39,7 +54,7 @@ end
 local function GetFirstSequence(self, names)
     for _, name in ipairs(names) do
         local sequence = self:LookupSequence(name)
-        if isnumber(sequence) and sequence >= 0 then return sequence end
+        if IsUsableSequence(self, sequence) then return sequence end
     end
     return -1
 end
@@ -161,11 +176,12 @@ function ENT:GetBZCNMovementSequence(speed, state)
 
     if state == "crawling" then
         local sequence = GetFirstSequence(self, {
-            "crawl_all", "crawl", "crawl_forward", "zombie_crawl", "walk_crouch_all"
+            "crawl_all", "crawl", "crawl_forward", "zombie_crawl", "crawl_idle"
         })
         if sequence >= 0 then return sequence end
-        -- Keep the crouch-walk activity as the generic fallback; changing the
-        -- state to "walking" here would undo the visible crawl response.
+        -- Many player models have no suitable crawl sequence. Don't force a
+        -- crouch pose on a different rig; retain injury speed and use locomotion.
+        state = speed > 150 and "running" or "walking"
     elseif state == "climbing" then
         local sequence = GetFirstSequence(self, {"climb_up", "climb_ladder", "ladder_climb", "climb"})
         if sequence >= 0 then return sequence end
@@ -221,9 +237,35 @@ function ENT:GetBZCNMovementSequence(speed, state)
     local sequence = -1
     if isstring(selected) then
         sequence = self:LookupSequence(selected)
-    elseif isnumber(selected) and self.SelectWeightedSequence then
-        local ok, result = pcall(self.SelectWeightedSequence, self, selected)
-        if ok and isnumber(result) and result >= 0 then sequence = result end
+    elseif isnumber(selected) then
+        -- IXAnims normally stores activities, but a few entries are literal
+        -- sequence indexes. Only use them directly when this model owns them.
+        local count = self.GetSequenceCount and self:GetSequenceCount() or 0
+        if selected >= 1000 and selected < count then
+            sequence = selected
+        elseif self.SelectWeightedSequence then
+            local ok, result = pcall(self.SelectWeightedSequence, self, selected)
+            if ok and IsUsableSequence(self, result) then sequence = result end
+        end
+    end
+    if not IsUsableSequence(self, sequence) then sequence = -1 end
+
+    -- NextBots do not execute Player TranslateActivity hooks. Use actual named
+    -- movement sequences when an IXAnims activity isn't available for the model.
+    if sequence < 0 then
+        local aliases
+        if state == "standing" then
+            aliases = {"idle_all_01", "idle_all", "idle_unarmed", "idle", "idle01", "idle_subtle"}
+        elseif state == "walking" then
+            aliases = {"walk_all", "walk_all_moderate", "walk_all_01", "walk_unarmed", "walk"}
+        elseif state == "running" or state == "climbing" then
+            aliases = {"run_all", "run_all_01", "run_unarmed", "run", "walk_all", "walk"}
+        elseif state == "airborne" then
+            aliases = {"jump_all", "jump", "jump_start", "jump_holding", "fall", "jump_fall", "run_all", "walk_all"}
+        else
+            aliases = {"idle_all_01", "idle_all", "idle_unarmed", "idle", "walk_all", "run_all"}
+        end
+        sequence = GetFirstSequence(self, aliases)
     end
     cache[cacheKey] = sequence
     return sequence
@@ -309,7 +351,10 @@ function ENT:BodyUpdate()
             self:SetPlaybackRate(1)
             self:FrameAdvance()
         else
-            self:BodyMoveXY()
+            -- No grab idle exists on this model. Avoid re-entering BodyMoveXY
+            -- with an unsupported activity and leave its last sequence advancing.
+            self:SetPlaybackRate(1)
+            self:FrameAdvance()
         end
         return
     end
@@ -335,7 +380,8 @@ function ENT:BodyUpdate()
             self:SetPlaybackRate(1)
             self:FrameAdvance()
         else
-            self:BodyMoveXY()
+            self:SetPlaybackRate(1)
+            self:FrameAdvance()
         end
         return
     end
@@ -381,8 +427,22 @@ function ENT:BodyUpdate()
         return
     end
 
-    -- Fallback for custom models whose activity tables don't expose a valid
-    -- sequence; keep standard NextBot locomotion rather than freezing.
+    -- Last-resort named idle/walk fallback. BodyMoveXY with no valid base
+    -- sequence can leave playermodel rigs stuck in their reference/T-pose.
     self.BZCNCurrentSequence = nil
-    self:BodyMoveXY()
+    local fallback = GetFirstSequence(self, {
+        "idle_all_01", "idle_all", "idle_unarmed", "idle", "idle01",
+        "walk_all", "walk_all_moderate", "walk", "run_all", "run"
+    })
+    if fallback >= 0 then
+        if self:GetSequence() ~= fallback then
+            self:ResetSequence(fallback)
+            self:SetCycle(0)
+        end
+        self:SetPlaybackRate(1)
+        self:FrameAdvance()
+    elseif self.GetSequence and self:GetSequence() >= 0 then
+        self:SetPlaybackRate(1)
+        self:FrameAdvance()
+    end
 end

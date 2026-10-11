@@ -70,6 +70,13 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     -- only when the AI decides to treat someone.
     if MEDICAL_WEAPONS[class] then
         weapon.OwnerChanged = function() end
+        -- This hidden weapon is consumed only through BZCN's explicit Heal call.
+        -- Don't let its Player input/Think loops run for a NextBot owner; the
+        -- stock bandage Think indexes modeValues directly and assumes a Player UI.
+        weapon.Think = function() end
+        weapon.PrimaryAttack = function() end
+        weapon.SecondaryAttack = function() end
+        weapon.Reload = function() end
     end
 
     weapon:SetPos(owner:GetPos())
@@ -269,68 +276,49 @@ function BZCN.FireRuntimeWeapon(ent, target)
     return fired
 end
 
-function BZCN.AttackRuntimeMelee(ent, target)
+function BZCN.AttackRuntimeMelee(ent, target, trace)
     if not IsValid(ent) or not IsValid(target) or not BZCN.IsManaged(ent) then return false end
     local selectedClass = ent.BZCN_SelectedWeapon
         or (ent.BZCNClassProfile and ent.BZCNClassProfile.WeaponClass)
-    -- The native Z-City fists SWEP is used for fists/claws profiles. Armed
-    -- profiles keep their own gun presentation and use the configured melee
-    -- fallback instead of suddenly punching while visibly holding a rifle.
+    -- weapon_hands_sh is Player-oriented: its PrimaryAttack may simply raise
+    -- fists and its real hit test depends on Player aim state. Do not call that
+    -- path from a NextBot; the caller already supplied a validated trace.
     if selectedClass ~= "weapon_hands_sh" then return false end
-    local distance = ent:GetPos():Distance(target:GetPos())
-    local weapon
-    if IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon:GetClass() == "weapon_hands_sh" then
-        weapon = ent.BZCNRuntimeWeapon
-    else
-        weapon = ConfigureWeaponEntity(ent, "weapon_hands_sh", "BZCNRuntimeMeleeWeapon")
-    end
-    if not IsValid(weapon) or not isfunction(weapon.PrimaryAttack) then return false end
+    if not istable(trace) or not trace.Hit or not IsValid(trace.Entity) then return true end
 
-    local reach = tonumber(weapon.ReachDistance) or 40
-    -- Don't invoke the native fists attack outside its configured reach; let
-    -- the addon use its existing melee fallback for profiles with a longer hit
-    -- radius, instead of reporting a native attack that couldn't connect.
-    if distance > reach + 14 then
-        if ent.BZCNClassProfile and ent.BZCNClassProfile.FurryStyle
+    local profile = ent.BZCNClassProfile or {}
+    local distance = ent:WorldSpaceCenter():Distance(target:WorldSpaceCenter())
+    local weapon = ent.BZCNRuntimeWeapon
+    if not IsValid(weapon) or weapon:GetClass() ~= "weapon_hands_sh" then
+        weapon = ConfigureWeaponEntity(ent, "weapon_hands_sh", "BZCNRuntimeWeapon")
+    end
+    if not IsValid(weapon) then return false end
+
+    local reach = math.min(tonumber(weapon.ReachDistance) or 40, 40)
+    if distance > reach + 8 then return true end
+    PlaceRuntimeWeapon(ent, weapon)
+    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
+    timer.Simple(0.35, function()
+        if IsValid(ent) and not ent.BZCNFurryGrab and IsValid(weapon)
             and isfunction(weapon.SetFists) then
             pcall(weapon.SetFists, weapon, false)
         end
-        return false
-    end
+    end)
 
-    local now = CurTime()
-    local nextFire = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
-    if nextFire > now then return true end
-    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
-
-    PlaceRuntimeWeapon(ent, weapon)
-    ent.BZCNCombatTarget = target
-    ent.BZCN_SimulatedButtons = IN_ATTACK
-    local beforeNext = nextFire
-    local beforeHealth = target:Health()
-    local ok = pcall(weapon.PrimaryAttack, weapon)
-    local afterNext = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
-    local afterHealth = IsValid(target) and target:Health() or beforeHealth
-
-    ent.BZCN_SimulatedButtons = 0
-    ent.BZCNCombatTarget = nil
-
-    if not ok or (afterNext <= beforeNext and afterHealth >= beforeHealth) then return false end
-    if weapon.SetNextPrimaryFire and afterNext <= now then
-        weapon:SetNextPrimaryFire(now + math.max(tonumber(ent.BZCNClassProfile and ent.BZCNClassProfile.AttackDelay) or 0.45, 0.08))
-    end
-    if ent.BZCNClassProfile and ent.BZCNClassProfile.FurryStyle then
-        timer.Simple(0.4, function()
-            if IsValid(ent) and not ent.BZCNFurryGrab and IsValid(weapon)
-                and isfunction(weapon.SetFists) then
-                pcall(weapon.SetFists, weapon, false)
-            end
-        end)
-    end
-    hook.Run("BZCN_NPCMeleeWeaponAttack", ent, target, weapon)
+    local source = ent:WorldSpaceCenter()
+    local destination = target:WorldSpaceCenter()
+    local damage = DamageInfo()
+    damage:SetAttacker(ent)
+    damage:SetInflictor(weapon)
+    damage:SetDamage(math.Clamp(tonumber(profile.MeleeDamage) or tonumber(weapon.DamagePrimary) or 10, 1, 250))
+    damage:SetDamageType(profile.FurryStyle and DMG_SLASH or DMG_CLUB)
+    damage:SetDamagePosition(trace.HitPos or destination)
+    damage:SetDamageForce((destination - source):GetNormalized() * 600)
+    target:TakeDamageInfo(damage)
+    ent:EmitSound(profile.MeleeSound or "Flesh.ImpactHard", 72, math.random(92, 108), 0.8)
+    hook.Run("BZCN_NPCMeleeWeaponAttack", ent, target, weapon, trace)
     return true
-end
-
+}
 
 local function GetFurryClass(target)
     if not IsValid(target) then return "" end
@@ -373,7 +361,7 @@ local function RestoreFurryRagdollOrganism(state)
     state.originalRagOrganism = nil
 end
 
-function BZCN.StopFurryAssimilation(owner)
+function BZCN.StopFurryAssimilation(owner, restoreTarget)
     if not IsValid(owner) then return end
     local state = owner.BZCNFurryGrab
     if not istable(state) then
@@ -388,13 +376,39 @@ function BZCN.StopFurryAssimilation(owner)
     RestoreFurryRagdollOrganism(state)
 
     if IsValid(weapon) and isfunction(weapon.SetFists) then
-        -- Paws must return to the lowered state after the interaction.
         pcall(weapon.SetFists, weapon, false)
     end
     owner.BZCNFurryGrab = nil
     owner.BZCNFurryGrabTarget = nil
     owner.BZCNCombatTarget = nil
     owner.BZCN_SimulatedButtons = 0
+
+    if restoreTarget == false then return end
+    local target = state.target
+    if not IsValid(target) or target:Health() <= 0 then return end
+
+    if target:IsPlayer() then
+        if state.createdFake and hg and isfunction(hg.FakeUp) then
+            timer.Simple(0, function()
+                if IsValid(target) and target:IsPlayer() and target:Alive()
+                    and IsValid(target.FakeRagdoll) then
+                    pcall(hg.FakeUp, target)
+                end
+            end)
+        end
+    elseif BZCN.IsManaged(target) and state.forcedDowned then
+        local support = hg and hg.BZCNNPCSupport
+        if target:GetNW2Bool("BZCNNPCDowned", false)
+            and support and isfunction(support.Recover) then
+            pcall(support.Recover, target, state.rag, true)
+        end
+        if support and isfunction(support.GetNPCHealthTable) then
+            local ok, healthState = pcall(support.GetNPCHealthTable, target)
+            if ok and istable(healthState) and state.previousCrawling ~= nil then
+                healthState.crawling = state.previousCrawling
+            end
+        end
+    end
 end
 
 local function AttachFurryRagdoll(attacker, state, rag)
@@ -457,7 +471,7 @@ local function AttachFurryRagdoll(attacker, state, rag)
 end
 
 local function TransformFurryTarget(attacker, target, state)
-    BZCN.StopFurryAssimilation(attacker)
+    BZCN.StopFurryAssimilation(attacker, false)
     if not IsValid(target) then return false end
 
     if target:IsPlayer() then
@@ -544,7 +558,8 @@ function BZCN.TryFurryAssimilation(attacker, target)
             started = CurTime(),
             pendingUntil = CurTime() + 3,
             lastThink = CurTime(),
-            attached = false
+            attached = false,
+            createdFake = target:IsPlayer() and not IsValid(GetCurrentFurryRagdoll(target)) or false
         }
         attacker.BZCNFurryGrab = state
         attacker.BZCNFurryGrabTarget = target
@@ -557,9 +572,15 @@ function BZCN.TryFurryAssimilation(attacker, target)
             end
         elseif BZCN.IsManaged(target) then
             local support = hg and hg.BZCNNPCSupport
+            if support and isfunction(support.GetNPCHealthTable) then
+                local ok, healthState = pcall(support.GetNPCHealthTable, target)
+                if ok and istable(healthState) then state.previousCrawling = healthState.crawling end
+            end
             if not target:GetNW2Bool("BZCNNPCDowned", false)
                 and support and isfunction(support.EnterDownedState) then
-                pcall(support.EnterDownedState, target, "furry_grab")
+                state.forcedDowned = true
+                local ok = pcall(support.EnterDownedState, target, "furry_grab")
+                if not ok then state.forcedDowned = false end
             end
         end
     end
@@ -666,7 +687,12 @@ local function UseMedicalItem(healer, target, class)
     local previousWeaponClass = healer.BZCN_SelectedWeapon
         or (healer.BZCNClassProfile and healer.BZCNClassProfile.WeaponClass)
 
-    med.modeValues = istable(med.modeValues) and med.modeValues or {[1] = 80, [2] = 1, [3] = 10, [4] = 1, [5] = 1}
+    med.modeValues = istable(med.modeValues) and med.modeValues
+        or {[1] = 80, [2] = 1, [3] = 10, [4] = 1, [5] = 1}
+    if not istable(med.modeValuesdef) then
+        local stored = GetStored(class)
+        med.modeValuesdef = stored and istable(stored.modeValuesdef) and stored.modeValuesdef or {}
+    end
     med.modeValues[1] = tonumber(med.modeValues[1]) or 0
     med.modeValues[2] = tonumber(med.modeValues[2]) or 0
     med.modeValues[3] = tonumber(med.modeValues[3]) or 0
@@ -705,6 +731,11 @@ local function UseMedicalItem(healer, target, class)
         med.mode = mode
         local fn = med.Heal
         if isfunction(fn) then
+            -- Third-party SWEP hooks can leave a malformed scalar behind;
+            -- normalise immediately before every medicine operation.
+            if not istable(med.modeValues) then
+                med.modeValues = {[1] = 80, [2] = 1, [3] = 10, [4] = 1, [5] = 1}
+            end
             local beforeSupply = tonumber(med.modeValues[mode]) or 0
             local beforeAnalgesia = tonumber(org.analgesiaAdd) or 0
             local beforeInternalHeal = tonumber(org.internalBleedHeal) or 0
