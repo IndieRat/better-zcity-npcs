@@ -578,9 +578,10 @@ function BZCN.TryFurryAssimilation(attacker, target)
     organ.lightstun = CurTime() + 1
     attacker.BZCN_SimulatedButtons = bit.bor(IN_ATTACK, IN_ATTACK2)
 
-    if target:IsPlayer() and isfunction(target.SetLocalVar) then
-        pcall(target.SetLocalVar, target, "assimilation", organ.assimilated)
-    elseif target.SetNW2Float then
+    if isfunction(attacker.SetLocalVar) then
+        pcall(attacker.SetLocalVar, attacker, "assimilation", organ.assimilated)
+    end
+    if target.SetNW2Float then
         target:SetNW2Float("BZCNAssimilation", organ.assimilated)
     end
 
