@@ -6,6 +6,7 @@ if SERVER then
     AddCSLuaFile()
     AddCSLuaFile("autorun/client/cl_bzcn_hud_bridge.lua")
     AddCSLuaFile("autorun/client/cl_bzcn_tpik_adapter.lua")
+    AddCSLuaFile("autorun/client/cl_bzcn_npc_chat.lua")
 end
 
 BZCN = BZCN or {}
