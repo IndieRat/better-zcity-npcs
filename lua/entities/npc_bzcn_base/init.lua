@@ -1257,6 +1257,22 @@ function ENT:ChaseEnemy(target)
         local actualAimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
             and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
         local actualDistance = visible and self:WorldSpaceCenter():Distance(actualAimPoint) or math.huge
+
+        -- When a trained combatant voluntarily drops into a prone/crouched aim
+        -- pose, hold position and keep the TPIK aim trained on the real body
+        -- instead of having path following immediately stand it back up.
+        if now < (self.BZCNCombatProneUntil or 0) then
+            self.loco:SetDesiredSpeed(0)
+            self.loco:FaceTowards(actualAimPoint)
+            local fireRange = tonumber(profile.WeaponRange) or 900
+            if visible and actualDistance <= fireRange then
+                self.BZCNEnemy = target
+                self:AttackTarget(target)
+            end
+            coroutine.wait(0.1)
+            continue
+        end
+
         local engageDistance = 32
         if hasRangedWeapon then
             engageDistance = math.Clamp((tonumber(profile.WeaponRange) or 900) * 0.35, 220, 360)
