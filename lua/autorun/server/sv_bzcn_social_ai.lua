@@ -487,17 +487,19 @@ BZCN.Social.PlayPhrase = PlayNPCPhrase
 local function ResolveManagedNPCTarget(target)
     if IsManagedNPC(target) then return target end
     if not IsValid(target) then return nil end
-    local candidates = {
-        target.BZCNNPCOwner,
-        target.owner,
-        target.organism and target.organism.owner,
-        target.BZCN_Organism and target.BZCN_Organism.owner,
-        target.GetNW2Entity and target:GetNW2Entity("BZCNNPCOwner", NULL) or nil,
-        target.GetNWEntity and target:GetNWEntity("RagdollOwner", NULL) or nil
-    }
+    local candidates = {}
+    local function addCandidate(candidate)
+        if IsValid(candidate) then candidates[#candidates + 1] = candidate end
+    end
+    addCandidate(target.BZCNNPCOwner)
+    addCandidate(target.owner)
+    addCandidate(target.organism and target.organism.owner)
+    addCandidate(target.BZCN_Organism and target.BZCN_Organism.owner)
+    if target.GetNW2Entity then addCandidate(target:GetNW2Entity("BZCNNPCOwner", NULL)) end
+    if target.GetNWEntity then addCandidate(target:GetNWEntity("RagdollOwner", NULL)) end
     if hg and isfunction(hg.RagdollOwner) then
         local ok, owner = pcall(hg.RagdollOwner, target)
-        if ok then candidates[#candidates + 1] = owner end
+        if ok then addCandidate(owner) end
     end
     for _, candidate in ipairs(candidates) do
         if IsManagedNPC(candidate) then return candidate end
