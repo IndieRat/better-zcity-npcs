@@ -14,13 +14,13 @@ local TASK_POOLS = {
         {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"hold", 1}
     },
     combine = {
-        {"squad", 4}, {"patrol", 3}, {"hold", 3}, {"cover", 3}, {"pickup", 2}
+        {"squad", 4}, {"patrol", 3}, {"hold", 3}, {"cover", 3}, {"pickup", 2}, {"rescue", 2}
     },
     metrocop = {
-        {"patrol", 3}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}
+        {"patrol", 3}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}, {"rescue", 2}
     },
     rebel = {
-        {"squad", 4}, {"patrol", 3}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"hold", 1}
+        {"squad", 4}, {"patrol", 3}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 1}
     }
 }
 
@@ -326,6 +326,31 @@ timer.Create("BZCN_TaskWeaponPickup", 0.75, 0, function()
     end
 end)
 
+local function FindWoundedAlly(ent, radius)
+    local profile = ent.BZCNClassProfile or {}
+    local ownFaction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or GetKind(ent)))
+    local best, bestDistance
+    for _, other in ipairs(ents.FindInSphere(ent:GetPos(), radius or 950)) do
+        if not IsManaged(other) or other == ent or other:Health() <= 0 then continue end
+        local otherProfile = other.BZCNClassProfile or {}
+        local faction = string.lower(tostring(otherProfile.Faction or other.BZCN_Faction or GetKind(other)))
+        if faction ~= ownFaction then continue end
+        local organism = other.BZCNNPCOrg or other.BZCN_Organism or other.organism or {}
+        local downed = other:GetNW2Bool("BZCNNPCDowned", false)
+            or (istable(organism) and (organism.downed == true or organism.otrub == true))
+        local crawling = other:GetNW2Bool("BZCNNPCCrawling", false)
+            or (istable(organism) and organism.crawling == true)
+        local maxHealth = math.max(other:GetMaxHealth(), 1)
+        local severelyWounded = other:Health() / maxHealth <= 0.35
+        if not downed and not crawling and not severelyWounded then continue end
+        local distance = ent:GetPos():DistToSqr(other:GetPos())
+        if not bestDistance or distance < bestDistance then
+            best, bestDistance = other, distance
+        end
+    end
+    return best
+end
+
 function Tasks.RunIdleTask(ent)
     if not IsAvailable(ent) then return false end
     local task = PickTask(ent)
@@ -339,6 +364,25 @@ function Tasks.RunIdleTask(ent)
 
     if task == "talk" then
         RunConversation(ent)
+        return true
+    end
+
+    if task == "rescue" then
+        local wounded = FindWoundedAlly(ent, kind == "rebel" and 1250 or 950)
+        if IsValid(wounded) then
+            local distanceSquared = ent:GetPos():DistToSqr(wounded:GetPos())
+            local medicalRange = tonumber((ent.BZCNClassProfile or {}).MedicalRange) or 320
+            if distanceSquared > medicalRange * medicalRange then
+                MoveTo(ent, wounded:GetPos(), 1.2, kind == "rebel" and 0.78 or 0.62)
+            else
+                ent.loco:SetDesiredSpeed(0)
+                ent.loco:FaceTowards(wounded:GetPos())
+                if BZCN.TryUseMedicalItem then BZCN.TryUseMedicalItem(ent) end
+                coroutine.wait(0.5)
+            end
+        else
+            coroutine.wait(0.55)
+        end
         return true
     end
 
