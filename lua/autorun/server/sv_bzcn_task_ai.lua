@@ -24,6 +24,18 @@ local TASK_POOLS = {
     }
 }
 
+local AMMO_PICKUPS = {
+    item_ammo_pistol = {"Pistol", 20},
+    item_ammo_smg1 = {"SMG1", 45},
+    item_ammo_smg1_grenade = {"SMG1_Grenade", 1},
+    item_ammo_ar2 = {"AR2", 20},
+    item_ammo_ar2_altfire = {"AR2AltFire", 1},
+    item_ammo_357 = {"357", 6},
+    item_box_buckshot = {"Buckshot", 8},
+    item_ammo_crossbow = {"XBowBolt", 5},
+    item_rpg_round = {"RPG_Round", 3}
+}
+
 local function IsManaged(ent)
     return IsValid(ent) and BZCN.IsManaged and BZCN.IsManaged(ent) and not ent:IsPlayer()
 end
