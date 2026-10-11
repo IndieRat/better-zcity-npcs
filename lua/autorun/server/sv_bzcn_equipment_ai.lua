@@ -889,13 +889,19 @@ function BZCN.StopFurryAssimilation(owner, restoreTarget)
     if not IsValid(target) or target:Health() <= 0 then return end
 
     if target:IsPlayer() then
-        if state.createdFake and hg and isfunction(hg.FakeUp) then
-            timer.Simple(0, function()
-                if IsValid(target) and target:IsPlayer() and target:Alive()
-                    and IsValid(target.FakeRagdoll) then
-                    pcall(hg.FakeUp, target)
-                end
-            end)
+        -- A player may already have been fake-ragdolled before the grab, so
+        -- createdFake is not a reliable test for whether release must stand
+        -- them up. Always retry FakeUp while their live fake ragdoll remains.
+        if hg and isfunction(hg.FakeUp) then
+            local function TryReleasedPlayerRecovery()
+                if not IsValid(target) or not target:IsPlayer() or not target:Alive()
+                    or not IsValid(target.FakeRagdoll) then return end
+                pcall(hg.FakeUp, target)
+            end
+            TryReleasedPlayerRecovery()
+            for _, delay in ipairs({0.25, 0.75, 1.5, 2.5}) do
+                timer.Simple(delay, TryReleasedPlayerRecovery)
+            end
         end
     elseif BZCN.IsManaged(target) and state.forcedDowned then
         local support = hg and hg.BZCNNPCSupport
