@@ -1584,6 +1584,69 @@ local function UpdateFurryCarryPhysics(owner, state)
     return true
 end
 
+local function UpdateCompanionCarryPhysics(owner, state)
+    local weapon = state and state.weapon
+    local object = state and state.object
+    if not IsValid(owner) or not BZCN.IsManaged(owner) or not IsValid(weapon)
+        or not IsValid(object) or weapon.CarryEnt ~= object then return false end
+
+    local eye = owner:EyePos()
+    local aim = owner:GetAimVector()
+    if not isvector(eye) or not isvector(aim) or aim:LengthSqr() < 0.01 then
+        aim = owner:GetForward()
+    end
+    if not isvector(eye) or not isvector(aim) then return false end
+
+    local bone = math.max(math.floor(tonumber(state.bone) or weapon.CarryBone or 0), 0)
+    local count = object.GetPhysicsObjectCount and object:GetPhysicsObjectCount() or 0
+    if count > 0 then bone = math.min(bone, count - 1) end
+    local phys = object:GetPhysicsObjectNum(bone)
+    if not IsValid(phys) then return false end
+
+    local carryDistance = math.Clamp(tonumber(weapon.CarryDist) or 42, 24, 56)
+    local desired = eye + aim:GetNormalized() * carryDistance - Vector(0, 0, 8)
+    local forcePosition = phys:GetPos()
+    if isvector(weapon.CarryPos) then
+        local ok, position = pcall(LocalToWorld, weapon.CarryPos, angle_zero, phys:GetPos(), phys:GetAngles())
+        if ok and isvector(position) then forcePosition = position end
+    end
+    local difference = desired - forcePosition
+    local distance = difference:Length()
+    if distance > 220 then return false end
+    local direction = distance > 0.001 and difference:GetNormalized() or vector_origin
+    local velocity = phys:GetVelocity()
+    local desiredForce = difference * 8 - velocity
+    local magnitude = math.min(desiredForce:Length(), 3000)
+        / math.max(velocity:Dot(direction) / 25, 1)
+    local force = desiredForce:LengthSqr() > 0.001
+        and desiredForce:GetNormalized() * magnitude or vector_origin
+
+    phys:Wake()
+    object:SetPhysicsAttacker(owner, 8)
+    if isvector(weapon.CarryPos) then
+        phys:ApplyForceOffset(force, forcePosition)
+    else
+        phys:ApplyForceCenter(force)
+    end
+    phys:ApplyForceCenter(Vector(0, 0, phys:GetMass()))
+    return true
+end
+
+hook.Add("Think", "BZCN_CompanionCarryRuntimeThink", function()
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        local state = IsValid(ent) and ent.BZCNCompanionCarry or nil
+        if not istable(state) then continue end
+        local ok, carried = pcall(UpdateCompanionCarryPhysics, ent, state)
+        if ok and carried then continue end
+
+        if IsValid(state.weapon) and isfunction(state.weapon.SetCarrying) then
+            pcall(state.weapon.SetCarrying, state.weapon)
+        end
+        ent.BZCNCompanionCarry = nil
+        hook.Run("BZCN_CompanionCarryReleased", ent, IsValid(state.object) and state.object or nil)
+    end
+end)
+
 hook.Add("Think", "BZCN_FurryGrabRuntimeThink", function()
     -- Bridge furry-player grabbing to managed NPCs, which the stock hands
     -- SWEP otherwise rejects as NPC/NextBot pickup targets.
