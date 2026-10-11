@@ -910,6 +910,83 @@ local function TransformFurryTarget(attacker, target, state)
     return false
 end
 
+local function IsDownedForFurryGrab(target, rag)
+    if not IsValid(target) then return false end
+    if target.GetNW2Bool and target:GetNW2Bool("BZCNNPCDowned", false) then return true end
+    if target.GetNWBool and (target:GetNWBool("downed", false) or target:GetNWBool("fakeDowned", false)) then return true end
+    local support = hg and hg.BZCNNPCSupport
+    if support and isfunction(support.IsDowned) then
+        local ok, downed = pcall(support.IsDowned, target)
+        if ok and downed then return true end
+    end
+    local organ = target.organism or target.BZCN_Organism
+        or (IsValid(rag) and rag.organism) or {}
+    return istable(organ) and (organ.otrub == true or organ.unconscious == true
+        or organ.downed == true or organ.incapacitated == true)
+end
+
+local function IsGrabbableArmBone(rag, physicsBone)
+    if not IsValid(rag) or not isnumber(physicsBone) or physicsBone < 0
+        or not isfunction(rag.TranslatePhysBoneToBone) then return false end
+    local ok, bone = pcall(rag.TranslatePhysBoneToBone, rag, physicsBone)
+    if not ok or not isnumber(bone) or bone < 0 then return false end
+    local name = string.lower(tostring(rag:GetBoneName(bone) or ""))
+    return string.find(name, "upperarm", 1, true) ~= nil
+        or string.find(name, "forearm", 1, true) ~= nil
+        or string.find(name, "_hand", 1, true) ~= nil
+end
+
+local function TraceFurryGrab(attacker, target, weapon)
+    if not IsValid(attacker) or not IsValid(target) then return false end
+    local eye = isfunction(attacker.EyePos) and attacker:EyePos() or attacker:WorldSpaceCenter()
+    local aim = isfunction(attacker.GetAimVector) and attacker:GetAimVector() or attacker:GetForward()
+    if not isvector(eye) or not isvector(aim) or aim:LengthSqr() < 0.01 then return false end
+
+    local range = tonumber(IsValid(weapon) and weapon.ReachDistance)
+        or tonumber(attacker.BZCNClassProfile and attacker.BZCNClassProfile.FurryGrabRange) or 86
+    range = math.Clamp(range, 36, 112)
+    local filter = {attacker}
+    if IsValid(weapon) then filter[#filter + 1] = weapon end
+    if IsValid(attacker.BZCNHeldWeaponProxy) then filter[#filter + 1] = attacker.BZCNHeldWeaponProxy
+    end
+    local rag = GetCurrentFurryRagdoll(target)
+    local downed = IsDownedForFurryGrab(target, rag)
+    local trace = util.TraceHull({
+        start = eye,
+        endpos = eye + aim:GetNormalized() * range,
+        mins = Vector(-5, -5, -5),
+        maxs = Vector(5, 5, 5),
+        mask = MASK_SHOT,
+        filter = filter
+    })
+    if not trace.Hit or not IsValid(trace.Entity) or eye:DistToSqr(trace.HitPos) > range * range then
+        return false
+    end
+
+    local hitTarget = trace.Entity == target or trace.Entity == rag
+    if not hitTarget then
+        local owner = trace.Entity.BZCNNPCOwner
+        if not IsValid(owner) and trace.Entity.organism then owner = trace.Entity.organism.owner end
+        if not IsValid(owner) and trace.Entity.GetNW2Entity then owner = trace.Entity:GetNW2Entity("BZCNNPCOwner") end
+        if not IsValid(owner) and trace.Entity.GetNWEntity then owner = trace.Entity:GetNWEntity("RagdollOwner") end
+        if not IsValid(owner) and hg and isfunction(hg.RagdollOwner) then
+            local okOwner, value = pcall(hg.RagdollOwner, trace.Entity)
+            if okOwner then owner = value end
+        end
+        hitTarget = owner == target
+    end
+    if not hitTarget then return false end
+
+    if downed then
+        -- A downed target cannot be grabbed by its hidden living entity or
+        -- torso; the trace itself must hit an arm/forearm/hand physics bone.
+        if trace.Entity ~= rag or not IsGrabbableArmBone(rag, trace.PhysicsBone) then
+            return false
+        end
+    end
+    return true, trace
+end
+
 function BZCN.TryFurryAssimilation(attacker, target)
     if not IsValid(attacker) or not IsValid(target) or not BZCN.IsManaged(attacker) then
         if IsValid(attacker) then BZCN.StopFurryAssimilation(attacker) end
@@ -949,7 +1026,14 @@ function BZCN.TryFurryAssimilation(attacker, target)
         weapon = ConfigureWeaponEntity(attacker, "weapon_hands_sh", "BZCNRuntimeWeapon")
     end
     if not IsValid(weapon) then return false end
-    if state then state.weapon = weapon end
+    if state then
+        state.weapon = weapon
+    else
+        -- Mirror weapon_hands_sh's secondary attack: the target must be traced
+        -- within actual reach; downed targets require a physical arm hit.
+        local validTrace = TraceFurryGrab(attacker, target, weapon)
+        if not validTrace then return false end
+    end
 
     if not state then
         state = {
