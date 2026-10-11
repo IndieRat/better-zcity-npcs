@@ -372,7 +372,7 @@ end)
 hook.Add("BZCN_EntityDamaged", "BZCN_MetroCopMoraleDamage", function(victim, attacker, damageInfo)
     if not IsManaged(victim) or GetKind(victim) ~= "metrocop" then return end
     if not IsValid(attacker) or attacker == victim then return end
-    local damage = IsValid(damageInfo) and isfunction(damageInfo.GetDamage)
+    local damage = damageInfo and isfunction(damageInfo.GetDamage)
         and tonumber(damageInfo:GetDamage()) or 0
     local maxHealth = math.max(tonumber(victim:GetMaxHealth()) or 1, 1)
     local loss = math.Clamp(2 + (math.max(damage, 0) / maxHealth) * 18, 2, 14)
