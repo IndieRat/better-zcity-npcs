@@ -367,7 +367,9 @@ function ENT:IsBZCNEnemy(target)
 
     -- Rudeness creates a short, explicit grievance even for factions that
     -- would otherwise treat the target as neutral.
-    if self.BZCNHostileOffender == target and (self.BZCNHostileOffenderUntil or 0) > CurTime() then
+    if self.BZCNHostileOffender == target
+        and (self.BZCNHostileOffenderUntil or 0) > CurTime()
+        and (self.BZCNOffendedAttackAt or 0) <= CurTime() then
         return true
     end
 
