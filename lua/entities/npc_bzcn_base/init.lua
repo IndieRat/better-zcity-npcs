@@ -835,6 +835,36 @@ function ENT:AttackTarget(target)
 
     if not self:IsBZCNEnemy(target) or not HasSenseRecord(self, target, true)
         or CurTime() < (self.BZCNMedicalUntil or 0) then return end
+
+    -- Metro police have training, but not the Combine's emotionless discipline:
+    -- low morale (injuries or nearby squad losses) can cause a short hesitation.
+    -- It delays an attack, never overrides the hard target-incapacitated check.
+    local ownClass = string.lower(tostring(self.BZCNClass or self.PlayerClassName or ""))
+    if ownClass == "metrocop" then
+        local morale = math.Clamp(tonumber(self.BZCNMorale) or 100, 0, 100)
+        if now >= (self.BZCNNextHesitationAt or 0) then
+            local chance = math.Clamp((45 - morale) / 45 * 0.35, 0, 0.35)
+            local maxHealth = math.max(tonumber(self:GetMaxHealth()) or 1, 1)
+            if self:Health() / maxHealth <= 0.3 then chance = math.min(chance + 0.12, 0.45) end
+            self.BZCNNextHesitationAt = now + math.Rand(3.2, 6.5)
+            if chance > 0 and math.Rand(0, 1) < chance then
+                self.BZCNCombatHesitationUntil = now + math.Rand(0.35, 0.8)
+            end
+        end
+
+        if now < (self.BZCNCombatHesitationUntil or 0) then
+            self.LastAttack = now + 0.12
+            if self.loco then
+                self.loco:SetDesiredSpeed(0)
+                self.loco:FaceTowards(target:WorldSpaceCenter())
+            end
+            if self.SetNW2Bool then self:SetNW2Bool("BZCNHesitating", true) end
+            return
+        elseif self:GetNW2Bool("BZCNHesitating", false) and self.SetNW2Bool then
+            self:SetNW2Bool("BZCNHesitating", false)
+        end
+    end
+
     local aimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
         and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
     local distance = self:WorldSpaceCenter():Distance(aimPoint)
