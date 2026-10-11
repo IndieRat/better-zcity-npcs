@@ -128,29 +128,42 @@ function ENT:GetBZCNProfile()
 end
 
 local nativeNPCFaction = {
-    npc_combine_s = "Combine", npc_metropolice = "Combine", npc_combine = "Combine",
-    npc_combinegunship = "Combine", npc_hunter = "Combine", npc_stalker = "Combine",
-    npc_strider = "Combine", npc_turret_floor = "Combine", npc_combine_camera = "Combine",
-    npc_manhack = "Combine", npc_cscanner = "Combine", npc_clawscanner = "Combine",
-    npc_citizen = "default", npc_barney = "default", npc_eli = "default",
-    npc_kleiner = "default", npc_magnusson = "default", npc_mossman = "default",
-    npc_odessa = "default", npc_alyx = "Rebel", npc_vortigaunt = "Rebel",
-    npc_rollermine_hacked = "Rebel"
+    npc_combine_s = "Combine", npc_combine = "Combine", npc_metropolice = "Combine",
+    npc_combinegunship = "Combine", npc_combinedropship = "Combine", npc_hunter = "Combine",
+    npc_stalker = "Combine", npc_strider = "Combine", npc_turret_floor = "Combine",
+    npc_turret_ceiling = "Combine", npc_combine_camera = "Combine", npc_manhack = "Combine",
+    npc_cscanner = "Combine", npc_clawscanner = "Combine",
+    npc_citizen = "default", npc_fisherman = "default", npc_barney = "default",
+    npc_eli = "default", npc_kleiner = "default", npc_magnusson = "default",
+    npc_mossman = "default", npc_odessa = "default",
+    npc_alyx = "Rebel", npc_vortigaunt = "Rebel", npc_rollermine_hacked = "Rebel",
+    npc_turret_floor_resistance = "Rebel"
 }
+
+local playerClassFaction = {
+    combine = "Combine", metrocop = "Combine", police = "Combine",
+    default = "default", civilian = "default",
+    rebel = "Rebel", furry = "furry"
+}
+
+local function CanonicalFaction(value)
+    if not isstring(value) or value == "" then return nil end
+    return playerClassFaction[string.lower(value)] or value
+end
 
 function ENT:GetBZCNEntityFaction(target)
     if not IsValid(target) then return nil end
     if target:IsPlayer() then
         local targetClass = target.PlayerClassName
             or (target.GetNW2String and target:GetNW2String("PlayerClassName", ""))
-        if isstring(targetClass) and targetClass ~= "" then return targetClass end
-        return "default"
+        return CanonicalFaction(targetClass) or "default"
     end
     if BZCN.IsManaged(target) then
         local targetProfile = target.BZCNClassProfile or BZCN.GetClass(target.BZCNClass or target.PlayerClassName)
-        return targetProfile and (targetProfile.Faction or targetProfile.ClassName) or target.BZCN_Faction
+        return CanonicalFaction(targetProfile and (targetProfile.Faction or targetProfile.ClassName)
+            or target.BZCN_Faction or target.PlayerClassName)
     end
-    return nativeNPCFaction[target:GetClass()]
+    return CanonicalFaction(nativeNPCFaction[target:GetClass()])
 end
 
 function ENT:HasRecentAllyThreat(target)
@@ -206,9 +219,11 @@ function ENT:IsBZCNEnemy(target)
         local targetClass = self:GetBZCNEntityFaction(target)
         if targetClass == self.BZCN_Faction or targetClass == self.PlayerClassName then return false end
         for _, enemyClass in ipairs(profile.EnemyFactions or {}) do
-            if enemyClass == targetClass then return true end
+            if CanonicalFaction(enemyClass) == targetClass then return true end
         end
-        return profile.EnemyPlayers == true and (not targetClass or targetClass == "")
+        -- A Combine/MetroCop profile is hostile to all non-Combine players.
+        -- Z-City gives most players a non-empty PlayerClassName.
+        return profile.EnemyPlayers == true
     end
 
     if BZCN.IsManaged(target) then
@@ -227,10 +242,11 @@ function ENT:IsBZCNEnemy(target)
     -- Vanilla Z-City citizens/Combine remain valid friends or threats as well;
     -- this lets scripted NextBots coordinate with the gamemode's native NPCs.
     if target:IsNPC() then
-        local faction = nativeNPCFaction[target:GetClass()]
-        if not faction or faction == profile.Faction then return false end
+        local faction = CanonicalFaction(nativeNPCFaction[target:GetClass()])
+        local ownFaction = CanonicalFaction(profile.Faction or self.BZCN_Faction)
+        if not faction or faction == ownFaction then return false end
         for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
-            if enemyFaction == faction then return true end
+            if CanonicalFaction(enemyFaction) == faction then return true end
         end
     end
     return false
