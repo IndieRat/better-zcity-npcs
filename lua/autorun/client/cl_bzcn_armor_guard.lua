@@ -3,10 +3,15 @@
 -- either lookup. NPC/ragdoll netvars can contain stale or unsupported entries,
 -- which otherwise produce a repeated nil-index error every render frame.
 
-local function EnsureBZCNArmorRendererGuard()
-    if not isfunction(DrawArmors) or DrawArmors.BZCNGuarded then return end
+-- Lua functions are not tables in GMod's Lua runtime, so keep the wrapper
+-- identity in a local instead of attaching marker fields to the function.
+local lastWrappedRenderer
 
-    local original = DrawArmors
+local function EnsureBZCNArmorRendererGuard()
+    local renderer = DrawArmors
+    if not isfunction(renderer) or renderer == lastWrappedRenderer then return end
+
+    local original = renderer
     local guarded = function(ply, armors, ent)
         if not istable(armors) then return end
 
@@ -26,8 +31,7 @@ local function EnsureBZCNArmorRendererGuard()
         return original(ply, validArmors, ent)
     end
 
-    guarded.BZCNGuarded = true
-    guarded.BZCNOriginal = original
+    lastWrappedRenderer = guarded
     DrawArmors = guarded
 end
 
