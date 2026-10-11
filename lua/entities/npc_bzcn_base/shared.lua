@@ -135,6 +135,8 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "climbing"
     elseif support and support.ShouldCrawl and support.ShouldCrawl(self) then
         state = "crawling"
+    elseif CurTime() < (self.BZCNCombatProneUntil or 0) and self:OnGround() then
+        state = "combat_prone"
     elseif not self:OnGround() then
         state = "airborne"
     elseif self.BZCN_Sprinting and speed > 20 then
@@ -159,6 +161,7 @@ end
 function ENT:GetBZCNMovementSequence(speed, state)
     local namedFallbacks = {
         sitting = {"sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle", "sit_idle", "sit", "sitting", "idle_sit"},
+        combat_prone = {"prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle", "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"},
         crawling = {"crawl_all", "crawl_all_01", "crawl_forward", "crawl_loop", "crawl_prone", "crawl", "zombie_crawl", "crawl_idle"},
         climbing = {"climb_up", "climb_ladder", "ladder_climb", "climb"},
         sprinting = {"sprint_all", "sprint", "sprint_armed", "sprint_unarmed", "run_all", "run_all_01", "run_unarmed", "run"},
@@ -224,6 +227,13 @@ function ENT:GetBZCNMovementSequence(speed, state)
         end
         if sequence >= 0 then return sequence end
         state = "standing"
+    elseif state == "combat_prone" then
+        local sequence = GetFirstSequence(self, {
+            "prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle",
+            "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"
+        })
+        if sequence >= 0 then return sequence end
+        state = "crawling"
     elseif state == "sprinting" then
         local sequence = GetFirstSequence(self, {
             "sprint_all", "sprint", "sprint_armed", "sprint_unarmed",
@@ -374,6 +384,21 @@ function ENT:BodyUpdate()
     end
 
     if state == "getting_up" then
+        self:SetPlaybackRate(1)
+        self:FrameAdvance()
+        return
+    end
+
+    if state == "combat_prone" then
+        if self.loco then self.loco:SetDesiredSpeed(0) end
+        local sequence = GetFirstSequence(self, {
+            "prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle",
+            "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"
+        })
+        if sequence >= 0 and self:GetSequence() ~= sequence then
+            self:ResetSequence(sequence)
+            self:SetCycle(0)
+        end
         self:SetPlaybackRate(1)
         self:FrameAdvance()
         return
