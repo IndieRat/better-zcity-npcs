@@ -50,8 +50,8 @@ local function ApplyTPIK(ent)
 
     -- This is the state the native TPIK solver reads from GetActiveWeapon().
     -- Set on the client-side SWEP instance; these are not networked SWEP vars.
-    weapon.rhandik = definition and definition.setrhik == false and false or true
-    weapon.lhandik = definition and (definition.setlhik == false or definition.setlh == false) and false or true
+    weapon.rhandik = not (definition and (definition.setrhik == false or definition.setrh == false))
+    weapon.lhandik = not (definition and (definition.setlhik == false or definition.setlh == false))
     weapon.setrhik = weapon.rhandik
     weapon.setlhik = weapon.lhandik
 
