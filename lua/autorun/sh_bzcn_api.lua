@@ -782,8 +782,67 @@ function BZCN.SelectWeapon(ent, weaponClass)
 end
 
 if SERVER then
+    local heldWeaponProxies = setmetatable({}, {__mode = "k"})
+
+    local function IsHomigradWeaponClass(class)
+        local current, seen = class, {}
+        for _ = 1, 12 do
+            if not isstring(current) or current == "" or seen[current] then return false end
+            if current == "homigrad_base" then return true end
+            seen[current] = true
+            local definition = weapons and weapons.GetStored and weapons.GetStored(current)
+            if not istable(definition) then return false end
+            current = definition.Base
+        end
+        return false
+    end
+
+    local function UpdateHeldWeaponTransform(ent, proxy)
+        if not IsValid(ent) or not IsValid(proxy) then return false end
+        if ent.GetNoDraw and ent:GetNoDraw() then
+            proxy:SetNoDraw(true)
+            return true
+        end
+        proxy:SetNoDraw(false)
+
+        local weaponClass = ent.BZCN_SelectedWeapon
+            or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
+        local runtime = IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon or nil
+        local definition = isstring(weaponClass) and weapons and weapons.GetStored
+            and weapons.GetStored(weaponClass) or nil
+        local worldPos = runtime and runtime.WorldPos or (istable(definition) and definition.WorldPos)
+        local worldAng = runtime and runtime.WorldAng or (istable(definition) and definition.WorldAng)
+        if not isvector(worldPos) then worldPos = vector_origin end
+        if not isangle(worldAng) then worldAng = angle_zero end
+
+        if ent.SetupBones then pcall(ent.SetupBones, ent) end
+        local hand = ent:LookupBone("ValveBiped.Bip01_R_Hand")
+            or ent:LookupBone("ValveBiped.Bip01_L_Hand")
+        if not hand then return false end
+
+        local matrix = ent.GetBoneMatrix and ent:GetBoneMatrix(hand)
+        local handPos, handAng
+        if matrix then
+            handPos, handAng = matrix:GetTranslation(), matrix:GetAngles()
+        elseif ent.GetBonePosition then
+            handPos, handAng = ent:GetBonePosition(hand)
+        end
+        if not isvector(handPos) or not isangle(handAng) then return false end
+
+        -- Mirror Homigrad's own WorldModel_Transform world-position and angle
+        -- offsets, including its final 180-degree forward-axis rotation. The
+        -- regular Homigrad transform returns early for NPC owners, so the
+        -- lightweight BZCN proxy has to do this work explicitly.
+        local pos, ang = LocalToWorld(worldPos, worldAng, handPos, handAng)
+        ang:RotateAroundAxis(ang:Forward(), 180)
+        proxy:SetPos(pos)
+        proxy:SetAngles(ang)
+        return true
+    end
+
     function BZCN.HideHeldWeapon(ent)
         if not IsValid(ent) then return end
+        heldWeaponProxies[ent] = nil
         if IsValid(ent.BZCNHeldWeaponProxy) then ent.BZCNHeldWeaponProxy:Remove() end
         ent.BZCNHeldWeaponProxy = nil
     end
@@ -791,7 +850,9 @@ if SERVER then
     function BZCN.ShowHeldWeapon(ent)
         if not IsValid(ent) then return end
         BZCN.HideHeldWeapon(ent)
-        local model = BZCN.GetWeaponModel(ent, ent.BZCN_SelectedWeapon or ent:GetNW2String("BZCNWeaponClass", ""))
+        local weaponClass = ent.BZCN_SelectedWeapon
+            or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
+        local model = BZCN.GetWeaponModel(ent, weaponClass)
         if not isstring(model) or model == "" then return end
 
         local proxy = ents.Create("prop_dynamic")
@@ -804,17 +865,45 @@ if SERVER then
         proxy:SetMoveType(MOVETYPE_NONE)
         proxy:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
 
-        local hand = ent:LookupBone("ValveBiped.Bip01_R_Hand") or ent:LookupBone("ValveBiped.Bip01_L_Hand")
-        if hand then
-            proxy:FollowBone(ent, hand)
-            proxy:SetLocalPos(Vector(2, 0, 0))
-            proxy:SetLocalAngles(Angle(0, 0, 0))
+        if IsHomigradWeaponClass(weaponClass) then
+            -- Unparented world-space transform lets the gun follow the right-hand
+            -- bone using the real SWEP WorldPos/WorldAng; the final rotation
+            -- prevents the 180-degree roll introduced by directly following a hand.
+            heldWeaponProxies[ent] = proxy
+            UpdateHeldWeaponTransform(ent, proxy)
         else
-            proxy:SetParent(ent)
+            local hand = ent:LookupBone("ValveBiped.Bip01_R_Hand")
+                or ent:LookupBone("ValveBiped.Bip01_L_Hand")
+            if hand then
+                proxy:FollowBone(ent, hand)
+                proxy:SetLocalPos(Vector(2, 0, 0))
+                local stored = isstring(weaponClass) and weapons and weapons.GetStored
+                    and weapons.GetStored(weaponClass) or nil
+                local profile = ent.BZCNClassProfile or {}
+                local hasRangedModel = profile.Ranged == true
+                    and istable(stored) and istable(stored.Primary)
+                    and weaponClass ~= "weapon_hands_sh"
+                proxy:SetLocalAngles(hasRangedModel and Angle(0, 0, 180) or angle_zero)
+            else
+                proxy:SetParent(ent)
+            end
         end
+
         ent.BZCNHeldWeaponProxy = proxy
         ent:DeleteOnRemove(proxy)
     end
+
+    hook.Add("Think", "BZCN_CombatActorHeldWeaponTransform", function()
+        for ent, proxy in pairs(heldWeaponProxies) do
+            if not IsValid(ent) or not IsValid(proxy) then
+                heldWeaponProxies[ent] = nil
+            elseif not UpdateHeldWeaponTransform(ent, proxy) then
+                -- Missing hand matrices can occur during model swaps. Keep the
+                -- proxy stable until the next frame rather than applying bogus angles.
+                proxy:SetNoDraw(true)
+            end
+        end
+    end)
 
     function BZCN.RefreshHeldWeapon(ent)
         if IsValid(ent) then BZCN.ShowHeldWeapon(ent) end
