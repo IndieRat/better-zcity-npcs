@@ -84,7 +84,16 @@ function FakeActor.Attach(owner, ragdoll, config)
     if not IsValid(owner) or not IsValid(ragdoll) then return nil end
     if IsValid(owner.BZCNFakeActor) and owner.BZCNFakeActor.Destroy then owner.BZCNFakeActor:Destroy() end
     local actor = FakeActor.New(owner, ragdoll, config)
-    if actor then owner.BZCNFakeActor = actor end
+    if actor then
+        owner.BZCNFakeActor = actor
+        actor.lastUpdate = CurTime()
+        hook.Add("Think", "BZCN.FakeActorUpdate." .. owner:EntIndex(), function()
+            if not actor.active then hook.Remove("Think", "BZCN.FakeActorUpdate." .. owner:EntIndex()) return end
+            local now = CurTime()
+            actor:Update(now - (actor.lastUpdate or now))
+            actor.lastUpdate = now
+        end)
+    end
     return actor
 end
 
