@@ -200,36 +200,77 @@ local function ComputeNearbyTaskPath(path, ent, destination)
 end
 
 local function MoveTo(ent, destination, duration, speedScale)
-    if not IsAvailable(ent) or not isvector(destination) then return false end
+    if not IsAvailable(ent) or not isvector(destination) or not ent.loco then return false end
+
+    local profile = ent.BZCNClassProfile or {}
+    local speed = tonumber(profile.Speed) or 175
     local path = Path("Follow")
-    path:SetMinLookAheadDistance(100)
-    path:SetGoalTolerance(45)
-    if not ComputeNearbyTaskPath(path, ent, destination) then
+    path:SetMinLookAheadDistance(130)
+    path:SetGoalTolerance(55)
+
+    local function Repath()
+        path = Path("Follow")
+        path:SetMinLookAheadDistance(130)
+        path:SetGoalTolerance(55)
+        if ComputeNearbyTaskPath(path, ent, destination) then return true end
         TryOpenTaskDoor(ent, destination)
         if ent.TryBZCNClimb then pcall(ent.TryBZCNClimb, ent) end
         return false
     end
 
-    local profile = ent.BZCNClassProfile or {}
-    local speed = tonumber(profile.Speed) or 175
-    ent.loco:SetDesiredSpeed(speed * (speedScale or 0.58))
-    local stopAt = CurTime() + (duration or 1.15)
-    while path:IsValid() and CurTime() < stopAt do
-        if not IsAvailable(ent) then return false end
-        if ent.HaveEnemy and IsValid(ent:HaveEnemy()) then return false end
-        if ent:GetPos():DistToSqr(destination) <= 45 * 45 then break end
-        if path:GetAge() > 0.35 then path:Compute(ent, destination) end
-        if path:IsValid() then path:Update(ent) end
-        if ent.loco:IsStuck() then
-            ent.loco:ClearStuck()
-            if ent.TryBZCNClimb and ent:TryBZCNClimb() then break end
-            ent.loco:Jump()
-            break
-        end
-        coroutine.wait(0.1)
+    if not Repath() then
+        -- Don't repeatedly hammer the same unreachable goal every idle tick.
+        ent.BZCNTaskPathFailures = (ent.BZCNTaskPathFailures or 0) + 1
+        ent.BZCNNextTaskPathAt = CurTime() + math.min(0.35 * ent.BZCNTaskPathFailures, 1.8)
+        return false
     end
-    ent.loco:SetDesiredSpeed(speed * 0.35)
-    return true
+
+    ent.BZCNTaskPathFailures = 0
+    local startPos = ent:GetPos()
+    local lastProgressAt = CurTime()
+    local stopAt = CurTime() + (duration or 1.8)
+    local repaths = 0
+    ent.loco:SetDesiredSpeed(speed * (speedScale or 0.58))
+
+    while path:IsValid() and CurTime() < stopAt do
+        if not IsAvailable(ent) then ent.loco:SetDesiredSpeed(0); return false end
+        if ent.HaveEnemy and IsValid(ent:HaveEnemy()) then ent.loco:SetDesiredSpeed(0); return false end
+        if ent:GetPos():DistToSqr(destination) <= 58 * 58 then break end
+
+        path:Update(ent)
+        local moved = ent:GetPos():DistToSqr(startPos)
+        if moved >= 30 * 30 then
+            startPos = ent:GetPos()
+            lastProgressAt = CurTime()
+        elseif CurTime() - lastProgressAt > 0.75 then
+            -- Stuck recovery is a sequence, not a single jump-and-give-up:
+            -- open doors, try a class movement ability, then compute a new
+            -- route toward a nearby reachable nav area around the destination.
+            TryOpenTaskDoor(ent, destination)
+            local climbed = ent.TryBZCNClimb and ent:TryBZCNClimb()
+            if not climbed then
+                ent.loco:Jump()
+                ent.loco:SetVelocity(ent:GetForward() * 65 + Vector(0, 0, 70))
+            end
+            ent.loco:ClearStuck()
+            repaths = repaths + 1
+            if repaths >= 3 or not Repath() then break end
+            startPos = ent:GetPos()
+            lastProgressAt = CurTime()
+        elseif ent.loco:IsStuck() then
+            ent.loco:ClearStuck()
+            TryOpenTaskDoor(ent, destination)
+            if ent.TryBZCNClimb then pcall(ent.TryBZCNClimb, ent) end
+            repaths = repaths + 1
+            if repaths >= 3 or not Repath() then break end
+            startPos = ent:GetPos()
+            lastProgressAt = CurTime()
+        end
+        coroutine.wait(0.08)
+    end
+
+    ent.loco:SetDesiredSpeed(speed * 0.25)
+    return ent:GetPos():DistToSqr(destination) <= 90 * 90
 end
 
 local function FindGuardPost(ent)
