@@ -277,17 +277,23 @@ function BZCN.AttackRuntimeMelee(ent, target)
         weapon = ConfigureWeaponEntity(ent, "weapon_hands_sh", "BZCNRuntimeMeleeWeapon")
     end
     if not IsValid(weapon) or not isfunction(weapon.PrimaryAttack) then return false end
-    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
 
     local reach = tonumber(weapon.ReachDistance) or 40
     -- Don't invoke the native fists attack outside its configured reach; let
     -- the addon use its existing melee fallback for profiles with a longer hit
     -- radius, instead of reporting a native attack that couldn't connect.
-    if distance > reach + 14 then return false end
+    if distance > reach + 14 then
+        if ent.BZCNClassProfile and ent.BZCNClassProfile.FurryStyle
+            and isfunction(weapon.SetFists) then
+            pcall(weapon.SetFists, weapon, false)
+        end
+        return false
+    end
 
     local now = CurTime()
     local nextFire = weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() or 0
     if nextFire > now then return true end
+    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
 
     PlaceRuntimeWeapon(ent, weapon)
     ent.BZCNCombatTarget = target
