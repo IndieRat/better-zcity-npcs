@@ -2102,7 +2102,10 @@ hook.Add("OnNPCKilled", "BZCNNPCSupport_DeathCleanup", function(ent)
     state.getUpTimer = nil
     RestoreRagdollWeapon(state)
     timer.Simple(0, function()
-        if IsValid(rag) then
+        -- OnNPCDeath may transfer this same temporary ragdoll into a permanent
+        -- corpse and install its independent organism before this deferred
+        -- cleanup runs. Never delete a ragdoll after that ownership transfer.
+        if IsValid(rag) and rag.BZCNNPCDeathCorpse ~= true then
             rag.BZCNNPCOwner = nil
             rag:Remove()
         end
