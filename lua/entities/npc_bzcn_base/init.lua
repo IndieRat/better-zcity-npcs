@@ -505,13 +505,18 @@ hook.Add("EntityFireBullets", "BZCNNPCSupport_MetroCopHostileFire", function(sho
     if not IsValid(shooter) or shooter:IsWorld() or not istable(bullet)
         or not isvector(bullet.Src) or not isvector(bullet.Dir) then return end
 
-    local shooterFaction = string.lower(tostring(
-        (BZCN and BZCN.IsManaged and BZCN.IsManaged(shooter)
-            and ((shooter.BZCNClassProfile and shooter.BZCNClassProfile.Faction)
-                or shooter.BZCN_Faction or shooter.BZCNClass))
-        or (shooter.GetNW2String and shooter:GetNW2String("PlayerClassName", ""))
-        or shooter.PlayerClassName or "default"
-    ))
+    local shooterFaction
+    if BZCN and BZCN.IsManaged and BZCN.IsManaged(shooter) then
+        local shooterProfile = shooter.BZCNClassProfile
+        shooterFaction = shooterProfile and shooterProfile.Faction
+            or shooter.BZCN_Faction or shooter.BZCNClass
+    else
+        shooterFaction = shooter.PlayerClassName
+        if (not isstring(shooterFaction) or shooterFaction == "") and shooter.GetNW2String then
+            shooterFaction = shooter:GetNW2String("PlayerClassName", "")
+        end
+    end
+    shooterFaction = string.lower(tostring(shooterFaction or "default"))
     local isCivilian = shooterFaction == "default" or shooterFaction == "civilian"
     if not isCivilian then return end
 
