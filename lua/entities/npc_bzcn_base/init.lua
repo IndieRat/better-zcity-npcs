@@ -678,29 +678,55 @@ local function TryOpenDoorToward(bot, destination)
         or CurTime() < (bot.BZCNNextDoorUseAt or 0) then return false end
 
     local startPos = bot:WorldSpaceCenter()
-    local trace = util.TraceLine({
+    local trace = util.TraceHull({
         start = startPos,
         endpos = destination,
+        mins = Vector(-12, -12, -8),
+        maxs = Vector(12, 12, 8),
         filter = {bot},
         mask = MASK_SOLID
     })
     local door = IsValid(trace.Entity) and trace.Entity or nil
+    if not IsValid(door) then
+        -- Door brushes can be awkward to hit with a line trace. Look for a
+        -- nearby door along the actual travel corridor before giving up.
+        local midpoint = (startPos + destination) * 0.5
+        local bestDist
+        for _, candidate in ipairs(ents.FindInSphere(midpoint, startPos:Distance(destination) * 0.5 + 48)) do
+            if not IsValid(candidate) then continue end
+            local name = string.lower(candidate:GetClass() or "")
+            if not string.find(name, "door", 1, true) and name ~= "func_movelinear" then continue end
+            local d = candidate:WorldSpaceCenter():DistToSqr(midpoint)
+            if not bestDist or d < bestDist then door, bestDist = candidate, d end
+        end
+    end
     if not IsValid(door) then return false end
 
     local class = string.lower(door:GetClass() or "")
-    local isDoor = string.find(class, "door", 1, true) ~= nil
-        or class == "func_movelinear"
+    local isDoor = string.find(class, "door", 1, true) ~= nil or class == "func_movelinear"
     if not isDoor then return false end
 
-    bot.BZCNNextDoorUseAt = CurTime() + 0.85
-    pcall(door.Fire, door, "Unlock", "", 0, bot, bot)
+    local mode = string.lower(tostring(bot.BZCNDoorMode
+        or (bot.BZCNClassProfile and bot.BZCNClassProfile.DoorMode) or "normal"))
+    if mode ~= "fast_loud" and mode ~= "slow_quiet" then mode = "normal" end
+    local now = CurTime()
+    if now < (bot.BZCNNextDoorUseAt or 0) then return false end
+    bot.BZCNNextDoorUseAt = now + (mode == "slow_quiet" and 1.6 or 0.85)
+
+    local delay = mode == "slow_quiet" and 0.25 or 0
+    if mode ~= "slow_quiet" then
+        pcall(door.Fire, door, "Unlock", "", delay, bot, bot)
+    end
     if class == "func_movelinear" then
-        pcall(door.Fire, door, "Toggle", "", 0, bot, bot)
+        pcall(door.Fire, door, "Toggle", "", delay, bot, bot)
     else
-        pcall(door.Fire, door, "Open", "", 0, bot, bot)
+        pcall(door.Fire, door, "Open", "", delay, bot, bot)
     end
     if isfunction(door.Use) then pcall(door.Use, door, bot, bot, USE_ON, 1) end
-    hook.Run("BZCN_NPCOpenedDoor", bot, door)
+    if mode == "fast_loud" then
+        bot:EmitSound("doors/door_metal_large_open1.wav", 72, 100, 0.8)
+    end
+    hook.Run("BZCN_NPCOpenedDoor", bot, door, mode)
     return true
 end
 
