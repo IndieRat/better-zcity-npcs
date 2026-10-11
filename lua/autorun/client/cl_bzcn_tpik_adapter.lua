@@ -119,6 +119,7 @@ local function UpdateRenderedWeapon(ent)
     local proxy = ent:GetNW2Entity("BZCNHeldWeaponProxy")
     if not IsValid(proxy) or proxy:GetNoDraw() then return end
 
+    local weapon = GetRuntimeWeapon(ent)
     local _, class = GetWeaponDefinition(ent)
     if class == "" then return end
     local definition = weapons and weapons.GetStored and weapons.GetStored(class)
@@ -130,8 +131,13 @@ local function UpdateRenderedWeapon(ent)
     local matrix = ent:GetBoneMatrix(hand)
     if not matrix then return end
 
-    local offsetPos = isvector(definition.WorldPos) and definition.WorldPos or vector_origin
-    local offsetAng = isangle(definition.WorldAng) and definition.WorldAng or angle_zero
+    -- Prefer offsets on the actual runtime SWEP instance: Z-City may compute
+    -- these from the active hold type, while the stored definition is only a
+    -- default. Reading the definition first caused a visible idle/firing snap.
+    local offsetPos = IsValid(weapon) and isvector(weapon.WorldPos) and weapon.WorldPos
+        or isvector(definition.WorldPos) and definition.WorldPos or vector_origin
+    local offsetAng = IsValid(weapon) and isangle(weapon.WorldAng) and weapon.WorldAng
+        or isangle(definition.WorldAng) and definition.WorldAng or angle_zero
     local pos, ang = LocalToWorld(offsetPos, offsetAng, matrix:GetTranslation(), matrix:GetAngles())
 
     -- Homigrad's world-model transform intentionally omits the player-only
