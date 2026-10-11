@@ -8,19 +8,25 @@ local Tasks = BZCNTaskAI
 
 local TASK_POOLS = {
     civilian = {
-        {"stay", 3}, {"crowd", 4}, {"talk", 4}, {"wander", 2}, {"look", 2}
+        {"stay", 3}, {"crowd", 4}, {"talk", 4}, {"wander", 2}, {"look", 2}, {"sit", 1}
     },
     furry = {
         {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"hold", 1}
     },
     combine = {
-        {"squad", 4}, {"patrol", 3}, {"hold", 3}, {"cover", 3}, {"pickup", 2}, {"rescue", 2}
+        {"squad", 4}, {"patrol", 3}, {"hold", 3}, {"cover", 3}, {"pickup", 2}, {"rescue", 2}, {"sit", 1}
     },
     metrocop = {
-        {"patrol", 3}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}, {"rescue", 2}
+        {"patrol", 3}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}, {"rescue", 2}, {"sit", 2}
     },
     rebel = {
-        {"squad", 4}, {"patrol", 3}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 1}
+        {"squad", 4}, {"patrol", 3}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 1}, {"sit", 1}
+    },
+    headcrab = {
+        {"hunt", 6}, {"patrol", 2}, {"climb", 3}, {"hold", 1}
+    },
+    zombie = {
+        {"hunt", 4}, {"patrol", 3}, {"hold", 2}, {"sit", 1}
     }
 }
 
@@ -49,7 +55,9 @@ local function GetKind(ent)
     local profile = ent.BZCNClassProfile or {}
     local class = string.lower(tostring(ent.BZCNClass or ent.PlayerClassName or ""))
     local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
-    if profile.FurryStyle == true or class == "furry" or faction == "furry" then return "furry" end
+    if profile.FurryStyle == true or class == "furry" or class == "furry_companion" or faction == "furry" then return "furry" end
+    if class == "headcrab" or profile.HeadcrabStyle == true then return "headcrab" end
+    if class == "headcrab_zombie" or profile.ZombieStyle == true then return "zombie" end
     if class == "metrocop" or class == "police" then return "metrocop" end
     if class == "rebel" or faction == "rebel" then return "rebel" end
     if class == "combine" or faction == "combine" then return "combine" end
@@ -67,7 +75,17 @@ local function PickTask(ent)
     if isstring(ent.BZCNCurrentTask) and (ent.BZCNTaskUntil or 0) > now then
         return ent.BZCNCurrentTask
     end
-    local pool = TASK_POOLS[GetKind(ent)] or TASK_POOLS.civilian
+    local basePool = TASK_POOLS[GetKind(ent)] or TASK_POOLS.civilian
+    local pool = basePool
+    if ent.BZCNClassProfile and ent.BZCNClassProfile.SmartFurry == true then
+        pool = table.Copy(basePool)
+        pool[#pool + 1] = {"pickup", 3}
+        pool[#pool + 1] = {"rescue", 2}
+    end
+    if ent.BZCNCuriosity == true and GetKind(ent) == "civilian" then
+        if pool == basePool then pool = table.Copy(basePool) end
+        pool[#pool + 1] = {"curious", 3}
+    end
     local total = 0
     for _, item in ipairs(pool) do total = total + item[2] end
     local pick = math.random() * total
@@ -559,6 +577,45 @@ function Tasks.RunIdleTask(ent)
         if ent.TryBZCNClimb then pcall(ent.TryBZCNClimb, ent) end
         if ent.loco:IsStuck() then ent.loco:ClearStuck() end
         coroutine.wait(0.6)
+        return true
+    end
+
+    if task == "sit" then
+        local sequence = ent:FindSequence({
+            "sit_ground", "sit_zen", "sit_floor", "sit_chair", "chair_idle",
+            "sit_idle", "sit", "sitting", "idle_sit"
+        })
+        if sequence >= 0 then
+            ent.BZCNSitSequence = sequence
+            ent.BZCNSittingUntil = CurTime() + math.Rand(8, 24)
+            if ent.SetNW2Float then ent:SetNW2Float("BZCNSittingUntil", ent.BZCNSittingUntil) end
+            ent.loco:SetDesiredSpeed(0)
+            local nearby
+            for _, other in ipairs(ents.FindInSphere(ent:GetPos(), 220)) do
+                if other ~= ent and (other:IsPlayer() or IsManaged(other)) then nearby = other break end
+            end
+            if IsValid(nearby) then ent.loco:FaceTowards(nearby:GetPos()) end
+            coroutine.wait(0.65)
+        else
+            coroutine.wait(0.4)
+        end
+        return true
+    end
+
+    if task == "curious" then
+        local target = ent.BZCNCuriousTarget
+        if IsValid(target) then
+            local away = ent:GetPos() - target:GetPos()
+            away.z = 0
+            if away:LengthSqr() < 1 then away = ent:GetForward() end
+            away:Normalize()
+            local destination = NavPoint(ent, target:GetPos() + away * math.Rand(180, 260), 260)
+            MoveTo(ent, destination, 1.0, 0.38)
+            ent.loco:FaceTowards(target:GetPos())
+            coroutine.wait(0.45)
+        else
+            coroutine.wait(0.55)
+        end
         return true
     end
 
