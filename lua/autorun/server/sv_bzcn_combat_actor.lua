@@ -342,7 +342,7 @@ function Actor.GetFireDelay(owner, weapon)
     -- a semi-auto pistol into an almost automatic weapon against players.
     if not automatic then
         if IsValidEntity(owner) then owner.BZCNFireCadenceState = nil end
-        local delay = math.Clamp(math.max(base, pistol and 0.34 or 0.22) + math.Rand(0.045, 0.11), 0.28, 2.2)
+        local delay = math.Clamp(math.max(base, pistol and 0.42 or 0.24) + math.Rand(0.05, 0.12), 0.29, 2.2)
         if IsValidEntity(owner) then owner.BZCNRecoilUntil = CurTime() + delay + 0.12 end
         return delay
     end
