@@ -1360,6 +1360,78 @@ function ENT:OnKilled(damageInfo)
     self:Remove()
 end
 
+function ENT:TryBZCNClimb()
+    if not self.loco or not IsValid(self) or self:WaterLevel() >= 2
+        or self:GetNW2Bool("BZCNNPCDowned", false) then return false end
+    if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
+        and hg.BZCNNPCSupport.IsGettingUp(self) then return false end
+    if CurTime() < (self.BZCNNextClimbAttemptAt or 0) then return false end
+
+    local profile = self.BZCNClassProfile or {}
+    local furry = profile.FurryStyle == true
+    local support = hg and hg.BZCNNPCSupport
+    local crawling = support and isfunction(support.ShouldCrawl)
+        and support.ShouldCrawl(self) or self:GetNW2Bool("BZCNNPCCrawling", false)
+    local origin = self:GetPos()
+    local forward = self:GetForward()
+    local filter = {self}
+    if IsValid(self.BZCNHeldWeaponProxy) then filter[#filter + 1] = self.BZCNHeldWeaponProxy end
+
+    local wall = util.TraceHull({
+        start = origin + Vector(0, 0, 10),
+        endpos = origin + forward * 38 + Vector(0, 0, 10),
+        mins = Vector(-9, -9, 0),
+        maxs = Vector(9, 9, 52),
+        mask = MASK_PLAYERSOLID or MASK_SOLID,
+        filter = filter
+    })
+    if not wall.Hit then return false end
+
+    local high = util.TraceHull({
+        start = origin + Vector(0, 0, 62),
+        endpos = origin + Vector(0, 0, 62) + forward * 42,
+        mins = Vector(-8, -8, 0),
+        maxs = Vector(8, 8, 8),
+        mask = MASK_PLAYERSOLID or MASK_SOLID,
+        filter = filter
+    })
+
+    -- Everyone can vault a lower ledge. Furries and injured crawlers also
+    -- try a stronger upward burst when the wall is higher than their normal
+    -- hull, rather than repeatedly clearing the locomotor's stuck state.
+    if high.Hit and not furry and not crawling then return false end
+    local speed = math.max(tonumber(profile.Speed) or 175, 100)
+    local forwardSpeed = crawling and 70 or math.Clamp(speed * (furry and 0.95 or 0.62), 90, 240)
+    local upwardSpeed = crawling and 135 or furry and 255 or 190
+
+    self.BZCNNextClimbAttemptAt = CurTime() + (furry and 0.45 or 0.8)
+    self.BZCNWallClimbUntil = CurTime() + 0.45
+    if self.SetNW2Bool then self:SetNW2Bool("BZCNWallClimbing", true) end
+
+    if high.Hit and furry and isfunction(self.loco.SetGravity) then
+        pcall(self.loco.SetGravity, self.loco, 0.35)
+        local token = (self.BZCNClimbGravityToken or 0) + 1
+        self.BZCNClimbGravityToken = token
+        timer.Simple(0.5, function()
+            if IsValid(self) and self.BZCNClimbGravityToken == token and self.loco
+                and isfunction(self.loco.SetGravity) then
+                pcall(self.loco.SetGravity, self.loco, 1)
+                if self.SetNW2Bool then self:SetNW2Bool("BZCNWallClimbing", false) end
+            end
+        end)
+    else
+        timer.Simple(0.5, function()
+            if IsValid(self) and (self.BZCNWallClimbUntil or 0) <= CurTime()
+                and self.SetNW2Bool then self:SetNW2Bool("BZCNWallClimbing", false) end
+        end)
+    end
+
+    if isfunction(self.loco.Jump) then pcall(self.loco.Jump, self.loco) end
+    self.loco:SetVelocity(forward * forwardSpeed + Vector(0, 0, upwardSpeed))
+    hook.Run("BZCN_NPCClimbAttempt", self, wall.HitPos, furry, crawling)
+    return true
+end
+
 function ENT:HandleStuck()
     if not self.loco then return end
     if self.TryBZCNClimb and self:TryBZCNClimb() then return end
