@@ -379,6 +379,7 @@ function BZCN.StopFurryAssimilation(owner)
     end
     owner.BZCNFurryGrab = nil
     owner.BZCNFurryGrabTarget = nil
+    owner.BZCNCombatTarget = nil
     owner.BZCN_SimulatedButtons = 0
 end
 
@@ -392,6 +393,10 @@ local function AttachFurryRagdoll(attacker, state, rag)
     organ.assimilated = math.Clamp(tonumber(organ.assimilated) or 0, 0, 1)
     if not IsValid(organ.owner) then organ.owner = target end
 
+    -- Stash these before aliasing: a failure in SetCarrying must still restore
+    -- the ragdoll's own organism reference rather than leave a live alias behind.
+    state.rag = rag
+    state.organism = organ
     local weapon = state.weapon
     if not IsValid(weapon) then return false end
     if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, false) end
@@ -516,6 +521,7 @@ function BZCN.TryFurryAssimilation(attacker, target)
         weapon = ConfigureWeaponEntity(attacker, "weapon_hands_sh", "BZCNRuntimeWeapon")
     end
     if not IsValid(weapon) then return false end
+    if state then state.weapon = weapon end
 
     if not state then
         state = {
