@@ -90,7 +90,7 @@ BZCN.RegisterClass("furry", {
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
-    MedicalRange = 250, FurryStyle = true, Skin = 4, BloodType = "c-",
+    MedicalRange = 250, FurryStyle = true, FurryGrabRange = 86, Skin = 4, BloodType = "c-",
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
 })
 
@@ -237,6 +237,20 @@ function BZCN.InstallAdapter(ent)
         local classes = player and player.classList
         return classes and classes[self.PlayerClassName or ""] or self.BZCNClassProfile
     end
+    -- Z-City classes use PlayerClassName/faction conventions, not an actual
+    -- Player team index. Keep the logical class/team label explicit without
+    -- lying about engine Player/Team identity.
+    data.GetTeamName = function(self)
+        return self.BZCN_TeamName
+            or (self.GetNW2String and self:GetNW2String("BZCNTeamName", ""))
+            or (self.BZCNClassProfile and (self.BZCNClassProfile.TeamName or self.BZCNClassProfile.Faction))
+            or self.PlayerClassName or ""
+    end
+    data.IsCombine = function(self)
+        local faction = self.BZCN_Faction
+            or (self.BZCNClassProfile and self.BZCNClassProfile.Faction)
+        return isstring(faction) and string.lower(faction) == "combine"
+    end
     -- Keep the same query shape used by Player-focused Z-City ragdoll addons,
     -- but return only this NextBot's temporary knockdown ragdoll. Engine
     -- IsPlayer() and player enumeration remain untouched.
@@ -326,9 +340,18 @@ function BZCN.InstallAdapter(ent)
     data.GetLocalVar = function(self, key, default)
         local vars = self.BZCN_LocalVars
         if istable(vars) and vars[key] ~= nil then return vars[key] end
-        if isstring(key) and self.GetNW2Float then
-            local number = self:GetNW2Float("BZCNLocalVar_" .. key, nil)
-            if number ~= nil then return number end
+        if not isstring(key) or not self.GetNW2String then return default end
+        local kind = self:GetNW2String("BZCNLocalVarType_" .. key, "")
+        if kind == "number" and self.GetNW2Float then
+            return self:GetNW2Float("BZCNLocalVar_" .. key, tonumber(default) or 0)
+        elseif kind == "boolean" and self.GetNW2Bool then
+            return self:GetNW2Bool("BZCNLocalVar_" .. key, default == true)
+        elseif kind == "string" then
+            return self:GetNW2String("BZCNLocalVar_" .. key, isstring(default) and default or "")
+        elseif kind == "table" then
+            local raw = self:GetNW2String("BZCNLocalVar_" .. key, "")
+            local decoded = raw ~= "" and util.JSONToTable(raw) or nil
+            return istable(decoded) and decoded or default
         end
         return default
     end
@@ -437,9 +460,11 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.IsOrganism = true
     ent.hg_organism = true
     ent.BZCN_Faction = profile.Faction or profile.ClassName
+    ent.BZCN_TeamName = profile.TeamName or profile.Faction or profile.ClassName
 
     if SERVER then
         ent:SetNW2Bool("BZCNManaged", true)
+        ent:SetNW2String("BZCNTeamName", ent.BZCN_TeamName)
         ent:SetNW2String("BZCNClass", profile.ClassName)
         ent:SetNW2String("PlayerClassName", profile.PlayerClassName)
         ent:SetNW2String("BZCNDisplayName", profile.Name or profile.ClassName)
