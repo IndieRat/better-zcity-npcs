@@ -674,6 +674,7 @@ function ENT:FindFollowTarget()
 end
 
 local function TryOpenDoorToward(bot, destination)
+    if BZCN.RuleEnabled and not BZCN.RuleEnabled("door_interaction") then return false end
     if not IsValid(bot) or not isvector(destination)
         or CurTime() < (bot.BZCNNextDoorUseAt or 0) then return false end
 
@@ -1439,7 +1440,9 @@ function ENT:ChaseEnemy(target)
         local baseSpeed = tonumber(self:GetRunSpeed()) or tonumber(profile.Speed)
             or tonumber(self.MoveSpeed) or 175
         local distance = self:GetPos():Distance(goalPos)
-        if profile.FurryStyle == true and visible and self.loco
+        if profile.FurryStyle == true
+            and (not BZCN.RuleEnabled or BZCN.RuleEnabled("furry_tackles"))
+            and visible and self.loco
             and now >= (self.BZCNNextPounceAt or 0) and self:OnGround()
             and distance >= 82 and distance <= 330 then
             local support = hg and hg.BZCNNPCSupport
@@ -1751,7 +1754,8 @@ function ENT:RunBehaviour()
             end
             coroutine.wait(0.1)
         elseif IsValid(self.BZCNFleeThreat) and (self.BZCNFleeUntil or 0) > CurTime()
-            and not ((self:GetBZCNProfile().Faction == "civilian"
+            and not ((not BZCN.RuleEnabled or BZCN.RuleEnabled("armed_civilian_bravery"))
+                and (self:GetBZCNProfile().Faction == "civilian"
                     or self:GetBZCNProfile().Faction == "default"
                     or self.BZCNClass == "default" or self.BZCNClass == "civilian")
                 and (self:GetBZCNProfile().Ranged == true
