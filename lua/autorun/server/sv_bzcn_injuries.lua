@@ -748,6 +748,15 @@ end
 
 local function CanRecoverFromZCityOrganism(owner, state)
     if not IsValid(owner) or not state or not state.usesZCityOrganism then return true end
+
+    -- A severe leg injury is one of the conditions that caused the downed
+    -- state. Keep the NPC down until it improves instead of letting StateSync
+    -- immediately ragdoll it again after every get-up animation.
+    if (tonumber(state.lleg) or 0) >= 65 or (tonumber(state.rleg) or 0) >= 65
+        or ((tonumber(state.lleg) or 0) >= 45 and (tonumber(state.rleg) or 0) >= 45) then
+        return false
+    end
+
     local org = owner.organism
     if not istable(org) then return true end
 
@@ -825,6 +834,10 @@ local function Recover(owner, rag, removedExternally)
         owner.organism.needfake = false
         owner.organism.alive = owner:Health() > 0
     end
+    -- Z-City can leave this fake request latched after removing the temporary
+    -- ragdoll. Clear it so its next organism tick does not request another.
+    owner.neednpcfake = false
+    owner.needfake = false
 
     owner:SetPos(position)
     owner:SetAngles(Angle(0, angles.y, 0))
@@ -882,6 +895,15 @@ local function Recover(owner, rag, removedExternally)
             state.gettingUp = false
             state.getUpTimer = nil
             if IsAlive(owner) then
+                -- Clear stale requests after the whole get-up animation too.
+                owner.neednpcfake = false
+                owner.needfake = false
+                local organism = owner.organism
+                if istable(organism) then
+                    organism.fake = false
+                    organism.needfake = false
+                    organism.needotrub = false
+                end
                 owner:SetMoveType(owner.BZCNNPCOldMoveType or MOVETYPE_STEP)
                 SyncEntity(owner, state)
             end
@@ -911,7 +933,9 @@ end
 local function EnterDownedState(owner, reason)
     if not IsAlive(owner) then return end
     local state = Support.Attach(owner)
-    if not state or state.downed then return end
+    -- Damage/organism callbacks may arrive while get-up is still playing.
+    -- Treat that interval as recovery, not as a fresh knockdown.
+    if not state or state.downed or state.gettingUp then return false end
 
     local model = owner:GetModel()
     if not isstring(model) or model == "" then return end
@@ -1057,7 +1081,9 @@ InstallManagedTakeDamageInfoGuard = function(owner)
                 timer.Simple(0, function()
                     if not IsAlive(self) or self.BZCNDeathHandled then return end
                     local state = Support.Attach(self)
-                    if state and not state.downed then EnterDownedState(self, "shock") end
+                    if state and not state.downed and not state.gettingUp then
+                        EnterDownedState(self, "shock")
+                    end
                 end)
                 return
             end
@@ -1088,7 +1114,9 @@ local function InstallZCityFakeAdapter()
         if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
             local state = Support.Attach(ent)
-            if state and not state.downed then return EnterDownedState(ent, "shock") end
+            if state and not state.downed and not state.gettingUp then
+                return EnterDownedState(ent, "shock")
+            end
             return false
         end
         return nativeFake(ent, ...)
@@ -1133,7 +1161,7 @@ local function InstallZCityStunAdapters()
                     local seconds = math.max(tonumber(duration) or 1, 0.1)
                     local org = ent.organism or ent.BZCN_Organism
                     if istable(org) then org.stun = CurTime() + seconds end
-                    if not state.downed then EnterDownedState(ent, "stun") end
+                    if not state.downed and not state.gettingUp then EnterDownedState(ent, "stun") end
                     hook.Run("BZCN_NPCStunned", ent, seconds, false)
                     return true
                 end
@@ -1155,7 +1183,7 @@ local function InstallZCityStunAdapters()
                     local seconds = math.max(tonumber(duration) or 1, 0.1)
                     local org = ent.organism or ent.BZCN_Organism
                     if istable(org) then org.lightstun = CurTime() + seconds end
-                    if not state.downed then EnterDownedState(ent, "lightstun") end
+                    if not state.downed and not state.gettingUp then EnterDownedState(ent, "lightstun") end
                     hook.Run("BZCN_NPCStunned", ent, seconds, true)
                     return true
                 end
@@ -1377,7 +1405,7 @@ end
 local function QueueZCityDowned(owner, reason, forceFromDamage)
     if not IsAlive(owner) then return false end
     local state = owner.BZCNNPCOrg or Support.Attach(owner)
-    if not state or state.downed or state.knockdownQueued then return false end
+    if not state or state.downed or state.gettingUp or state.knockdownQueued then return false end
 
     state.knockdownQueued = true
     timer.Simple(0, function()
@@ -1387,7 +1415,7 @@ local function QueueZCityDowned(owner, reason, forceFromDamage)
         end
 
         local current = owner.BZCNNPCOrg
-        if not current or current.downed then
+        if not current or current.downed or current.gettingUp then
             if current then current.knockdownQueued = false end
             return
         end
@@ -1455,7 +1483,7 @@ end)
 hook.Add("HomigradDamage", "BZCNNPCSupport_ZCityIncapacity", function(ent, damageInfo)
     if not IsSupportedNPC(ent) or not damageInfo then return end
     local state = Support.Attach(ent)
-    if not state or not state.usesZCityOrganism or state.downed then return end
+    if not state or not state.usesZCityOrganism or state.downed or state.gettingUp then return end
 
     ent.BZCNNPCLastDamagePosition = damageInfo:GetDamagePosition()
     ent.BZCNNPCLastAttacker = damageInfo:GetAttacker()
@@ -1543,7 +1571,8 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
         (state.lleg >= 45 and state.rleg >= 45)
 
     local lethalHit = amount >= math.max(target:Health(), 1)
-    if (hardHit or legFailure) and not lethalHit and not state.downed and not state.knockdownQueued then
+    if (hardHit or legFailure) and not lethalHit and not state.downed
+        and not state.gettingUp and not state.knockdownQueued then
         state.knockdownQueued = true
         local reason = legFailure and "legs" or "impact"
         timer.Simple(0, function()
@@ -1553,7 +1582,7 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
             end
             local current = target.BZCNNPCOrg
             if current then current.knockdownQueued = false end
-            if current and not current.downed then EnterDownedState(target, reason) end
+            if current and not current.downed and not current.gettingUp then EnterDownedState(target, reason) end
         end)
     end
 
@@ -1605,7 +1634,7 @@ hook.Add("PostEntityTakeDamage", "BZCNNPCSupport_ZCityDamageSync", function(targ
     local legFailure = state.lleg >= 65 or state.rleg >= 65
         or (state.lleg >= 45 and state.rleg >= 45)
     local physiologicallyDown, physiologicalReason = IsZCityPhysiologicallyIncapacitated(target, state)
-    if (legFailure or physiologicallyDown) and not state.downed
+    if (legFailure or physiologicallyDown) and not state.downed and not state.gettingUp
         and not state.knockdownQueued and IsAlive(target) then
         QueueZCityDowned(target, physiologicalReason or (legFailure and "legs" or "impact"), false)
     end
@@ -1679,7 +1708,7 @@ timer.Create("BZCNNPCSupport_StateSync", 0.25, 0, function()
                 local legFailure = state.lleg >= 65 or state.rleg >= 65
                     or (state.lleg >= 45 and state.rleg >= 45)
                 if (organismDown or legFailure) and IsAlive(ent)
-                    and not state.downed and not state.knockdownQueued then
+                    and not state.downed and not state.gettingUp and not state.knockdownQueued then
                     state.knockdownQueued = true
                     local reason = legFailure and "legs" or "impact"
                     timer.Simple(0, function()
@@ -1687,7 +1716,9 @@ timer.Create("BZCNNPCSupport_StateSync", 0.25, 0, function()
                         local current = ent.BZCNNPCOrg
                         if not current then return end
                         current.knockdownQueued = false
-                        if IsAlive(ent) and not current.downed then EnterDownedState(ent, reason) end
+                        if IsAlive(ent) and not current.downed and not current.gettingUp then
+                            EnterDownedState(ent, reason)
+                        end
                     end)
                 end
             else
