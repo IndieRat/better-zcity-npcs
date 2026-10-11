@@ -783,10 +783,21 @@ local function ReleasePlayerFurryGrab(ply, recoverTarget)
     end
     ClearPlayerFurryAssimilationUI(ply)
     if recoverTarget and IsValid(target) and state and state.forcedDowned then
-        local support = hg and hg.BZCNNPCSupport
-        if target:GetNW2Bool("BZCNNPCDowned", false)
-            and support and isfunction(support.Recover) then
-            pcall(support.Recover, target, rag, false)
+        local function TryReleasedVictimRecovery()
+            if not IsValid(target) or not target:IsPlayer() and target:Health() <= 0 then return end
+            if target.BZCNFurryConversionPending then return end
+            local support = hg and hg.BZCNNPCSupport
+            if target:GetNW2Bool("BZCNNPCDowned", false)
+                and support and isfunction(support.Recover) then
+                pcall(support.Recover, target, rag, false)
+            elseif target:IsPlayer() and target:Alive() and IsValid(target.FakeRagdoll)
+                and hg and isfunction(hg.FakeUp) then
+                pcall(hg.FakeUp, target)
+            end
+        end
+        TryReleasedVictimRecovery()
+        for _, delay in ipairs({0.35, 1.0, 2.2}) do
+            timer.Simple(delay, TryReleasedVictimRecovery)
         end
     end
 end
