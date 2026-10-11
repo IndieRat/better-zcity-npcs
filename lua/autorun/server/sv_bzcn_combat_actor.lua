@@ -304,6 +304,24 @@ function Actor.GetFireDelay(owner, weapon)
     return math.Clamp(tonumber(profile and profile.AttackDelay) or 0.35, 0.06, 3)
 end
 
+function Actor.CanFire(owner, weapon)
+    if not IsValidEntity(owner) then return false end
+    if not IsValidEntity(weapon) then return true end
+    local now = CurTime()
+    if (tonumber(weapon.BZCNReloadUntil) or 0) > now then return false end
+    if (tonumber(weapon.BZCNNextFire) or 0) > now then return false end
+    if weapon.GetNextPrimaryFire and weapon:GetNextPrimaryFire() > now then return false end
+
+    local primary = istable(weapon.Primary) and weapon.Primary or {}
+    local clipSize = tonumber(primary.ClipSize) or 0
+    if weapon.GetMaxClip1 then
+        local maxClip = tonumber(weapon:GetMaxClip1())
+        if maxClip and maxClip > 0 then clipSize = maxClip end
+    end
+    if clipSize > 0 and weapon.Clip1 and weapon:Clip1() <= 0 then return false end
+    return true
+end
+
 function Actor.ClearAim(owner)
     if IsValidEntity(owner) then owner.BZCNCombatAimSolution = nil end
 end
