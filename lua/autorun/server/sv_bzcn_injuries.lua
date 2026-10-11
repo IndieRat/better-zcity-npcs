@@ -775,22 +775,33 @@ end
 local function CanRecoverFromZCityOrganism(owner, state)
     if not IsValid(owner) or not state then return false end
     if IsAssimilationLocked(owner) then return false end
-    if not state.usesZCityOrganism then return true end
 
-    -- A severe leg injury is one of the conditions that caused the downed
-    -- state. Keep the NPC down until it improves instead of letting StateSync
-    -- immediately ragdoll it again after every get-up animation.
+    -- Do not turn recovery into an escape hatch. Reuse Z-City's own
+    -- Should Fake Up rulebook (ragdoll momentum, stun and other installed
+    -- physiology restrictions) before applying this bridge's injury limits.
+    if hook and isfunction(hook.Run) then
+        local ok, blocked = pcall(hook.Run, "Should Fake Up", owner)
+        if ok and blocked ~= nil then return false end
+    end
+
+    -- These bridge injury thresholds apply even when this entity isn't using
+    -- the full native organism adapter.
     if (tonumber(state.lleg) or 0) >= 65 or (tonumber(state.rleg) or 0) >= 65
         or ((tonumber(state.lleg) or 0) >= 45 and (tonumber(state.rleg) or 0) >= 45) then
         return false
     end
+    if (tonumber(state.pain) or 0) > 90
+        or (tonumber(state.blood) or 5000) < 2900
+        or (tonumber(state.shock) or 0) >= 95 then
+        return false
+    end
 
-    local org = owner.organism
+    local org = owner.organism or owner.BZCN_Organism
     if not istable(org) then return true end
 
-    -- Match Z-City's own fake-up restrictions. If physiology still says the
-    -- body is unconscious, unable to move, critically blood-depleted, or fake-
-    -- ragdolled, keep it down rather than looping up/down every tick.
+    -- Mirror the native organism's fake-up restrictions so low consciousness,
+    -- severe spine damage, depleted blood, active stun, or a pending fake
+    -- request keeps the NPC down until the underlying condition has cleared.
     if org.otrub or org.needotrub or org.fake or org.needfake
         or owner.otrub or owner.needotrub or owner.fake or owner.needfake
         or owner.neednpcfake then
@@ -802,13 +813,18 @@ local function CanRecoverFromZCityOrganism(owner, state)
         or (tonumber(org.spine3) or 0) >= (tonumber(thresholds.fake_spine3) or math.huge) then
         return false
     end
-    if (tonumber(org.stun) or 0) > CurTime() then return false end
-    if (tonumber(org.blood) or 5000) < 2900 then return false end
+    if (tonumber(org.stun) or 0) > CurTime()
+        or (tonumber(org.lightstun) or 0) > CurTime() then
+        return false
+    end
+    if (tonumber(org.pain) or 0) > 90 then return false end
+    if (tonumber(org.blood) or tonumber(state.blood) or 5000) < 2900 then return false end
     if org.consciousness ~= nil and (tonumber(org.consciousness) or 0) <= 0.4 then return false end
     if (tonumber(org.lleg) or 0) >= 1 and (tonumber(org.rleg) or 0) >= 1
         and (tonumber(org.berserk) or 0) <= 0.3 then
         return false
     end
+    if owner.IsOnFire and owner:IsOnFire() then return false end
     return true
 end
 
@@ -835,8 +851,7 @@ local function Recover(owner, rag, removedExternally)
         end
     end
 
-    if IsAssimilationLocked(owner)
-        or (not removedExternally and not CanRecoverFromZCityOrganism(owner, state)) then
+    if IsAssimilationLocked(owner) or not CanRecoverFromZCityOrganism(owner, state) then
         local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
         state.recoverTimer = timerName
         timer.Create(timerName, 0.75, 1, function()
