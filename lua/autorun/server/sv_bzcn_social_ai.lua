@@ -242,6 +242,81 @@ local function ReactToPhrase(playerEnt, soundPath, context)
     end
 end
 
+-- NPC-to-NPC reactions. Civilians treat nearby furry NPCs as a frightening
+-- presence by default: they emote, call out, and flee rather than initiating
+-- a confrontation. Existing hostility/active combat takes priority.
+local function IsCivilianNPC(ent)
+    if not IsManagedNPC(ent) then return false end
+    local profile = ent.BZCNClassProfile or {}
+    local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+    local className = string.lower(tostring(ent.BZCNClass or ent.PlayerClassName or ""))
+    return faction == "civilian" or faction == "citizen"
+        or string.find(className, "civilian", 1, true) ~= nil
+        or string.find(className, "citizen", 1, true) ~= nil
+end
+
+local function IsFurryThreat(ent)
+    if not IsManagedNPC(ent) then return false end
+    if IsFurry(ent) then return true end
+    local profile = ent.BZCNClassProfile or {}
+    local className = string.lower(tostring(ent.BZCNClass or ent.PlayerClassName or ""))
+    return profile.Furry == true or string.find(className, "furry", 1, true) ~= nil
+end
+
+local function CanUseSocialEmote(ent)
+    return IsManagedNPC(ent) and not IsUnavailableForSocial(ent)
+        and not ent:GetNW2Bool("BZCNNPCDowned", false)
+        and not (hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
+            and hg.BZCNNPCSupport.IsGettingUp(ent))
+        and CurTime() >= (ent.BZCNMedicalUntil or 0)
+        and not istable(ent.BZCNFurryGrab)
+end
+
+local function FleeFromFurry(civilian, furry)
+    if not IsCivilianNPC(civilian) or not IsFurryThreat(furry)
+        or civilian == furry or not CanUseSocialEmote(civilian) then return false end
+    if civilian.BZCNFleeUntil and civilian.BZCNFleeUntil > CurTime() then return true end
+    -- Only run away when the furry is actually an enemy to this civilian.
+    local enemy = EntityIsHostileTo(civilian, furry)
+    if not enemy then return false end
+    civilian.BZCNFleeThreat = furry
+    civilian.BZCNFleeUntil = CurTime() + math.Rand(4.5, 7.5)
+    civilian.BZCNFleeNextCallout = CurTime() + 2
+    civilian.BZCNNextSocialReactionAt = CurTime() + 3
+    PlayNPCGesture(civilian, math.random(1, 2) == 1 and "disagree" or "wave")
+    PlayNPCPhrase(civilian, "answer", "Scared")
+    return true
+end
+
+timer.Create("BZCN_NPC_Social_Network", 0.8, 0, function()
+    local managed = {}
+    for _, ent in ipairs(ents.GetAll()) do
+        if IsManagedNPC(ent) and CanUseSocialEmote(ent) then managed[#managed + 1] = ent end
+    end
+    for _, npc in ipairs(managed) do
+        local nearby = ents.FindInSphere(npc:GetPos(), 520)
+        local responded = false
+        for _, other in ipairs(nearby) do
+            if other == npc or not IsManagedNPC(other) or not CanUseSocialEmote(other) then continue end
+            if IsCivilianNPC(npc) and IsFurryThreat(other) and FleeFromFurry(npc, other) then
+                responded = true
+                break
+            end
+            -- Friendly NPCs occasionally acknowledge each other instead of
+            -- only reacting to players. The shared cooldown prevents chatter spam.
+            if not responded and CurTime() >= (npc.BZCNNextNPCSocialAt or 0)
+                and not EntityIsHostileTo(npc, other)
+                and not EntityIsHostileTo(other, npc)
+                and math.random(1, 5) == 1 then
+                npc.BZCNNextNPCSocialAt = CurTime() + math.Rand(8, 16)
+                PlayNPCGesture(npc, math.random(1, 3) == 1 and "wave" or "agree")
+                PlayNPCPhrase(npc, "ambient", IsFurry(npc) and nil or "Satisfied")
+                responded = true
+            end
+        end
+    end
+end)
+
 local function IsVoiceSound(soundPath)
     if not isstring(soundPath) then return false end
     local path = string.lower(soundPath)
