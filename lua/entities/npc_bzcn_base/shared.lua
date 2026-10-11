@@ -110,6 +110,8 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "downed"
     elseif gettingUp then
         state = "getting_up"
+    elseif self.BZCNFurryGrab then
+        state = "grabbing"
     elseif CurTime() < (self.BZCNMedicalUntil or 0) then
         state = "treating"
     elseif CurTime() < (self.BZCNClimbUntil or 0) then
@@ -128,6 +130,7 @@ function ENT:UpdateBZCNMovementState(speed)
     if previous ~= state then
         self.BZCNMovementState = state
         if previous == "treating" and state ~= "treating" then self.BZCNMedicalSequence = nil end
+        if previous == "grabbing" and state ~= "grabbing" then self.BZCNGrabSequence = nil end
         if SERVER and self.SetNW2String then self:SetNW2String("BZCNMovementState", state) end
         hook.Run("BZCN_NPCMovementStateChanged", self, previous, state)
     end
@@ -169,7 +172,14 @@ function ENT:GetBZCNMovementSequence(speed, state)
 
     local activity
     if state == "airborne" then
-        activity = ACT_MP_JUMP
+        local jumpSequence = GetFirstSequence(self, {
+            "jump_all", "jump", "jump_start", "jump_holding", "fall", "jump_fall"
+        })
+        if jumpSequence >= 0 then return jumpSequence end
+        -- The Z-City IXAnims hold tables don't define ACT_MP_JUMP for most
+        -- citizen/Combine models. Use their run activity in air as the safe
+        -- fallback, rather than dropping into BodyMoveXY mid-jump.
+        activity = ACT_MP_RUN
     elseif state == "running" then
         activity = ACT_MP_RUN
     elseif state == "walking" then
@@ -258,6 +268,29 @@ function ENT:BodyUpdate()
     if state == "getting_up" then
         self:SetPlaybackRate(1)
         self:FrameAdvance()
+        return
+    end
+
+    if state == "grabbing" then
+        if self.loco then self.loco:SetDesiredSpeed(0) end
+        local sequence = self.BZCNGrabSequence
+        if not isnumber(sequence) or sequence < 0 then
+            sequence = GetFirstSequence(self, {
+                "grab", "grab_idle", "idle_armed", "idle_all_01", "idle_all", "idle"
+            })
+            if sequence < 0 then sequence = self:GetBZCNMovementSequence(0, "standing") end
+            self.BZCNGrabSequence = sequence
+        end
+        if isnumber(sequence) and sequence >= 0 then
+            if self:GetSequence() ~= sequence then
+                self:ResetSequence(sequence)
+                self:SetCycle(0)
+            end
+            self:SetPlaybackRate(1)
+            self:FrameAdvance()
+        else
+            self:BodyMoveXY()
+        end
         return
     end
 
