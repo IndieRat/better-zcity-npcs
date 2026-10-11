@@ -774,11 +774,10 @@ local function UseMedicalItem(healer, target, class)
         local maxHealth = math.max(tonumber(target:GetMaxHealth()) or 100, 1)
         local healAmount = hasMedkit and 24 or 12
         local newHealth = math.min(maxHealth, currentHealth + healAmount)
-        if newHealth > currentHealth then
+        local availableSupply = tonumber(med.modeValues and med.modeValues[1]) or 0
+        if availableSupply > 0 and newHealth > currentHealth then
             target:SetHealth(newHealth)
-            if istable(med.modeValues) then
-                med.modeValues[1] = math.max((tonumber(med.modeValues[1]) or 0) - 8, 0)
-            end
+            med.modeValues[1] = math.max(availableSupply - 8, 0)
             applied = true
         end
     else
