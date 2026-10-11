@@ -1120,8 +1120,8 @@ function BZCN.TryFurryAssimilation(attacker, target)
             lastThink = CurTime(),
             attached = false,
             startedDowned = IsDownedForFurryGrab(target, initialRag),
-            grabEntity = IsValid(grabTrace) and grabTrace.Entity or nil,
-            grabPhysicsBone = IsValid(grabTrace) and grabTrace.PhysicsBone or nil,
+            grabEntity = istable(grabTrace) and IsValid(grabTrace.Entity) and grabTrace.Entity or nil,
+            grabPhysicsBone = istable(grabTrace) and grabTrace.PhysicsBone or nil,
             createdFake = target:IsPlayer() and not IsValid(initialRag) or false
         }
         attacker.BZCNFurryGrab = state
