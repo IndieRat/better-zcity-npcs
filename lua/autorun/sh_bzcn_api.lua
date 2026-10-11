@@ -148,7 +148,15 @@ local function DecodeNetworkTable(value, depth, seen)
     for key, item in pairs(value) do
         if isstring(key) or isnumber(key) then
             local decoded = DecodeNetworkTable(item, depth, seen)
-            if decoded ~= nil then out[key] = decoded end
+            local decodedKey = key
+            if isstring(key) then
+                local numericKey = tonumber(key)
+                if numericKey and numericKey >= 0 and math.floor(numericKey) == numericKey
+                    and tostring(math.floor(numericKey)) == key then
+                    decodedKey = math.floor(numericKey)
+                end
+            end
+            if decoded ~= nil then out[decodedKey] = decoded end
         end
     end
     seen[value] = nil
