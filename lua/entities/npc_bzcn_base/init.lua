@@ -642,6 +642,102 @@ function ENT:FindFollowTarget()
     return best
 end
 
+local function TryOpenDoorToward(bot, destination)
+    if not IsValid(bot) or not isvector(destination)
+        or CurTime() < (bot.BZCNNextDoorUseAt or 0) then return false end
+
+    local startPos = bot:WorldSpaceCenter()
+    local trace = util.TraceLine({
+        start = startPos,
+        endpos = destination,
+        filter = {bot},
+        mask = MASK_SOLID
+    })
+    local door = IsValid(trace.Entity) and trace.Entity or nil
+    if not IsValid(door) then return false end
+
+    local class = string.lower(door:GetClass() or "")
+    local isDoor = string.find(class, "door", 1, true) ~= nil
+        or class == "func_movelinear"
+    if not isDoor then return false end
+
+    bot.BZCNNextDoorUseAt = CurTime() + 0.85
+    for _, inputName in ipairs({"Unlock", "Open", "Toggle"}) do
+        pcall(door.Fire, door, inputName, "", 0, bot, bot)
+    end
+    if isfunction(door.Use) then pcall(door.Use, door, bot, bot, USE_ON, 1) end
+    hook.Run("BZCN_NPCOpenedDoor", bot, door)
+    return true
+end
+
+local function TryComputePathToGoal(path, bot, goal)
+    if not path or not IsValid(bot) or not isvector(goal) then return false end
+    local candidates = {goal}
+    local seenAreas = {}
+    local function addAreaPoint(point, radius)
+        if not isvector(point) then return end
+        local area = navmesh.GetNearestNavArea(point, false, radius or 256, false, true)
+        if not IsValid(area) then return end
+        local id = isfunction(area.GetID) and area:GetID() or tostring(area)
+        if seenAreas[id] then return end
+        seenAreas[id] = true
+        local candidate = area:GetClosestPointOnArea(point)
+        if isvector(candidate) then candidates[#candidates + 1] = candidate end
+    end
+
+    -- First try the closest walkable point to the goal. Then try a small ring
+    -- around it so a target beside a wall/doorway doesn't invalidate the route.
+    addAreaPoint(goal, 512)
+    for _, radius in ipairs({88, 160, 244}) do
+        for _, direction in ipairs({
+            Vector(1, 0, 0), Vector(-1, 0, 0), Vector(0, 1, 0), Vector(0, -1, 0)
+        }) do
+            addAreaPoint(goal + direction * radius, 280)
+            if #candidates >= 7 then break end
+        end
+        if #candidates >= 7 then break end
+    end
+
+    -- Try direct destination first, then nearby nav-area alternatives.
+    for _, candidate in ipairs(candidates) do
+        local ok = pcall(path.Compute, path, bot, candidate)
+        if ok and path:IsValid() then return true, candidate end
+    end
+    return false
+end
+
+local function TrySafeUnstuck(bot, destination)
+    if not IsValid(bot) or not bot.loco then return false end
+    if bot.TryBZCNClimb and bot:TryBZCNClimb() then return true end
+    TryOpenDoorToward(bot, destination)
+    local origin = bot:GetPos()
+    local yaw = bot:GetAngles().y
+    for _, offset in ipairs({Angle(0, 70, 0), Angle(0, -70, 0), Angle(0, 145, 0), Angle(0, -145, 0)}) do
+        local direction = Angle(0, yaw, 0) + offset
+        local point = origin + direction:Forward() * 44
+        local area = navmesh.GetNearestNavArea(point, false, 150, false, true)
+        if IsValid(area) then point = area:GetClosestPointOnArea(point) end
+        local trace = util.TraceHull({
+            start = origin + Vector(0, 0, 8),
+            endpos = point + Vector(0, 0, 8),
+            mins = Vector(-10, -10, 0),
+            maxs = Vector(10, 10, 52),
+            filter = {bot},
+            mask = MASK_PLAYERSOLID or MASK_SOLID
+        })
+        if not trace.Hit then
+            bot.loco:ClearStuck()
+            bot.loco:Approach(point, 1)
+            bot.loco:Jump()
+            bot.BZCNNextPathRetryAt = CurTime() + 0.2
+            return true
+        end
+    end
+    bot.loco:ClearStuck()
+    bot.BZCNNextPathRetryAt = CurTime() + 0.65
+    return false
+end
+
 function ENT:FollowAlly(target)
     if not IsValid(target) then return end
     local profile = self:GetBZCNProfile()
@@ -649,8 +745,12 @@ function ENT:FollowAlly(target)
     local path = Path("Follow")
     path:SetMinLookAheadDistance(125)
     path:SetGoalTolerance(followDistance)
-    path:Compute(self, target:GetPos())
-    if not path:IsValid() then return end
+    local initialPath = TryComputePathToGoal(path, self, target:GetPos())
+    if not initialPath then
+        TryOpenDoorToward(self, target:GetPos())
+        coroutine.wait(0.25)
+        return
+    end
 
     while IsValid(target) and self:IsBZCNAlly(target) do
         if self:GetNW2Bool("BZCNNPCDowned", false)
@@ -1138,18 +1238,37 @@ function ENT:ChaseEnemy(target)
             or pathGoal:DistToSqr(goalPos) > 64 * 64
         )
         if mustCompute then
-            pcall(path.Compute, path, self, goalPos)
+            local computed = TryComputePathToGoal(path, self, goalPos)
             pathGoal = goalPos
-            nextPathCompute = now + 0.4
+            nextPathCompute = now + (computed and 0.4 or 0.85)
+            if not computed then
+                TryOpenDoorToward(self, goalPos)
+                self.BZCNPathRetries = (self.BZCNPathRetries or 0) + 1
+            else
+                self.BZCNPathRetries = 0
+            end
         end
 
-        -- PathFollower fails when no usable navmesh path exists. A direct
-        -- locomotion approach is a fallback so an otherwise valid enemy chase
-        -- does not abort at the first invalid path.
+        -- Do not walk straight into a solid wall when a nav route failed.
+        -- Try opening a door, a short alternate path, a climb/vault or a clear
+        -- sidestep, then retry the path on the next movement tick.
         if path:IsValid() then
             path:Update(self)
         else
-            self.loco:Approach(goalPos, 1)
+            TryOpenDoorToward(self, goalPos)
+            local direct = util.TraceHull({
+                start = self:WorldSpaceCenter(),
+                endpos = goalPos,
+                mins = Vector(-8, -8, -8),
+                maxs = Vector(8, 8, 8),
+                filter = {self},
+                mask = MASK_PLAYERSOLID or MASK_SOLID
+            })
+            if not direct.Hit or direct.Entity == target then
+                self.loco:Approach(goalPos, 1)
+            elseif now >= (self.BZCNNextPathRetryAt or 0) then
+                TrySafeUnstuck(self, goalPos)
+            end
         end
         self.loco:FaceTowards(visible and ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
             and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos()) or goalPos)
