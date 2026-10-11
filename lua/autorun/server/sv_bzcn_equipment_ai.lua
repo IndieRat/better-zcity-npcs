@@ -363,8 +363,25 @@ function BZCN.FireRuntimeWeapon(ent, target)
     end
     local beforeClip = weapon.Clip1 and weapon:Clip1() or -1
     if clipSize > 0 and beforeClip == 0 then
-        -- A NextBot has no native Player reload input/viewmodel. Refill its own
-        -- clip after a short reload window instead of leaving gun NPCs unarmed.
+        -- Reloads consume the NPC's own Z-City reserve-ammo inventory. A gun
+        -- with no reserve stays empty until its carrier scavenges more ammo.
+        local ammoName = isstring(primary.Ammo) and primary.Ammo or nil
+        local ammoID = ammoName and game and game.GetAmmoID and game.GetAmmoID(ammoName) or nil
+        local ammoKey = isnumber(ammoID) and ammoID >= 0 and ammoID or ammoName
+        local inventory = GetInventory(ent)
+        inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+        local reserve
+        if ammoKey ~= nil then
+            reserve = tonumber(inventory.Ammo[ammoKey] or inventory.Ammo[tostring(ammoKey)])
+            if reserve == nil and ammoName then reserve = tonumber(inventory.Ammo[ammoName]) end
+        end
+        if reserve ~= nil and reserve <= 0 then
+            weapon.BZCNReloadUntil = nil
+            weapon.BZCNOutOfAmmo = true
+            weapon.BZCNNextFire = now + 0.35
+            if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(weapon.BZCNNextFire) end
+            return true
+        end
         if not weapon.BZCNReloadUntil then
             weapon.BZCNReloadUntil = now + math.max(tonumber(profile.ReloadDelay) or 1.25, 0.5)
             if isfunction(weapon.Reload) then pcall(weapon.Reload, weapon) end
@@ -374,12 +391,25 @@ function BZCN.FireRuntimeWeapon(ent, target)
         if now < weapon.BZCNReloadUntil then return true end
         local defaultClip = tonumber(primary.DefaultClip)
         if not defaultClip or defaultClip < 1 then defaultClip = clipSize end
-        weapon:SetClip1(math.Clamp(defaultClip, 1, clipSize))
+        local loaded = math.Clamp(defaultClip, 1, clipSize)
+        if reserve ~= nil then loaded = math.min(loaded, reserve) end
+        if loaded <= 0 then
+            weapon.BZCNReloadUntil = nil
+            weapon.BZCNOutOfAmmo = true
+            return true
+        end
+        if reserve ~= nil and ammoKey ~= nil then
+            inventory.Ammo[ammoKey] = math.max(reserve - loaded, 0)
+            inventory.Ammo[tostring(ammoKey)] = nil
+            if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
+        end
+        weapon:SetClip1(loaded)
         if weapon.SetNWInt then weapon:SetNWInt("Clip1", weapon:Clip1()) end
         weapon.drawBullet = true
         weapon.BZCNNextFire = now + 0.2
         if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(weapon.BZCNNextFire) end
         weapon.BZCNReloadUntil = nil
+        weapon.BZCNOutOfAmmo = false
         return true
     end
 
