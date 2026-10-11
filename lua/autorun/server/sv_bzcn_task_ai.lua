@@ -80,6 +80,8 @@ end
 
 local function IsAvailable(ent)
     if not IsManaged(ent) or not ent.loco or ent:Health() <= 0 then return false end
+    if BZCNCombatActor and isfunction(BZCNCombatActor.IsIncapacitated)
+        and BZCNCombatActor.IsIncapacitated(ent) then return false end
     if ent:GetNW2Bool("BZCNNPCDowned", false) or ent:GetNW2Bool("BZCNNPCGettingUp", false) then return false end
     if CurTime() < (ent.BZCNMedicalUntil or 0) or istable(ent.BZCNFurryGrab) then return false end
     if hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp then
