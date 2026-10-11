@@ -89,6 +89,9 @@ timer.Create("BZCN_NaturalNPCBloodLoss", TICK, 0, function()
         if rate <= 0 then
             state.bleedRate = 0
             state.bleedActive = false
+            if owner.SetNW2Bool then owner:SetNW2Bool("BZCNNPCBleeding", false) end
+            local rag = owner.BZCNNPCRagdoll
+            if IsValid(rag) and rag.SetNW2Bool then rag:SetNW2Bool("BZCNNPCBleeding", false) end
             continue
         end
 
