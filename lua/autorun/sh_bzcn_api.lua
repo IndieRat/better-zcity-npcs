@@ -85,7 +85,7 @@ BZCN.RegisterClass("Rebel", {
 BZCN.RegisterClass("furry", {
     Name = "Furry Specimen", PlayerClassName = "furry",
     Model = "models/eradium/protogen_player.mdl", Health = 125, Speed = 190,
-    Faction = "furry", EnemyPlayers = false, EnemyFactions = {"Combine", "default", "Rebel"},
+    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
     FollowAllies = true, FollowRange = 800, FollowDistance = 125, HelpRange = 1000, HelpMemory = 8,
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
