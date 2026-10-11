@@ -1053,8 +1053,29 @@ local function EnterDownedState(owner, reason)
     rag.ply = owner
     owner.FakeRagdoll = rag
     rag.BZCNNPCOrg = state
-    rag.BZCN_Organism = owner.BZCN_Organism
-    rag.organism = nil
+    -- Expose the native Z-City organism before Ragdoll_Create runs. Extensions
+    -- inspect rag.organism synchronously in that hook; leaving it nil here
+    -- meant they saw a plain prop_ragdoll even though SyncEntity populated it
+    -- a few lines later. Keep the same table while the actor is merely downed,
+    -- because its blood/wounds and recovery state still belong to the living NPC.
+    local organism = owner.organism or owner.BZCN_Organism
+    if istable(organism) then
+        organism.owner = owner
+        organism.fakePlayer = true
+        organism.alive = owner:Health() > 0
+        organism.entindex = owner:EntIndex()
+        rag.organism = organism
+        rag.BZCN_Organism = organism
+    else
+        rag.organism = nil
+        rag.BZCN_Organism = nil
+    end
+    -- Preserve the engine blood metadata as well as Z-City's organism fields;
+    -- blood-effect addons commonly query the ragdoll's blood color directly.
+    if isfunction(owner.GetBloodColor) and isfunction(rag.SetBloodColor) then
+        local ok, bloodColor = pcall(owner.GetBloodColor, owner)
+        if ok and bloodColor ~= nil then pcall(rag.SetBloodColor, rag, bloodColor) end
+    end
     rag:SetNWEntity("BZCNNPCOwner", owner)
     rag:SetNWEntity("RagdollOwner", owner)
     if rag.SetNW2Entity then rag:SetNW2Entity("BZCNNPCOwner", owner) end
@@ -1068,6 +1089,21 @@ local function EnterDownedState(owner, reason)
     if not hookOK then
         ErrorNoHalt("[BZCN] Ragdoll_Create hook failed for NPC #"
             .. tostring(owner:EntIndex()) .. ": " .. tostring(hookError) .. "\n")
+    end
+
+    -- A compatibility hook for extension addons: unlike the engine's
+    -- CreateEntityRagdoll event, this proxy represents a temporary downed NPC,
+    -- not a death. It is fired only after ownership and organism aliases exist.
+    hook.Run("BZCNNPC_RagdollCreated", owner, rag, reason, state)
+
+    -- A Z-City hook may have replaced an alias; restore the shared live organism
+    -- before the next sync so bleeding/wound readers see a stable table.
+    organism = owner.organism or owner.BZCN_Organism or rag.organism
+    if istable(organism) then
+        owner.organism = organism
+        owner.BZCN_Organism = organism
+        rag.organism = organism
+        rag.BZCN_Organism = organism
     end
 
     -- Z-City hooks may alter the proxy's physics setup. Reassert a physical,
