@@ -1271,9 +1271,16 @@ function ENT:ChaseEnemy(target)
                             healthState.pain = math.min((tonumber(healthState.pain) or 0) + 12, 100)
                         end
                     end
-                    if isfunction(support and support.EnterDownedState)
+                    if pounceTarget:IsPlayer() then
+                        -- Use Z-City's player stun/fake-ragdoll path so the
+                        -- pounce has the same physical consequence as a tackle.
+                        if hg and isfunction(hg.LightStunPlayer)
+                            and not IsValid(pounceTarget.FakeRagdoll) then
+                            pcall(hg.LightStunPlayer, pounceTarget, 2)
+                        end
+                    elseif isfunction(support and support.EnterDownedState)
                         and not pounceTarget:GetNW2Bool("BZCNNPCDowned", false)
-                        and (pounceTarget:IsPlayer() or BZCN.IsManaged(pounceTarget)) then
+                        and BZCN.IsManaged(pounceTarget) then
                         pcall(support.EnterDownedState, pounceTarget, "furry_pounce")
                     end
                     if pounceTarget.loco then
@@ -1384,7 +1391,20 @@ function ENT:ChaseEnemy(target)
                             target = target, direction = direction, started = now,
                             expires = now + 0.9
                         }
-                        self:PlayBZCNAttackAnimation()
+                        local pounceSequence = self:FindSequence({
+                            "leap_attack", "fastzombie_leap", "jump_attack",
+                            "jump_fist", "jump", "range_attack_melee"
+                        })
+                        if pounceSequence >= 0 and isfunction(self.AddGestureSequence) then
+                            pcall(self.AddGestureSequence, self, pounceSequence)
+                        else
+                            self:PlayBZCNAttackAnimation()
+                        end
+                        -- The melee gesture keeps both arms reaching forward
+                        -- while the NextBot's physics velocity carries the leap.
+                        if isfunction(self.AddGesture) and ACT_GESTURE_RANGE_ATTACK_MELEE then
+                            pcall(self.AddGesture, self, ACT_GESTURE_RANGE_ATTACK_MELEE)
+                        end
                         self:EmitSound("npc_fastzombie.leap", 70, math.random(95, 105))
                         self.loco:Jump()
                         self.loco:SetVelocity(direction * 350 + Vector(0, 0, 215))
