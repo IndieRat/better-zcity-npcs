@@ -17,10 +17,10 @@ local TASK_POOLS = {
         {"squad", 4}, {"patrol", 3}, {"hold", 3}, {"cover", 3}, {"pickup", 2}, {"rescue", 2}, {"sit", 1}
     },
     metrocop = {
-        {"patrol", 3}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}, {"rescue", 2}, {"sit", 2}
+        {"guard", 5}, {"patrol", 2}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}, {"rescue", 2}, {"sit", 2}
     },
     rebel = {
-        {"squad", 4}, {"patrol", 3}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 1}, {"sit", 1}
+        {"guard", 4}, {"squad", 4}, {"patrol", 2}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 1}, {"sit", 1}
     },
     headcrab = {
         {"hunt", 6}, {"patrol", 2}, {"climb", 3}, {"hold", 1}
@@ -177,6 +177,54 @@ local function MoveTo(ent, destination, duration, speedScale)
     end
     ent.loco:SetDesiredSpeed(speed * 0.35)
     return true
+end
+
+local function FindGuardPost(ent)
+    local home = EnsureHome(ent)
+    local bestDoor, bestScore
+    local doorClasses = {"prop_door_rotating", "func_door", "func_door_rotating", "func_movelinear"}
+    for _, class in ipairs(doorClasses) do
+        for _, door in ipairs(ents.FindByClass(class)) do
+            if not IsValid(door) then continue end
+            local distance = door:GetPos():DistToSqr(home)
+            if distance > 1400 * 1400 then continue end
+            local score = distance + math.Rand(0, 95000)
+            if not bestScore or score < bestScore then bestDoor, bestScore = door, score end
+        end
+    end
+
+    local civilianCenter, civilians = Vector(0, 0, 0), 0
+    for _, other in ipairs(ents.FindInSphere(home, 1200)) do
+        if not IsManaged(other) or other == ent then continue end
+        local profile = other.BZCNClassProfile or {}
+        local faction = string.lower(tostring(profile.Faction or other.BZCN_Faction or ""))
+        local class = string.lower(tostring(other.BZCNClass or other.PlayerClassName or ""))
+        if faction == "civilian" or class == "default" or profile.CivilianStyle == true then
+            civilianCenter = civilianCenter + other:GetPos()
+            civilians = civilians + 1
+        end
+    end
+    if civilians > 0 then civilianCenter = civilianCenter / civilians end
+
+    local selected
+    if IsValid(bestDoor) and (civilians == 0 or bestDoor:GetPos():DistToSqr(home) < civilianCenter:DistToSqr(home) * 1.4) then
+        local direction = ent:GetPos() - bestDoor:GetPos()
+        direction.z = 0
+        if direction:LengthSqr() < 1 then direction = Vector(1, 0, 0) end
+        direction:Normalize()
+        selected = bestDoor:GetPos() + direction * math.Rand(72, 128)
+    elseif civilians > 0 then
+        local angle = math.Rand(0, math.pi * 2)
+        selected = civilianCenter + Vector(math.cos(angle), math.sin(angle), 0) * math.Rand(140, 260)
+    elseif IsValid(bestDoor) then
+        selected = bestDoor:GetPos() + Vector(math.Rand(-100, 100), math.Rand(-100, 100), 0)
+    else
+        selected = ChooseHomePoint(ent, 320)
+    end
+
+    local area = navmesh.GetNearestNavArea(selected, false, 320, false, true)
+    if IsValid(area) then selected = area:GetClosestPointOnArea(selected) end
+    return selected
 end
 
 local function ChooseHomePoint(ent, radius)
@@ -393,6 +441,17 @@ hook.Add("BZCN_NPCSpawned", "BZCN_TaskDirectorHome", function(ent)
     ent.BZCNTaskHomeRadius = 650
 
     local kind = GetKind(ent)
+    if kind == "metrocop" or kind == "rebel" then
+        timer.Simple(0.25, function()
+            if not IsAvailable(ent) then return end
+            ent.BZCNGuardPost = FindGuardPost(ent)
+            if isvector(ent.BZCNGuardPost) and ent.SetNW2Vector then
+                ent:SetNW2Vector("BZCNGuardPost", ent.BZCNGuardPost)
+            end
+            ent.BZCNCurrentTask = "guard"
+            ent.BZCNTaskUntil = CurTime() + math.Rand(9, 18)
+        end)
+    end
     if kind == "metrocop" then
         ent.BZCNMorale = tonumber(ent.BZCNMorale) or 100
         if ent.SetNW2Float then ent:SetNW2Float("BZCNMorale", ent.BZCNMorale) end
@@ -577,6 +636,36 @@ function Tasks.RunIdleTask(ent)
         if ent.TryBZCNClimb then pcall(ent.TryBZCNClimb, ent) end
         if ent.loco:IsStuck() then ent.loco:ClearStuck() end
         coroutine.wait(0.6)
+        return true
+    end
+
+    if task == "guard" and (kind == "metrocop" or kind == "rebel") then
+        local post = ent.BZCNGuardPost
+        if not isvector(post) then
+            post = FindGuardPost(ent)
+            ent.BZCNGuardPost = post
+            if isvector(post) and ent.SetNW2Vector then ent:SetNW2Vector("BZCNGuardPost", post) end
+        end
+        if isvector(post) then
+            if ent:GetPos():DistToSqr(post) > 78 * 78 then
+                MoveTo(ent, post, 1.2, kind == "rebel" and 0.68 or 0.58)
+            else
+                ent.loco:SetDesiredSpeed(0)
+                local focus
+                for _, near in ipairs(ents.FindInSphere(post, 450)) do
+                    if near ~= ent and (near:IsPlayer() or IsManaged(near))
+                        and (not isfunction(ent.IsBZCNEnemy) or not ent:IsBZCNEnemy(near)) then
+                        focus = near
+                        break
+                    end
+                end
+                if IsValid(focus) then ent.loco:FaceTowards(focus:WorldSpaceCenter())
+                else ent:SetAngles(Angle(0, ent:GetAngles().y + math.Rand(-18, 18), 0)) end
+                coroutine.wait(math.Rand(0.5, 1.0))
+            end
+        else
+            coroutine.wait(0.45)
+        end
         return true
     end
 
