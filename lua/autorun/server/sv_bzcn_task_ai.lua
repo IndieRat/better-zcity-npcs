@@ -925,7 +925,8 @@ function Tasks.RunIdleTask(ent)
                 local physBone = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or nil
                 local phys = isnumber(physBone) and rag:GetPhysicsObjectNum(physBone) or nil
                 if IsValid(phys) then
-                    local target = center + Vector(phase == 1 and 0 or 0, 0, phase == 1 and -10 or -4)
+                    local target = center + rag:GetForward() * (phase == 1 and 18 or 8)
+                        + Vector(0, 0, phase == 1 and -12 or -5)
                     local delta = target - phys:GetPos()
                     phys:Wake()
                     phys:ApplyForceCenter(delta * (phase == 1 and 18 or 5) - phys:GetVelocity() * 3)
