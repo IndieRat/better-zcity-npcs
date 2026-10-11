@@ -250,6 +250,13 @@ function BZCN.EquipRuntimeWeapon(ent, class)
     return true
 end
 
+function BZCN.GetRuntimeMeleeWeapon(ent)
+    if not IsValid(ent) or not BZCN.IsManaged(ent) then return nil end
+    local weapon = ent.BZCNRuntimeMeleeWeapon
+    if IsValid(weapon) then return weapon end
+    return ConfigureWeaponEntity(ent, "weapon_hands_sh", "BZCNRuntimeMeleeWeapon")
+end
+
 hook.Add("BZCN_InventorySet", "BZCN_RuntimeWeaponInventorySync", function(ent, inventory)
     if not IsValid(ent) or not BZCN.IsManaged(ent) or not istable(inventory) then return end
     local weapon = ent.BZCNRuntimeWeapon
