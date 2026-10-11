@@ -5,9 +5,10 @@ A Z-City / Homigrad-compatible scripted NextBot addon with vanilla-style classes
 ## Starter classes
 
 - `npc_bzcn_default` — civilian / default class.
-- `npc_bzcn_combine` — Combine soldier.
+- `npc_bzcn_combine` — Combine soldier; logical `Combine` faction/team label and hostile to non-Combine player classes.
+- `npc_bzcn_metrocop` — Metro Police; shares the Combine faction and allied disposition.
 - `npc_bzcn_rebel` — Resistance fighter.
-- `npc_bzcn_furry` — adapted from Z-City's own `furry` player class.
+- `npc_bzcn_furry` — adapted from Z-City's own `furry` player class; can grab nearby non-furry players or managed NPCs and apply Z-City-style assimilation.
 
 The furry profile uses the model from Z-City's `lua/homigrad/playerclass/classes/furry/sh_furry.lua` (`models/eradium/protogen_player.mdl`), the claw model used by `weapon_hands_sh`, the `c-` blood type, and the `protovisor` head-armor entry. It does **not** call the player's conversion, UI, or role callbacks, because those require a real Player entity.
 
@@ -22,6 +23,7 @@ Spawn them from the Entities tab under **Better ZCity NPCs**, or use server cons
 ```text
 ent_create npc_bzcn_default
 ent_create npc_bzcn_combine
+ent_create npc_bzcn_metrocop
 ent_create npc_bzcn_rebel
 ent_create npc_bzcn_furry
 ```
@@ -38,7 +40,9 @@ bzcn_npc_test <entity-index> reset
 bzcn_npc_set_class <entity-index> furry
 ```
 
-The class-switch command accepts `default`, `Combine`, `Rebel`, or `furry`. `down` tests ragdoll/recovery, `crawl` simulates a serious leg injury, and `reset` clears injuries. The dump command reports the effective class, inventory, fake weapon, organism data and the engine's actual `IsPlayer()` result.
+The class-switch command accepts `default`, `Combine`, `Metrocop`, `Rebel`, or `furry`. `down` tests ragdoll/recovery, `crawl` simulates a serious leg injury, and `reset` clears injuries. The dump command reports the effective class, inventory, fake weapon, organism data and the engine's actual `IsPlayer()` result.
+
+Combine and MetroCop use the shared `Combine` faction/role label and consider players outside that faction hostile; the logical `TeamName` is exposed through the NPC adapter because a NextBot cannot join a real Player team index. The furry NPC keeps Z-City's hands SWEP lowered for grabbing, carries the target ragdoll through `weapon_hands_sh:SetCarrying()`, and holds simulated RMB+LMB so the real Z-City assimilation code can run. Conversion calls `hg.Furrify()` for real players or switches a managed NPC to the furry class.
 
 ## Adapter chain
 
@@ -85,7 +89,7 @@ The client HUD bridge mirrors health, blood, pain, shock and body-part state for
 
 ## Animation, civilian appearance, and ally AI
 
-Managed NPCs now explicitly register each resolved model through `hg.IXAnims.SetModelClass(model, class)`; this works around Z-City's resolver returning the generic `player` class early for most `models/player/...` paths. The addon's model mapper selects `citizen_male`, `citizen_female`, `overwatch`, `metrocop`, or `player` as appropriate, including explicit per-class overrides and hold types for the selected Z-City loadout. The movement state machine publishes `BZCNMovementState` and transitions between `standing`, `walking`, `running`, `crawling`, `climbing`, `airborne`, `downed`, and `getting_up`. Crawling tries available crawl sequences before falling back to crouch-walk. Climbing is a bounded small-ledge clamber/jump assist when the upper hull has clearance; it is not unrestricted ladder or wall climbing. Attacks consult the IX animation attack activity without invoking Player-only animation callbacks.
+Managed NPCs now explicitly register each resolved model through `hg.IXAnims.SetModelClass(model, class)`; this works around Z-City's resolver returning the generic `player` class early for most `models/player/...` paths. The addon's model mapper selects `citizen_male`, `citizen_female`, `overwatch`, `metrocop`, or `player` as appropriate, including explicit per-class overrides and hold types for the selected Z-City loadout. The movement state machine publishes `BZCNMovementState` and transitions between `standing`, `walking`, `running`, `crawling`, `climbing`, `grabbing`, `airborne`, `downed`, `getting_up`, and `treating`. It caches each selected weighted sequence per model/hold type/activity instead of reselecting every update, and uses `BodyMoveXY()` for moving states so `move_x`/`move_y` pose parameters are updated while frames advance only once. Crawling tries available crawl sequences before falling back to crouch-walk. Climbing is a bounded small-ledge clamber/jump assist when the upper hull has clearance; it is not unrestricted ladder or wall climbing. Attacks consult the IX animation attack activity without invoking Player-only animation callbacks.
 
 The `default` civilian first tries Z-City's `hg.Appearance.GetRandomAppearance()` and `hg.Appearance.ForceApplyAppearance()` path, which supplies its civilian model/clothing/bodygroups. If that API is unavailable or fails, it falls back to a random standard Group03 male/female civilian model and skin.
 
