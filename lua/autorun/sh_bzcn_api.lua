@@ -1191,6 +1191,14 @@ if SERVER then
         for class, value in pairs(inventory.Weapons or {}) do if value then weaponsFound[#weaponsFound + 1] = class end end
         table.sort(weaponsFound)
         local state = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.GetNPCHealthTable(target)
+        local organism = target.organism or target.BZCN_Organism
+        local nativeOrgList = hg and hg.organism and hg.organism.list
+        local nativeBloodModule = hg and hg.organism and hg.organism.module
+            and hg.organism.module.blood and hg.organism.module.blood[2]
+        local bloodValue = tonumber(organism and organism.blood) or tonumber(state and state.blood) or 0
+        local woundCount = istable(organism) and istable(organism.wounds) and #organism.wounds or 0
+        local arterialCount = istable(organism) and istable(organism.arterialwounds)
+            and #organism.arterialwounds or 0
         local grab = target.BZCNFurryGrab
         local grabTarget = istable(grab) and grab.target or nil
         local grabOrg = IsValid(grabTarget) and (grabTarget.organism or grabTarget.BZCN_Organism) or nil
@@ -1214,6 +1222,15 @@ if SERVER then
                 .. " | assimilation: " .. tostring(istable(grabOrg) and grabOrg.assimilated or "(n/a)"),
             "Medical inventory: " .. tostring(istable(inventory.Weapons) and inventory.Weapons.weapon_medkit_sh == true)
                 .. " / " .. tostring(istable(inventory.Weapons) and inventory.Weapons.weapon_bandage_sh == true),
+            "Blood: " .. tostring(math.floor(bloodValue + 0.5)) .. "/"
+                .. tostring(math.floor(tonumber(organism and organism.maxBlood) or tonumber(state and state.maxBlood) or 5000))
+                .. " | native organism registered: " .. tostring(istable(nativeOrgList) and nativeOrgList[target] == organism)
+                .. " | native blood module: " .. tostring(isfunction(nativeBloodModule))
+                .. " | uses native physiology: " .. tostring(state and state.usesZCityOrganism == true),
+            "Blood records: wounds=" .. tostring(woundCount) .. " arterial=" .. tostring(arterialCount)
+                .. " internalBleed=" .. tostring(tonumber(organism and organism.internalBleed) or 0)
+                .. " bleed=" .. tostring(tonumber(organism and organism.bleed) or 0)
+                .. " fallbackRate=" .. tostring(tonumber(state and state.bleedRate) or 0),
             "Netvars + Inventory bridge: " .. tostring(isfunction(target.GetNetVar) and isfunction(target.SetNetVar)),
             "Organism-compatible table: " .. tostring(istable(target.BZCN_Organism)) .. " | shared injury table: " .. tostring(istable(state))
         }
