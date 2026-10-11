@@ -596,9 +596,10 @@ function ENT:PlayBZCNAttackAnimation()
         local className = self.GetBZCNAnimationClass and self:GetBZCNAnimationClass()
         local animationClass = className and hg and hg.IXAnims and hg.IXAnims[className]
         local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-        local rawHoldType = profile.AnimationHoldType
-            or (istable(stored) and (stored.HoldType or stored.holdtype)) or "smg"
-        local holdType = string.lower(tostring(rawHoldType))
+        local holdType = BZCNCombatActor and BZCNCombatActor.GetWeaponHoldType
+            and BZCNCombatActor.GetWeaponHoldType(self, self.BZCNRuntimeWeapon, weaponClass)
+            or string.lower(tostring(profile.AnimationHoldType
+                or (istable(stored) and (stored.HoldType or stored.holdtype)) or "smg"))
         local translators = {
             physgun = "smg", ar2 = "smg", crossbow = "shotgun", rpg = "grenade",
             slam = "smg", revolver = "pistol", duel = "pistol"
@@ -653,9 +654,10 @@ function ENT:PlayBZCNAttackAnimation()
     local animationClass = modelClass and hg and hg.IXAnims and hg.IXAnims[modelClass]
     if istable(animationClass) then
         local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-        local holdType = profile.AnimationHoldType
-            or (istable(stored) and (stored.HoldType or stored.holdtype)) or "melee"
-        holdType = string.lower(tostring(holdType))
+        local holdType = BZCNCombatActor and BZCNCombatActor.GetWeaponHoldType
+            and BZCNCombatActor.GetWeaponHoldType(self, self.BZCNRuntimeWeapon, weaponClass)
+            or string.lower(tostring(profile.AnimationHoldType
+                or (istable(stored) and (stored.HoldType or stored.holdtype)) or "melee"))
         local translators = {
             physgun = "smg", ar2 = "smg", crossbow = "shotgun", rpg = "grenade",
             slam = "smg", fist = "normal", melee2 = "melee", knife = "melee",
@@ -778,7 +780,8 @@ function ENT:AttackTarget(target)
     local maxReach = weaponClass == "weapon_hands_sh" and 40 or 55
     local meleeRange = math.min(tonumber(profile.MeleeRange) or self.AttackRange or 78, maxReach)
     local source = self:WorldSpaceCenter()
-    local destination = target:WorldSpaceCenter()
+    local destination = (BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+        and BZCNCombatActor.GetTargetAimPoint(target)) or target:WorldSpaceCenter()
     local delta = destination - source
     local distanceToCenter = delta:Length()
     if distanceToCenter > meleeRange then return end
@@ -794,6 +797,10 @@ function ENT:AttackTarget(target)
         mask = MASK_SHOT
     })
     local hitTarget = trace.Entity == target
+    if not hitTarget and IsValid(trace.Entity) and BZCNCombatActor
+        and BZCNCombatActor.ResolveTarget then
+        hitTarget = BZCNCombatActor.ResolveTarget(trace.Entity) == target
+    end
     if not hitTarget and IsValid(trace.Entity) and hg and isfunction(hg.RagdollOwner) then
         local ok, ragOwner = pcall(hg.RagdollOwner, trace.Entity)
         hitTarget = ok and ragOwner == target
@@ -935,8 +942,9 @@ function ENT:ChaseEnemy(target)
             desiredSpeed = baseSpeed * 0.78
         end
 
-        local actualDistance = visible and self:GetPos():Distance(((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
-            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos())) or math.huge
+        local actualAimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+            and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+        local actualDistance = visible and self:WorldSpaceCenter():Distance(actualAimPoint) or math.huge
         local engageDistance = 32
         if hasRangedWeapon then
             engageDistance = math.Clamp((tonumber(profile.WeaponRange) or 900) * 0.35, 220, 360)
@@ -981,8 +989,9 @@ function ENT:ChaseEnemy(target)
             and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos()) or goalPos)
 
         local range = tonumber(profile.WeaponRange) or 900
-        if visible and self:GetPos():DistToSqr(((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
-            and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos())) <= range * range then
+        local aimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+            and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+        if visible and self:WorldSpaceCenter():DistToSqr(aimPoint) <= range * range then
             self.BZCNEnemy = target
             self:AttackTarget(target)
         end
