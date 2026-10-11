@@ -278,9 +278,8 @@ local function FleeFromFurry(civilian, furry)
     if not IsCivilianNPC(civilian) or not IsFurryThreat(furry)
         or civilian == furry or not CanUseSocialEmote(civilian) then return false end
     if civilian.BZCNFleeUntil and civilian.BZCNFleeUntil > CurTime() then return true end
-    -- Only run away when the furry is actually an enemy to this civilian.
-    -- Fear is not the same as faction hostility: civilians try to escape a
-    -- nearby furry without necessarily selecting it as a target to attack.
+    -- Fear is not faction hostility: civilians escape a nearby furry without
+    -- necessarily selecting it as a target to attack.
     civilian.BZCNFleeThreat = furry
     civilian.BZCNFleeUntil = CurTime() + math.Rand(4.5, 7.5)
     civilian.BZCNFleeNextCallout = CurTime() + 2
@@ -405,7 +404,9 @@ local function ReactToGesture(playerEnt, gesture)
             npc.BZCNOffendedAttackAt = now + (hostile and 0.15 or 1.0)
             npc.BZCNEnemy = nil
             if npc.BZCNBefriendedPlayers then npc.BZCNBefriendedPlayers[playerEnt] = nil end
-            PlayNPCGesture(npc, "flipoff")
+            if not PlayNPCGesture(npc, "flipoff") then
+                PlayNPCGesture(npc, "disagree")
+            end
             PlayNPCPhrase(npc, "answer", "Yell")
             hook.Run("BZCN_NPCOffended", npc, playerEnt, gesture)
             continue
@@ -439,8 +440,8 @@ end)
 hook.Add("PlayerSay", "BZCN_Social_ChatGestureReaction", function(ply, text)
     if not isstring(text) then return end
     local command = string.lower(string.Trim(text))
-    command = string.match(command, "^/?act%s+([%w_]+)$")
-        or string.match(command, "^/([%w_]+)$")
+    command = string.match(command, "^/?act%s+([%w_%-]+)$")
+        or string.match(command, "^/([%w_%-]+)$")
     if not command then return end
     local gesture = GestureFromName(command)
     if gesture then
@@ -483,7 +484,29 @@ BZCN.Social = BZCN.Social or {}
 BZCN.Social.PlayGesture = PlayNPCGesture
 BZCN.Social.PlayPhrase = PlayNPCPhrase
 
+local function ResolveManagedNPCTarget(target)
+    if IsManagedNPC(target) then return target end
+    if not IsValid(target) then return nil end
+    local candidates = {
+        target.BZCNNPCOwner,
+        target.owner,
+        target.organism and target.organism.owner,
+        target.BZCN_Organism and target.BZCN_Organism.owner,
+        target.GetNW2Entity and target:GetNW2Entity("BZCNNPCOwner", NULL) or nil,
+        target.GetNWEntity and target:GetNWEntity("RagdollOwner", NULL) or nil
+    }
+    if hg and isfunction(hg.RagdollOwner) then
+        local ok, owner = pcall(hg.RagdollOwner, target)
+        if ok then candidates[#candidates + 1] = owner end
+    end
+    for _, candidate in ipairs(candidates) do
+        if IsManagedNPC(candidate) then return candidate end
+    end
+    return nil
+end
+
 local function RestoreTrustAfterHealing(healer, target, itemClass)
+    target = ResolveManagedNPCTarget(target)
     if not IsValid(healer) or not IsManagedNPC(target) then return end
     target.BZCNBefriendedPlayers = target.BZCNBefriendedPlayers or setmetatable({}, {__mode = "k"})
     target.BZCNBefriendedPlayers[healer] = CurTime() + 120
@@ -520,9 +543,10 @@ local function AttachHealingTrust(weapon)
             ErrorNoHalt("[BZCN] Medical SWEP Heal wrapper failed: " .. tostring(result) .. "\n")
             return nil
         end
-        if result and IsValid(target) and IsManagedNPC(target) then
+        local managedTarget = result and ResolveManagedNPCTarget(target) or nil
+        if IsValid(managedTarget) then
             local owner = self:GetOwner()
-            if IsValid(owner) then hook.Run("BZCN_NPCHealed", owner, target, self:GetClass()) end
+            if IsValid(owner) then hook.Run("BZCN_NPCHealed", owner, managedTarget, self:GetClass()) end
         end
         return result
     end
