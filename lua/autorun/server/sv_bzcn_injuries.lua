@@ -35,18 +35,24 @@ local function SetNWBool(ent, key, value)
 end
 
 local function ResolveNPC(ent)
-    if not IsValid(ent) then return nil end
+    -- Player entities must never be treated as NPC bridge owners, even if
+    -- another addon accidentally leaves a BZCNNPCOwner field/netvar on them.
+    if not IsValid(ent) or ent:IsPlayer() then return nil end
+
     local owner = ent.BZCNNPCOwner
     if not IsValid(owner) and ent.GetNW2Entity then
         owner = ent:GetNW2Entity("BZCNNPCOwner")
     end
-    if IsValid(owner) then return owner end
+
+    -- Never trust an arbitrary valid owner reference. The resolved owner must
+    -- itself be in the NPC bridge's supported entity scope.
+    if IsSupportedNPC(owner) then return owner end
     if IsSupportedNPC(ent) then return ent end
     return nil
 end
 
 function Support.ShouldCrawl(ent)
-    if not IsValid(ent) then return false end
+    if not IsValid(ent) or ent:IsPlayer() then return false end
     local owner = ResolveNPC(ent)
     local state = IsValid(owner) and owner.BZCNNPCOrg or nil
     if state then return state.crawling == true end
@@ -54,13 +60,14 @@ function Support.ShouldCrawl(ent)
 end
 
 function Support.GetNPCHealthTable(ent)
+    if not IsValid(ent) or ent:IsPlayer() then return nil end
     local owner = ResolveNPC(ent)
     if not IsValid(owner) then return nil end
     return owner.BZCNNPCOrg
 end
 
 function Support.IsGettingUp(ent)
-    if not IsValid(ent) then return false end
+    if not IsValid(ent) or ent:IsPlayer() then return false end
     local owner = ResolveNPC(ent)
     local state = IsValid(owner) and owner.BZCNNPCOrg or nil
     if state then return state.gettingUp == true end
@@ -74,9 +81,15 @@ local function IsAlive(ent)
 end
 
 local function IsAssimilationLocked(ent)
-    if not IsValid(ent) then return false end
+    -- Assimilation locking is NPC-only. Never let a stale custom field on a
+    -- real player suppress a native player knockdown/get-up operation.
+    if not IsValid(ent) or ent:IsPlayer() then return false end
     local owner = ResolveNPC(ent)
-    if not IsValid(owner) then owner = ent end
+    if not IsValid(owner) then
+        if not IsSupportedNPC(ent) then return false end
+        owner = ent
+    end
+    if not IsSupportedNPC(owner) or owner:IsPlayer() then return false end
     if owner.BZCNAssimilationLocked ~= true
         and not (owner.GetNW2Bool and owner:GetNW2Bool("BZCNAssimilationLocked", false)) then
         return false
@@ -96,9 +109,10 @@ end
 Support.IsAssimilationLocked = IsAssimilationLocked
 
 hook.Add("Should Fake Up", "BZCNNPCSupport_AssimilationLock", function(ent)
-    -- This addon owns only managed-NPC recovery. Never return a value for real
-    -- players (or unrelated entities): a non-nil hook result short-circuits
-    -- Z-City's remaining hooks and original gamemode hook.
+    -- Hard boundary: this hook is not allowed to participate in real player
+    -- recovery. Returning nil lets Z-City's complete native hook chain proceed.
+    if not IsValid(ent) or ent:IsPlayer() then return end
+
     local owner = ResolveNPC(ent)
     if not IsValid(owner) then
         if not IsSupportedNPC(ent) then return end
@@ -1438,6 +1452,8 @@ local function InstallZCityFakeAdapter()
     local nativeFake = hg.Fake
     hg.BZCNNPCOriginalFake = hg.BZCNNPCOriginalFake or nativeFake
     local function BZCNNPCFakeAdapter(ent, ...)
+        -- Preserve the native player path before inspecting any addon marker.
+        if IsValid(ent) and ent:IsPlayer() then return nativeFake(ent, ...) end
         if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
             local state = Support.Attach(ent)
@@ -1461,6 +1477,8 @@ local function InstallZCityFakeUpAdapter()
     local nativeFakeUp = hg.FakeUp
     hg.BZCNNPCOriginalFakeUp = hg.BZCNNPCOriginalFakeUp or nativeFakeUp
     local function BZCNNPCFakeUpAdapter(ent, ...)
+        -- Player recovery always delegates to the function this adapter wrapped.
+        if IsValid(ent) and ent:IsPlayer() then return nativeFakeUp(ent, ...) end
         if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
         if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
             local state = ent.BZCNNPCOrg
@@ -1482,6 +1500,7 @@ local function InstallZCityStunAdapters()
             local nativeStun = hg.StunPlayer
             hg.BZCNNPCOriginalStunPlayer = hg.BZCNNPCOriginalStunPlayer or nativeStun
             local function BZCNNPCStunAdapter(ent, duration, ...)
+                if IsValid(ent) and ent:IsPlayer() then return nativeStun(ent, duration, ...) end
                 if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
                     local state = Support.Attach(ent)
                     if not state then return false end
@@ -1504,6 +1523,7 @@ local function InstallZCityStunAdapters()
             local nativeLightStun = hg.LightStunPlayer
             hg.BZCNNPCOriginalLightStunPlayer = hg.BZCNNPCOriginalLightStunPlayer or nativeLightStun
             local function BZCNNPCLightStunAdapter(ent, duration, ...)
+                if IsValid(ent) and ent:IsPlayer() then return nativeLightStun(ent, duration, ...) end
                 if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
                     local state = Support.Attach(ent)
                     if not state then return false end
