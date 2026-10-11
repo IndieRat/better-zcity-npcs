@@ -1351,9 +1351,19 @@ function ENT:ChaseEnemy(target)
             self.loco:ClearStuck()
             stuckCount = stuckCount + 1
             nextPathCompute = 0
-            if not (self.TryBZCNClimb and self:TryBZCNClimb()) then self.loco:Jump() end
-            if stuckCount >= 5 then
-                self.BZCNNextChaseRetry = CurTime() + 0.75
+            pathGoal = nil
+
+            local recovered = self.TryBZCNClimb and self:TryBZCNClimb()
+            if not recovered then recovered = TrySafeUnstuck(self, goalPos) end
+            if not recovered then
+                self.loco:Jump()
+                self.loco:SetVelocity(self:GetForward() * 55 + Vector(0, 0, 65))
+            end
+
+            -- Don't abandon a combat target after only a couple of failed
+            -- frames. Try alternate routes and side steps several times first.
+            if stuckCount >= 7 then
+                self.BZCNNextChaseRetry = CurTime() + 0.4
                 return
             end
         else
