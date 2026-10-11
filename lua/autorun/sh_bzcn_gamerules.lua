@@ -54,7 +54,8 @@ if SERVER then
 else
     function BZCN.RuleEnabled(name)
         local convar = GetConVar("bzcn_rule_" .. tostring(name or ""))
-        return convar and convar:GetBool() or true
+        if convar then return convar:GetBool() end
+        return true
     end
 
     hook.Add("PopulateToolMenu", "BZCN_GameRulesOptions", function()
@@ -62,7 +63,11 @@ else
             "Better ZCity NPCs", "", "", function(panel)
                 panel:ClearControls()
                 panel:Help("Server-authoritative gameplay rules. Changes require admin permissions.")
-                for name, rule in pairs(RULES) do
+                local names = {}
+                for name in pairs(RULES) do names[#names + 1] = name end
+                table.sort(names)
+                for _, name in ipairs(names) do
+                    local rule = RULES[name]
                     local control = panel:CheckBox(rule.label)
                     control:SetTooltip(rule.help)
                     local convar = GetConVar("bzcn_rule_" .. name)
