@@ -1021,6 +1021,22 @@ local function EnterDownedState(owner, reason)
         ErrorNoHalt("[BZCN] Ragdoll_Create hook failed for NPC #"
             .. tostring(owner:EntIndex()) .. ": " .. tostring(hookError) .. "\n")
     end
+
+    -- Z-City hooks may alter the proxy's physics setup. Reassert a physical,
+    -- gravity-driven ragdoll after those hooks so it can settle onto the floor
+    -- instead of retaining a frozen/upright pose. This never moves the hidden
+    -- NextBot; only the temporary prop_ragdoll is affected.
+    rag:SetMoveType(MOVETYPE_VPHYSICS)
+    rag:SetSolid(SOLID_VPHYSICS)
+    rag:SetCollisionGroup(COLLISION_GROUP_NONE)
+    for i = 0, (rag:GetPhysicsObjectCount() or 0) - 1 do
+        local phys = rag:GetPhysicsObjectNum(i)
+        if IsValid(phys) then
+            phys:EnableMotion(true)
+            phys:EnableGravity(true)
+            phys:Wake()
+        end
+    end
     SyncEntity(rag, state)
 
     rag:CallOnRemove("BZCNNPCSupport_ExternalRemoval", function(removed)
