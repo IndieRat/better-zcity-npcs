@@ -259,7 +259,9 @@ local function ReactToPhrase(playerEnt, soundPath, context)
         PlayNPCGesture(npc, chosenGesture)
         local chosenContext = hostile and "Scared" or responseContext
         local chosenKind = hostile and "answer" or kind
-        PlayNPCPhrase(npc, chosenKind, chosenContext)
+        -- Emergency/help callouts outrank ambient phrase cooldowns, just as
+        -- weapon attacks outrank idle emotes.
+        PlayNPCPhrase(npc, chosenKind, chosenContext, urgentSignal and true or false)
     end
 end
 
