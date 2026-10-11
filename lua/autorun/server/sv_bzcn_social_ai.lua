@@ -258,6 +258,13 @@ local function IsCivilianNPC(ent)
 end
 
 local function IsFurryThreat(ent)
+    if not IsValid(ent) then return false end
+    if ent:IsPlayer() then
+        if not ent:Alive() then return false end
+        local className = string.lower(tostring(ent.PlayerClassName
+            or (ent.GetNW2String and ent:GetNW2String("PlayerClassName", "")) or ""))
+        return className == "furry" or ent.IsFurry == true
+    end
     if not IsManagedNPC(ent) then return false end
     if IsFurry(ent) then return true end
     local profile = ent.BZCNClassProfile or {}
@@ -297,7 +304,21 @@ timer.Create("BZCN_NPC_Social_Network", 0.8, 0, function()
     for _, npc in ipairs(managed) do
         local nearby = ents.FindInSphere(npc:GetPos(), 520)
         local responded = false
+
+        -- Civilians are frightened by furry players as well as managed furry
+        -- NPCs. Fleeing is deliberately separate from combat hostility.
+        if IsCivilianNPC(npc) then
+            for _, ply in ipairs(player.GetAll()) do
+                if IsFurryThreat(ply) and npc:GetPos():DistToSqr(ply:GetPos()) <= 520 * 520
+                    and FleeFromFurry(npc, ply) then
+                    responded = true
+                    break
+                end
+            end
+        end
+
         for _, other in ipairs(nearby) do
+            if responded then break end
             if other == npc or not IsManagedNPC(other) or not CanUseSocialEmote(other) then continue end
             if IsCivilianNPC(npc) and IsFurryThreat(other) and FleeFromFurry(npc, other) then
                 responded = true
