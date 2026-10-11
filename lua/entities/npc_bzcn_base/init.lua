@@ -693,8 +693,11 @@ local function TryOpenDoorToward(bot, destination)
     if not isDoor then return false end
 
     bot.BZCNNextDoorUseAt = CurTime() + 0.85
-    for _, inputName in ipairs({"Unlock", "Open", "Toggle"}) do
-        pcall(door.Fire, door, inputName, "", 0, bot, bot)
+    pcall(door.Fire, door, "Unlock", "", 0, bot, bot)
+    if class == "func_movelinear" then
+        pcall(door.Fire, door, "Toggle", "", 0, bot, bot)
+    else
+        pcall(door.Fire, door, "Open", "", 0, bot, bot)
     end
     if isfunction(door.Use) then pcall(door.Use, door, bot, bot, USE_ON, 1) end
     hook.Run("BZCN_NPCOpenedDoor", bot, door)
