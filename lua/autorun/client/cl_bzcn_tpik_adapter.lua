@@ -182,11 +182,20 @@ end
 
 local function ApplyFingerHoldPose(ent, weapon)
     if not IsValid(ent) or not IsValid(weapon) or not hg then return end
-    local hold = weapon.hold_type
+
+    -- Scripted weapons often keep their hold type on the registered SWEP
+    -- definition rather than on the spawned runtime entity used by an NPC.
+    local definition = weapons and weapons.GetStored
+        and weapons.GetStored(weapon:GetClass()) or nil
+    local hold = weapon.hold_type or weapon.HoldType
+        or (istable(definition) and (definition.HoldType or definition.holdtype))
     if not isstring(hold) or hold == "" then
         local ok, isPistol = false, false
         if isfunction(weapon.IsPistolHoldType) then ok, isPistol = pcall(weapon.IsPistolHoldType, weapon) end
-        hold = ok and isPistol and "pistol_hold2" or "ak_hold"
+        if not ok and istable(definition) and isfunction(definition.IsPistolHoldType) then
+            ok, isPistol = pcall(definition.IsPistolHoldType, weapon)
+        end
+        hold = ok and isPistol and "pistol_hold2" or "ar2"
     end
     if isfunction(hg.set_hold) then pcall(hg.set_hold, ent, hold) end
     if isfunction(hg.set_holdrh) then pcall(hg.set_holdrh, ent, hold) end
