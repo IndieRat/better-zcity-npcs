@@ -250,7 +250,12 @@ function ENT:Initialize()
     end
     if self.BZCN_Organism and profile.BloodType then self.BZCN_Organism.bloodtype = profile.BloodType end
     if self.ApplyBZCNRelationships then self:ApplyBZCNRelationships() end
-    if self.CapabilitiesAdd then self:CapabilitiesAdd(CAP_MOVE_GROUND) end
+    if self.CapabilitiesAdd then
+        local capabilities = CAP_MOVE_GROUND or 0
+        if CAP_MOVE_JUMP then capabilities = bit.bor(capabilities, CAP_MOVE_JUMP) end
+        if CAP_MOVE_CLIMB then capabilities = bit.bor(capabilities, CAP_MOVE_CLIMB) end
+        self:CapabilitiesAdd(capabilities)
+    end
 
     timer.Simple(0.1, function()
         if not IsValid(self) then return end
@@ -353,6 +358,19 @@ end
 
 function ENT:IsBZCNEnemy(target)
     if not IsValid(target) or target == self or target:Health() <= 0 then return false end
+    if BZCNCombatActor and BZCNCombatActor.IsIncapacitated
+        and BZCNCombatActor.IsIncapacitated(target) then return false end
+
+    -- A recent rescue can override the target's default faction hostility.
+    local forgivenUntil = self.BZCNBefriendedPlayers and self.BZCNBefriendedPlayers[target]
+    if tonumber(forgivenUntil) and forgivenUntil > CurTime() then return false end
+
+    -- Rudeness creates a short, explicit grievance even for factions that
+    -- would otherwise treat the target as neutral.
+    if self.BZCNHostileOffender == target and (self.BZCNHostileOffenderUntil or 0) > CurTime() then
+        return true
+    end
+
     local profile = self:GetBZCNProfile()
     if self:HasRecentAllyThreat(target) then return true end
 
@@ -780,7 +798,11 @@ function ENT:AttackTarget(target)
     if profile.FurryStyle and self.BZCNFurryGrab and BZCN
         and isfunction(BZCN.TryFurryAssimilation) then
         local grabbedTarget = self.BZCNFurryGrab.target
-        if IsValid(grabbedTarget) and BZCN.TryFurryAssimilation(self, grabbedTarget) then
+        if IsValid(grabbedTarget) and BZCNCombatActor
+            and BZCNCombatActor.IsIncapacitated
+            and BZCNCombatActor.IsIncapacitated(grabbedTarget) then
+            if isfunction(BZCN.StopFurryAssimilation) then BZCN.StopFurryAssimilation(self) end
+        elseif IsValid(grabbedTarget) and BZCN.TryFurryAssimilation(self, grabbedTarget) then
             self.LastAttack = now + 0.1
             return
         end
@@ -1248,12 +1270,18 @@ function ENT:RunBehaviour()
             if IsValid(enemy) then
                 self:ChaseEnemy(enemy)
             else
-                local ally = self:FindFollowTarget()
-                if IsValid(ally) then
-                    self:FollowAlly(ally)
-                else
-                    self:Wander()
-                    coroutine.wait(0.2)
+                -- Faction task pools get first choice during idle time. This
+                -- prevents every friendly NPC from defaulting to player-follow.
+                local taskHandled = BZCNTaskAI and isfunction(BZCNTaskAI.RunIdleTask)
+                    and BZCNTaskAI.RunIdleTask(self)
+                if not taskHandled then
+                    local ally = self:FindFollowTarget()
+                    if IsValid(ally) then
+                        self:FollowAlly(ally)
+                    else
+                        self:Wander()
+                        coroutine.wait(0.2)
+                    end
                 end
             end
         end
