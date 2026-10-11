@@ -38,6 +38,46 @@ local function WantsGunTPIK(ent, class)
     return true
 end
 
+local function InstallClientAimAdapter(ent)
+    if ent.BZCNClientAimAdapter then return end
+    local nativeGetActiveWeapon = ent.GetActiveWeapon
+    local nativeEyeAngles = ent.EyeAngles
+    local nativeGetAimVector = ent.GetAimVector
+    ent.GetActiveWeapon = function(self)
+        local weapon = self.GetNW2Entity and self:GetNW2Entity("BZCNRuntimeWeapon")
+        if IsValid(weapon) then return weapon end
+        if isfunction(nativeGetActiveWeapon) then
+            local ok, result = pcall(nativeGetActiveWeapon, self)
+            if ok and IsValid(result) then return result end
+        end
+        return NULL
+    end
+    ent.EyeAngles = function(self)
+        local untilTime = self.GetNW2Float and self:GetNW2Float("BZCNCombatAimUntil", 0) or 0
+        if untilTime > CurTime() and self.GetNW2Angle then
+            return self:GetNW2Angle("BZCNCombatAimAngle", angle_zero)
+        end
+        if isfunction(nativeEyeAngles) then
+            local ok, result = pcall(nativeEyeAngles, self)
+            if ok and isangle(result) then return result end
+        end
+        return self:GetAngles()
+    end
+    ent.GetAimVector = function(self)
+        local untilTime = self.GetNW2Float and self:GetNW2Float("BZCNCombatAimUntil", 0) or 0
+        if untilTime > CurTime() and self.GetNW2Angle then
+            return self:GetNW2Angle("BZCNCombatAimAngle", angle_zero):Forward()
+        end
+        if isfunction(nativeGetAimVector) then
+            local ok, result = pcall(nativeGetAimVector, self)
+            if ok and isvector(result) then return result end
+        end
+        return self:GetForward()
+    end
+    ent.InVehicle = function() return false end
+    ent.BZCNClientAimAdapter = true
+end
+
 local function ApplyTPIK(ent)
     if not IsManaged(ent) then return end
     if ent:GetNW2Bool("BZCNNPCDowned", false) or ent:GetNoDraw() then return end
@@ -47,6 +87,8 @@ local function ApplyTPIK(ent)
 
     local weapon = GetRuntimeWeapon(ent)
     if not IsValid(weapon) then return end
+    InstallClientAimAdapter(ent)
+    if isfunction(weapon.SetHandPos) then pcall(weapon.SetHandPos, weapon) end
 
     -- This is the state the native TPIK solver reads from GetActiveWeapon().
     -- Set on the client-side SWEP instance; these are not networked SWEP vars.
