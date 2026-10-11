@@ -779,7 +779,7 @@ local function CanRecoverFromZCityOrganism(owner, state)
     -- Do not turn recovery into an escape hatch. Reuse Z-City's own
     -- Should Fake Up rulebook (ragdoll momentum, stun and other installed
     -- physiology restrictions) before applying this bridge's injury limits.
-    if hook and isfunction(hook.Run) then
+    if hook and isfunction(hook.Run) and istable(owner.organism) then
         local ok, blocked = pcall(hook.Run, "Should Fake Up", owner)
         if ok and blocked ~= nil then return false end
     end
@@ -1188,6 +1188,10 @@ function Support.ApplyPhysicalImpact(victim, attacker, hitPos, direction, force,
     local now = CurTime()
     stunDuration = math.Clamp(tonumber(stunDuration) or 2, 0.25, 6)
 
+    -- Conditioning owns the victim's fake/get-up state and physical hold.
+    -- Ignore further impulse events until assimilation is released/completed.
+    if IsAssimilationLocked(owner) then return false end
+
     -- If a ragdoll already exists, transfer the incoming momentum into it.
     -- This also allows repeated kicks/props to jostle an NPC already down.
     local existingRag = owner.BZCNNPCRagdoll or owner.FakeRagdoll
@@ -1200,10 +1204,6 @@ function Support.ApplyPhysicalImpact(victim, attacker, hitPos, direction, force,
         ApplyImpactImpulse(existingRag, hitPos, direction, force)
         return true
     end
-
-    -- An actual tackle can knock an NPC down during a get-up transition, but
-    -- must never break the active assimilation lock that keeps its victim held.
-    if IsAssimilationLocked(owner) then return false end
     if (tonumber(owner.BZCNNPCLastImpactAt) or 0) > now - 0.22 then return false end
     owner.BZCNNPCLastImpactAt = now
 
@@ -1233,6 +1233,9 @@ function Support.PerformKick(attacker, targetEntity, hitPos, direction, damageAm
     if not IsValid(attacker) or not IsValid(targetEntity) then return false end
     local victim = ResolvePhysicalVictim(targetEntity)
     if not IsValid(victim) or victim == attacker or not victim.Health or victim:Health() <= 0 then return false end
+    -- Don't let a kick/landing tackle damage or shake a victim out of an
+    -- active assimilation hold.
+    if IsAssimilationLocked(victim) then return false end
 
     direction = isvector(direction) and direction or attacker:GetForward()
     direction.z = direction.z or 0
