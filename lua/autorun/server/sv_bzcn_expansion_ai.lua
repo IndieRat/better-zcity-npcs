@@ -433,16 +433,43 @@ function Companion.RunIdleTask(ent)
                 end
                 if IsValid(candidate) then break end
             end
-            if IsValid(candidate) and BZCN.GetRuntimeMeleeWeapon then
-                local weapon = BZCN.GetRuntimeMeleeWeapon(ent)
-                local phys = IsValid(candidate) and candidate:GetPhysicsObject() or nil
-                if IsValid(weapon) and IsValid(phys) then
-                    local distance = math.Clamp(ent:EyePos():Distance(phys:GetPos()), 24, 56)
-                    local ok = pcall(weapon.SetCarrying, weapon, candidate, 0, phys:GetPos(), distance)
-                    if ok then
-                        state = {object = candidate, weapon = weapon, bone = 0}
-                        ent.BZCNCompanionCarry = state
-                        hook.Run("BZCN_CompanionPickedUpObject", ent, candidate)
+            if IsValid(candidate) then
+                local eye = ent:EyePos()
+                local targetPoint = candidate:WorldSpaceCenter()
+                local reach = eye:Distance(targetPoint)
+                local reachTrace = util.TraceLine({
+                    start = eye, endpos = targetPoint,
+                    filter = {ent, owner}, mask = MASK_SOLID
+                })
+                local clearReach = not reachTrace.Hit or reachTrace.Entity == candidate
+
+                -- Fetching is a movement task until the companion is physically
+                -- close and has line of sight; never pull a prop through walls.
+                if reach > 100 or not clearReach then
+                    local destination = candidate:GetPos()
+                    local area = navmesh.GetNearestNavArea(destination, false, 260, false, true)
+                    if IsValid(area) then destination = area:GetClosestPointOnArea(destination) end
+                    local path = Path("Follow")
+                    path:SetMinLookAheadDistance(90)
+                    path:SetGoalTolerance(45)
+                    path:Compute(ent, destination)
+                    if path:IsValid() then
+                        ent.loco:SetDesiredSpeed((tonumber(p.Speed) or 175) * 0.55)
+                        path:Update(ent)
+                    elseif ent.TryBZCNClimb then
+                        ent:TryBZCNClimb()
+                    end
+                elseif BZCN.GetRuntimeMeleeWeapon then
+                    local weapon = BZCN.GetRuntimeMeleeWeapon(ent)
+                    local phys = candidate:GetPhysicsObject()
+                    if IsValid(weapon) and IsValid(phys) then
+                        local distance = math.Clamp(eye:Distance(phys:GetPos()), 24, 56)
+                        local ok = pcall(weapon.SetCarrying, weapon, candidate, 0, phys:GetPos(), distance)
+                        if ok then
+                            state = {object = candidate, weapon = weapon, bone = 0}
+                            ent.BZCNCompanionCarry = state
+                            hook.Run("BZCN_CompanionPickedUpObject", ent, candidate)
+                        end
                     end
                 end
             end
