@@ -389,6 +389,7 @@ function ENT:IsBZCNEnemy(target)
     if self:HasRecentAllyThreat(target) then return true end
 
     local ownClass = string.lower(tostring(self.BZCNClass or self.PlayerClassName or ""))
+    if self.BZCNGoodCopDefected then ownClass = "rebel" end
     local function IsArmed(actor)
         if not IsValid(actor) then return false end
         local active = isfunction(actor.GetActiveWeapon) and actor:GetActiveWeapon() or nil
