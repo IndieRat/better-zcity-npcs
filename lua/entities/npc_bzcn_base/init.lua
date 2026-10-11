@@ -1245,17 +1245,53 @@ function ENT:ChaseEnemy(target)
         local now = CurTime()
         local visible = HasSenseRecord(self, target, true)
 
-        -- Preserve the launch velocity until the pounce contacts its target or
-        -- expires; normal Follow-path steering must not cancel the leap.
+        -- A pounce is a short, physics-driven tackle. Check contact before
+        -- yielding to the leap so a furry can knock the target down on impact.
         if istable(self.BZCNNPCPounce) then
             local pounce = self.BZCNNPCPounce
             if IsValid(pounce.target) and now <= (pounce.expires or 0) then
-                -- Leave locomotion speed untouched: the launch velocity is
-                -- physics-driven, and setting speed to zero would brake pounces.
-                coroutine.wait(0.05)
-                continue
+                local pounceTarget = pounce.target
+                if self:WorldSpaceCenter():DistToSqr(pounceTarget:WorldSpaceCenter()) <= 76 * 76 then
+                    local support = hg and hg.BZCNNPCSupport
+                    local impactPos = pounceTarget:WorldSpaceCenter()
+                    local direction = pounce.direction or self:GetForward()
+                    local organ = pounceTarget.organism or pounceTarget.BZCN_Organism
+                    if istable(organ) then
+                        organ.shock = math.min((tonumber(organ.shock) or 0) + 18, 100)
+                        organ.pain = math.min((tonumber(organ.pain) or 0) + 12, 100)
+                    end
+                    if pounceTarget.SetNW2Float then
+                        pounceTarget:SetNW2Float("BZCNImpactShock", math.min(
+                            (pounceTarget:GetNW2Float("BZCNImpactShock", 0) or 0) + 18, 100))
+                    end
+                    if isfunction(support and support.GetNPCHealthTable) then
+                        local ok, healthState = pcall(support.GetNPCHealthTable, pounceTarget)
+                        if ok and istable(healthState) then
+                            healthState.shock = math.min((tonumber(healthState.shock) or 0) + 18, 100)
+                            healthState.pain = math.min((tonumber(healthState.pain) or 0) + 12, 100)
+                        end
+                    end
+                    if isfunction(support and support.EnterDownedState)
+                        and not pounceTarget:GetNW2Bool("BZCNNPCDowned", false)
+                        and (pounceTarget:IsPlayer() or BZCN.IsManaged(pounceTarget)) then
+                        pcall(support.EnterDownedState, pounceTarget, "furry_pounce")
+                    end
+                    if pounceTarget.loco then
+                        pcall(pounceTarget.loco.SetVelocity, pounceTarget.loco, direction * 170 + Vector(0, 0, 90))
+                    end
+                    hook.Run("BZCN_FurryPounceImpact", self, pounceTarget, impactPos)
+                    self.BZCNNPCPounce = nil
+                    self.BZCNNextPounceAt = now + 2.8
+                    self.LastAttack = now + 0.6
+                else
+                    -- Leave locomotion speed untouched: the launch velocity is
+                    -- physics-driven, and setting speed to zero would brake pounces.
+                    coroutine.wait(0.05)
+                    continue
+                end
+            else
+                self.BZCNNPCPounce = nil
             end
-            self.BZCNNPCPounce = nil
         end
         if visible or impulseTracking then
             lastSeenPos = ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
@@ -1320,10 +1356,44 @@ function ENT:ChaseEnemy(target)
             or tonumber(self.MoveSpeed) or 175
         local distance = self:GetPos():Distance(goalPos)
         if profile.FurryStyle == true and visible and self.loco
-            and now >= (self.BZCNNextPounceAt or 0) then
+            and now >= (self.BZCNNextPounceAt or 0) and self:OnGround()
+            and distance >= 82 and distance <= 330 then
             local support = hg and hg.BZCNNPCSupport
-            if support and isfunction(support.TryFurryPounce)
-                and support.TryFurryPounce(self, target) then
+            local started = false
+            if support and isfunction(support.TryFurryPounce) then
+                local ok, result = pcall(support.TryFurryPounce, self, target)
+                started = ok and result == true
+            end
+            -- Keep this local implementation as a reliable fallback when the
+            -- optional organism integration has no pounce helper loaded.
+            if not started then
+                local start = self:WorldSpaceCenter()
+                local finish = target:WorldSpaceCenter()
+                local tr = util.TraceHull({
+                    start = start, endpos = finish,
+                    mins = Vector(-8, -8, -4), maxs = Vector(8, 8, 8),
+                    filter = {self, target}, mask = MASK_SOLID
+                })
+                if not tr.Hit then
+                    local direction = finish - start
+                    direction.z = 0
+                    if direction:LengthSqr() > 1 then
+                        direction:Normalize()
+                        self.BZCNNextPounceAt = now + 2.8
+                        self.BZCNNPCPounce = {
+                            target = target, direction = direction, started = now,
+                            expires = now + 0.9
+                        }
+                        self:PlayBZCNAttackAnimation()
+                        self:EmitSound("npc_fastzombie.leap", 70, math.random(95, 105))
+                        self.loco:Jump()
+                        self.loco:SetVelocity(direction * 350 + Vector(0, 0, 215))
+                        hook.Run("BZCN_FurryPounce", self, target)
+                        coroutine.wait(0.05)
+                        continue
+                    end
+                end
+            else
                 coroutine.wait(0.05)
                 continue
             end
