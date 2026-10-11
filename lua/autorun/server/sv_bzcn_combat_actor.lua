@@ -52,19 +52,19 @@ end
 
 local function FindFakeRagdoll(owner)
     if not IsValidEntity(owner) then return nil end
-    local candidates = {
-        owner.BZCNNPCRagdoll,
-        owner.FakeRagdoll,
-        owner.ragdoll
-    }
+    local candidates = {}
+    local function addCandidate(body)
+        if IsRagdollEntity(body) then candidates[#candidates + 1] = body end
+    end
+    addCandidate(owner.BZCNNPCRagdoll)
+    addCandidate(owner.FakeRagdoll)
+    addCandidate(owner.ragdoll)
     if owner.GetNWEntity then
-        candidates[#candidates + 1] = owner:GetNWEntity("FakeRagdoll")
-        candidates[#candidates + 1] = owner:GetNWEntity("ragdoll")
+        addCandidate(owner:GetNWEntity("FakeRagdoll"))
+        addCandidate(owner:GetNWEntity("ragdoll"))
     end
-    if owner.GetNW2Entity then
-        candidates[#candidates + 1] = owner:GetNW2Entity("FakeRagdoll")
-    end
-    for _, body in pairs(candidates) do
+    if owner.GetNW2Entity then addCandidate(owner:GetNW2Entity("FakeRagdoll")) end
+    for _, body in ipairs(candidates) do
         if IsRagdollEntity(body) and NetworkOwner(body) == owner then return body end
     end
     if IsRagdollEntity(owner.FakeRagdoll) then return owner.FakeRagdoll end
