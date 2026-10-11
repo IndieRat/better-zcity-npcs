@@ -897,8 +897,9 @@ function Tasks.RunIdleTask(ent)
             return true
         end
 
-        -- Keep the actual Z-City fake-ragdoll active. The timed stages gently
-        -- fold the lower body in, then damp the limbs for a resting pose.
+        -- Keep the actual Z-City fake-ragdoll active and guide it toward a
+        -- seated pose: pelvis grounded, torso stacked upright, legs straight
+        -- and parallel in front of the body. This is deliberately not a tuck.
         local sitUntil = ent.BZCNRagdollSitUntil
         local function GetSitRagdoll()
             if not IsValid(ent) then return nil end
@@ -912,41 +913,83 @@ function Tasks.RunIdleTask(ent)
             end
             return IsValid(rag) and rag or nil
         end
+        local function GetSitPhysics(rag, boneName)
+            local bone = rag:LookupBone(boneName)
+            local physBone = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or nil
+            return isnumber(physBone) and rag:GetPhysicsObjectNum(physBone) or nil
+        end
+        local function KeepEyesOpen(rag)
+            -- Downed-state helpers can copy a closed-eye flex onto the fake
+            -- ragdoll. Reset common blink/closed-eye flexes on both visible
+            -- bodies without assuming every model has the same flex list.
+            for _, body in ipairs({ent, rag}) do
+                if not IsValid(body) or not isfunction(body.GetFlexNum)
+                    or not isfunction(body.GetFlexName) or not isfunction(body.SetFlexWeight) then continue end
+                for i = 0, body:GetFlexNum() - 1 do
+                    local name = string.lower(tostring(body:GetFlexName(i) or ""))
+                    if string.find(name, "blink", 1, true)
+                        or string.find(name, "close", 1, true)
+                        or string.find(name, "eye_closed", 1, true) then
+                        body:SetFlexWeight(i, 0)
+                    end
+                end
+            end
+        end
         local function TuckLegs(phase)
             if not IsValid(ent) or ent.BZCNRagdollSitUntil ~= sitUntil then return end
             local rag = GetSitRagdoll()
             if not IsValid(rag) then return end
-            local pelvisBone = rag:LookupBone("ValveBiped.Bip01_Pelvis")
-            local pelvisPhysBone = isnumber(pelvisBone) and rag:TranslateBoneToPhysBone(pelvisBone) or 0
-            local pelvis = rag:GetPhysicsObjectNum(pelvisPhysBone)
+            KeepEyesOpen(rag)
+
+            local pelvis = GetSitPhysics(rag, "ValveBiped.Bip01_Pelvis")
             if not IsValid(pelvis) then pelvis = rag:GetPhysicsObject() end
             if not IsValid(pelvis) then return end
+
             local center = pelvis:GetPos()
-            for _, boneName in ipairs({
-                "ValveBiped.Bip01_L_Thigh", "ValveBiped.Bip01_R_Thigh",
-                "ValveBiped.Bip01_L_Calf", "ValveBiped.Bip01_R_Calf"
-            }) do
-                local bone = rag:LookupBone(boneName)
-                local physBone = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or nil
-                local phys = isnumber(physBone) and rag:GetPhysicsObjectNum(physBone) or nil
-                if IsValid(phys) then
-                    local target = center + rag:GetForward() * (phase == 1 and 18 or 8)
-                        + Vector(0, 0, phase == 1 and -12 or -5)
-                    local delta = target - phys:GetPos()
-                    phys:Wake()
-                    phys:ApplyForceCenter(delta * (phase == 1 and 18 or 5) - phys:GetVelocity() * 3)
-                    phys:AddAngleVelocity(-phys:GetAngleVelocity() * 0.35)
-                end
+            local forward = rag:GetForward()
+            forward.z = 0
+            if forward:LengthSqr() < 0.001 then forward = ent:GetForward() end
+            forward:Normalize()
+            local right = Vector(-forward.y, forward.x, 0)
+            local strength = phase == 1 and 16 or 7
+
+            local function Guide(boneName, target, forceScale)
+                local phys = GetSitPhysics(rag, boneName)
+                if not IsValid(phys) then return end
+                local delta = target - phys:GetPos()
+                phys:Wake()
+                phys:ApplyForceCenter(delta * strength * forceScale - phys:GetVelocity() * 4)
+                phys:AddAngleVelocity(-phys:GetAngleVelocity() * (phase == 1 and 0.3 or 0.55))
             end
+
+            -- Match left/right targets so the legs settle evenly instead of
+            -- pulling both knees into one point near the pelvis.
+            for _, side in ipairs({-1, 1}) do
+                local lateral = right * (side * 7)
+                Guide(side < 0 and "ValveBiped.Bip01_L_Thigh" or "ValveBiped.Bip01_R_Thigh",
+                    center + forward * 19 + lateral + Vector(0, 0, -2), 1)
+                Guide(side < 0 and "ValveBiped.Bip01_L_Calf" or "ValveBiped.Bip01_R_Calf",
+                    center + forward * 43 + lateral + Vector(0, 0, -5), 0.85)
+                Guide(side < 0 and "ValveBiped.Bip01_L_Foot" or "ValveBiped.Bip01_R_Foot",
+                    center + forward * 61 + lateral + Vector(0, 0, -7), 0.65)
+            end
+
+            -- Lift the chest over the pelvis and damp angular motion so the
+            -- spine settles upright instead of collapsing backward.
+            Guide("ValveBiped.Bip01_Spine", center + Vector(0, 0, 13), 1.1)
+            Guide("ValveBiped.Bip01_Spine1", center + Vector(0, 0, 25), 1.1)
+            Guide("ValveBiped.Bip01_Spine2", center + Vector(0, 0, 37), 1.1)
+            Guide("ValveBiped.Bip01_Neck1", center + Vector(0, 0, 48), 0.8)
             if phase == 2 then
                 for i = 0, (rag:GetPhysicsObjectCount() or 0) - 1 do
                     local phys = rag:GetPhysicsObjectNum(i)
-                    if IsValid(phys) then phys:AddAngleVelocity(-phys:GetAngleVelocity() * 0.45) end
+                    if IsValid(phys) then phys:AddAngleVelocity(-phys:GetAngleVelocity() * 0.55) end
                 end
             end
         end
-        timer.Simple(0.25, function() TuckLegs(1) end)
-        timer.Simple(0.85, function() TuckLegs(2) end)
+        timer.Simple(0.2, function() TuckLegs(1) end)
+        timer.Simple(0.7, function() TuckLegs(2) end)
+        timer.Simple(1.5, function() TuckLegs(2) end)
         timer.Simple(math.max(sitUntil - CurTime(), 0.1), function()
             if not IsValid(ent) or ent.BZCNRagdollSitUntil ~= sitUntil then return end
             ent.BZCNRagdollSitUntil = nil
