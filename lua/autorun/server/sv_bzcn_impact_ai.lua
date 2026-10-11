@@ -154,44 +154,39 @@ end)
 
 local function IsAssimilationHeld(target)
     if not IsValid(target) then return false end
-    if target.BZCNAssimilationLocked == true
+    -- Both player-driven and NPC-driven grabs set this lock at acquisition.
+    -- Avoid scanning every entity for every target each Think tick.
+    return target.BZCNAssimilationLocked == true
         or target:GetNW2Bool("BZCNAssimilationLocked", false)
-        or target.BZCNFurryConversionPending == true then return true end
-    for _, owner in ipairs(ents.GetAll()) do
-        local grab = IsValid(owner) and owner.BZCNFurryGrab or nil
-        if istable(grab) and grab.target == target then return true end
-    end
-    for _, ply in ipairs(player.GetAll()) do
-        local grab = IsValid(ply) and ply.BZCNPlayerFurryGrab or nil
-        if istable(grab) and grab.target == target then return true end
-    end
-    return false
+        or target.BZCNFurryConversionPending == true
 end
 
 local function InstallAssimilationGuards()
-    if hg and isfunction(hg.FakeUp) and not hg.BZCNAssimilationFakeUpGuard then
+    if hg and isfunction(hg.FakeUp) and hg.BZCNGuardedFakeUp ~= hg.FakeUp then
         local nativeFakeUp = hg.FakeUp
-        hg.FakeUp = function(target, ...)
+        local guardedFakeUp = function(target, ...)
             if IsValid(target) and IsAssimilationHeld(target) then
                 target.BZCNFakeUpBlockedAt = CurTime()
                 return false
             end
             return nativeFakeUp(target, ...)
         end
-        hg.BZCNAssimilationFakeUpGuard = true
+        hg.FakeUp = guardedFakeUp
+        hg.BZCNGuardedFakeUp = guardedFakeUp
     end
 
     local support = hg and hg.BZCNNPCSupport
-    if support and isfunction(support.Recover) and not support.BZCNAssimilationRecoverGuard then
+    if support and isfunction(support.Recover) and support.BZCNGuardedRecover ~= support.Recover then
         local nativeRecover = support.Recover
-        support.Recover = function(target, rag, ...)
+        local guardedRecover = function(target, rag, ...)
             if IsValid(target) and IsAssimilationHeld(target) then
                 target.BZCNRecoverBlockedAt = CurTime()
                 return false
             end
             return nativeRecover(target, rag, ...)
         end
-        support.BZCNAssimilationRecoverGuard = true
+        support.Recover = guardedRecover
+        support.BZCNGuardedRecover = guardedRecover
     end
 end
 
