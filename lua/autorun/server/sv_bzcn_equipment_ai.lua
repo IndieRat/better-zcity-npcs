@@ -119,7 +119,7 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
                 if not ok then
                     self.BZCNNativeFireError = tostring(a)
                     ErrorNoHalt("[BZCN] Native Homigrad FireBullet failed for "
-                        .. tostring(self:GetClass()) .. ": " .. tostring(a) .. "\\n")
+                        .. tostring(self:GetClass()) .. ": " .. tostring(a) .. "\n")
                     return
                 end
                 self.BZCNNativeFireSucceeded = true
@@ -357,8 +357,12 @@ function BZCN.FireRuntimeWeapon(ent, target)
         weapon.drawBullet = true
         local ok, err = pcall(weapon.BZCNNativePrimaryAttack, weapon)
         weapon.BZCNActorTrigger = nil
-        nativeHandled = weapon.BZCNNativeFireWasCalled == true
-        fired = nativeHandled and weapon.BZCNNativeFireSucceeded == true
+        -- A native Homigrad attack can deliberately decline to spawn a bullet
+        -- (dry fire, blank ammo, or weapon-specific gating). Treat a clean native
+        -- call as handled instead of bypassing that behavior with generic damage.
+        nativeHandled = ok or weapon.BZCNNativeFireWasCalled == true
+        fired = weapon.BZCNNativeFireWasCalled == true
+            and weapon.BZCNNativeFireSucceeded == true
         if not ok then
             ErrorNoHalt("[BZCN] Native Homigrad PrimaryAttack failed for "
                 .. tostring(class) .. ": " .. tostring(err) .. "\\n")
