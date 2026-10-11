@@ -642,6 +642,14 @@ function ENT:ChaseEnemy(target)
             coroutine.wait(0.1)
             continue
         end
+        if self.BZCNFurryGrab then
+            self.loco:SetDesiredSpeed(0)
+            if IsValid(self.BZCNFurryGrab.target) then
+                self.loco:FaceTowards(self.BZCNFurryGrab.target:GetPos())
+            end
+            coroutine.wait(0.1)
+            continue
+        end
 
         if path:GetAge() > 0.4 then path:Compute(self, target:GetPos()) end
         local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
@@ -730,6 +738,9 @@ function ENT:OnKilled(damageInfo)
     if self.BZCNDeathHandled then return end
     self.BZCNDeathHandled = true
     self:SetHealth(0)
+    if BZCN and isfunction(BZCN.StopFurryAssimilation) then
+        BZCN.StopFurryAssimilation(self)
+    end
     BZCN.HideHeldWeapon(self)
 
     local deathRagdoll
