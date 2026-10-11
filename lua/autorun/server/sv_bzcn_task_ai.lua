@@ -228,7 +228,10 @@ local function MoveTo(ent, destination, duration, speedScale)
     ent.BZCNTaskPathFailures = 0
     local startPos = ent:GetPos()
     local lastProgressAt = CurTime()
-    local stopAt = CurTime() + (duration or 1.8)
+    -- Task callers request short slices, but 1.0-second slices are too
+    -- short to enter buildings or traverse multi-area routes. Keep a useful
+    -- minimum while still honoring longer task-specific movement windows.
+    local stopAt = CurTime() + math.max(tonumber(duration) or 1.8, 2.4)
     local repaths = 0
     ent.loco:SetDesiredSpeed(speed * (speedScale or 0.58))
 
