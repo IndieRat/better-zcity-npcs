@@ -405,10 +405,17 @@ function ENT:IsBZCNEnemy(target)
     -- Metro police have Combine training but human hesitation: an unarmed
     -- civilian isn't a combat target unless they recently attacked the officer
     -- or one of its allies. Insults and active threats still create hostility.
-    if ownClass == "metrocop" and self:GetBZCNEntityFaction(target) == "default" then
+    if (ownClass == "metrocop" or ownClass == "combine")
+        and self:GetBZCNEntityFaction(target) == "default" then
         local recentlyHurtOfficer = self.BZCNLastAttacker == target
             and CurTime() - (tonumber(self.BZCNLastDamageTime) or 0) <= 12
-        if not IsArmed(target) and not recentlyHurtOfficer then return false end
+        local threatenedAlly = self:HasRecentAllyThreat(target)
+        -- Civil Protection officers can hesitate; Combine squads never target
+        -- harmless unarmed civilians unless the civilian actually threatened
+        -- their squad or has already attacked this unit.
+        if not IsArmed(target) and not recentlyHurtOfficer and not threatenedAlly then
+            return false
+        end
     end
 
     if target:IsPlayer() then
