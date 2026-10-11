@@ -83,11 +83,9 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     weapon:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
     weapon.BZCNRuntimeOwner = owner
     owner:DeleteOnRemove(weapon)
-    if class == "weapon_hands_sh" and isfunction(weapon.SetFists) then
-        -- Keep the Z-City hands SWEP in its attack-ready state instead of
-        -- spending the first melee turn only drawing the fists.
-        pcall(weapon.SetFists, weapon, true)
-    end
+    -- weapon_hands_sh initializes with fists lowered. Do not raise them here:
+    -- Z-City furry grab/assimilation is bound to RMB with fists lowered.
+    -- AttackRuntimeMelee raises them only during a punch action.
 
     if weapon.SetClip1 and not MEDICAL_WEAPONS[class] then
         local clip = weapon.GetMaxClip1 and weapon:GetMaxClip1() or 0
