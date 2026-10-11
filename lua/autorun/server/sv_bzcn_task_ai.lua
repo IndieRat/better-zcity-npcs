@@ -162,7 +162,12 @@ local function TryOpenTaskDoor(ent, destination)
     local class = string.lower(door:GetClass() or "")
     if not string.find(class, "door", 1, true) and class ~= "func_movelinear" then return false end
     ent.BZCNNextTaskDoorAt = CurTime() + 0.9
-    for _, input in ipairs({"Unlock", "Open", "Toggle"}) do pcall(door.Fire, door, input, "", 0, ent, ent) end
+    pcall(door.Fire, door, "Unlock", "", 0, ent, ent)
+    if class == "func_movelinear" then
+        pcall(door.Fire, door, "Toggle", "", 0, ent, ent)
+    else
+        pcall(door.Fire, door, "Open", "", 0, ent, ent)
+    end
     if isfunction(door.Use) then pcall(door.Use, door, ent, ent, USE_ON, 1) end
     return true
 end
