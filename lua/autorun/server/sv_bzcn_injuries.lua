@@ -1253,8 +1253,13 @@ function Support.PerformKick(attacker, targetEntity, hitPos, direction, damageAm
     if not (victimIsProxy and alreadyDown) then
         local info = DamageInfo()
         info:SetAttacker(IsValid(attacker) and attacker or game.GetWorld())
-        info:SetInflictor(IsValid(attacker.BZCNRuntimeWeapon) and attacker.BZCNRuntimeWeapon
-            or (attacker.GetActiveWeapon and attacker:GetActiveWeapon()) or attacker)
+        local inflictor = IsValid(attacker.BZCNRuntimeWeapon) and attacker.BZCNRuntimeWeapon or nil
+        if not IsValid(inflictor) and isfunction(attacker.GetActiveWeapon) then
+            local ok, active = pcall(attacker.GetActiveWeapon, attacker)
+            if ok and IsValid(active) then inflictor = active end
+        end
+        if not IsValid(inflictor) then inflictor = attacker end
+        info:SetInflictor(inflictor)
         info:SetDamage(damageAmount)
         info:SetDamageType(DMG_CLUB)
         info:SetDamagePosition(isvector(hitPos) and hitPos or victim:WorldSpaceCenter())
