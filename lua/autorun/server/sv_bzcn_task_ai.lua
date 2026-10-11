@@ -320,7 +320,9 @@ timer.Create("BZCN_TaskWeaponPickup", 0.75, 0, function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if not IsAvailable(ent) then continue end
         local kind = GetKind(ent)
-        if kind == "metrocop" or kind == "rebel" then Tasks.TryPickupWeapon(ent) end
+        if kind == "metrocop" or kind == "rebel" or kind == "combine" then
+            if not Tasks.TryPickupWeapon(ent) then Tasks.TryPickupAmmo(ent) end
+        end
     end
 end)
 
