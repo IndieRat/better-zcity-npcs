@@ -645,6 +645,47 @@ local function GetCurrentFurryRagdoll(target)
     return rag
 end
 
+function BZCN.TryFurryLick(owner, target)
+    if not IsValid(owner) or not BZCN.IsManaged(owner) or not IsValid(target)
+        or owner == target or not IsFurryTarget(owner) or not IsFurryTarget(target) then return false end
+    if isfunction(owner.IsBZCNAlly) then
+        local ok, ally = pcall(owner.IsBZCNAlly, owner, target)
+        if not ok or not ally then return false end
+    end
+    if CurTime() < (owner.BZCNNextLickAt or 0) then return false end
+    if owner:GetPos():DistToSqr(target:GetPos()) > 70 * 70 then return false end
+
+    local weapon = owner.BZCNRuntimeWeapon
+    if not IsValid(weapon) or weapon:GetClass() ~= "weapon_hands_sh" then
+        weapon = ConfigureWeaponEntity(owner, "weapon_hands_sh", "BZCNRuntimeWeapon")
+    end
+    if not IsValid(weapon) then return false end
+
+    local rag = GetCurrentFurryRagdoll(target)
+    local destination = IsValid(rag) and rag:WorldSpaceCenter() or target:WorldSpaceCenter()
+    local startPos = isfunction(owner.EyePos) and owner:EyePos() or owner:WorldSpaceCenter()
+    local filter = {owner, weapon}
+    if IsValid(owner.BZCNHeldWeaponProxy) then filter[#filter + 1] = owner.BZCNHeldWeaponProxy end
+    local trace = util.TraceLine({start = startPos, endpos = destination, filter = filter, mask = MASK_SHOT})
+    if trace.Hit and trace.Entity ~= target and trace.Entity ~= rag then return false end
+
+    local organ = target.organism or target.BZCN_Organism or (IsValid(rag) and rag.organism)
+    if not istable(organ) then return false end
+    organ.avgpain = math.Approach(tonumber(organ.avgpain) or 0, 0, 15)
+    organ.painadd = math.Approach(tonumber(organ.painadd) or 0, 0, 15)
+    if isnumber(organ.pain) then organ.pain = math.Approach(organ.pain, 0, 15) end
+    owner.BZCNNextLickAt = CurTime() + 1
+    if owner.SetNW2Float then owner:SetNW2Float("BZCNNextLickAt", owner.BZCNNextLickAt) end
+    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
+    owner:EmitSound("zbattle/furry/lick" .. math.random(3) .. ".wav", 65, math.random(95, 105), 0.85)
+    timer.Simple(0.35, function()
+        if IsValid(owner) and IsValid(weapon) and not owner.BZCNFurryGrab
+            and isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, false) end
+    end)
+    hook.Run("BZCN_NPCFurryLicked", owner, target)
+    return true
+end
+
 local function ResolveManagedNPCFromFurryEntity(raw)
     if not IsValid(raw) then return nil end
     if BZCN.IsManaged(raw) then return raw end
@@ -1163,6 +1204,50 @@ hook.Add("EntityRemoved", "BZCN_CleanupFurryAssimilation", function(ent)
     end
 end)
 
+
+-- Smart furries try to incapacitate hostile targets rather than kill them.
+-- Clamp the final health point and use the same knockdown integrations as the
+-- normal grab system; ordinary furry damage remains unchanged.
+hook.Add("EntityTakeDamage", "BZCN_SmartFurryIncapacitation", function(target, damageInfo)
+    if not IsValid(target) or not damageInfo or not isfunction(damageInfo.GetAttacker) then return end
+    local attacker = damageInfo:GetAttacker()
+    if not IsValid(attacker) or not BZCN.IsManaged(attacker) then return end
+    local profile = attacker.BZCNClassProfile or {}
+    if profile.FurryStyle ~= true or profile.SmartFurry ~= true then return end
+    if BZCNCombatActor and BZCNCombatActor.IsIncapacitated
+        and BZCNCombatActor.IsIncapacitated(target) then return end
+    if isfunction(attacker.IsBZCNEnemy) then
+        local ok, enemy = pcall(attacker.IsBZCNEnemy, attacker, target)
+        if not ok or not enemy then return end
+    end
+
+    local health = tonumber(target:Health()) or 0
+    if health <= 1 then return end
+    local incoming = math.max(tonumber(damageInfo:GetDamage()) or 0, 0)
+    if incoming <= 0 then return end
+    local maxHealth = math.max(tonumber(target:GetMaxHealth()) or health, 1)
+    local predictedHealth = health - incoming
+    if predictedHealth <= 0 then
+        damageInfo:SetDamage(math.max(health - 1, 0))
+        predictedHealth = 1
+    end
+    if predictedHealth > math.min(20, maxHealth * 0.28) then return end
+
+    timer.Simple(0.12, function()
+        if not IsValid(target) or target:Health() <= 0 then return end
+        if BZCNCombatActor and BZCNCombatActor.IsIncapacitated
+            and BZCNCombatActor.IsIncapacitated(target) then return end
+        if BZCN.IsManaged(target) then
+            local support = hg and hg.BZCNNPCSupport
+            if support and isfunction(support.EnterDownedState) then
+                pcall(support.EnterDownedState, target, "smart_furry_incapacitate")
+            end
+        elseif target:IsPlayer() and hg and isfunction(hg.LightStunPlayer) then
+            pcall(hg.LightStunPlayer, target, 2.5)
+        end
+        hook.Run("BZCN_SmartFurryIncapacitated", attacker, target)
+    end)
+end)
 
 local function WoundCount(wounds)
     if not istable(wounds) then return 0 end
