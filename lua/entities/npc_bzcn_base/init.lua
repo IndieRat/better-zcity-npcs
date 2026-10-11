@@ -643,12 +643,16 @@ function ENT:ChaseEnemy(target)
             continue
         end
         if self.BZCNFurryGrab then
+            local grabbedTarget = self.BZCNFurryGrab.target
+            local stillHolding = IsValid(grabbedTarget) and BZCN
+                and isfunction(BZCN.TryFurryAssimilation)
+                and BZCN.TryFurryAssimilation(self, grabbedTarget)
             self.loco:SetDesiredSpeed(0)
-            if IsValid(self.BZCNFurryGrab.target) then
-                self.loco:FaceTowards(self.BZCNFurryGrab.target:GetPos())
+            if IsValid(grabbedTarget) then self.loco:FaceTowards(grabbedTarget:GetPos()) end
+            if stillHolding then
+                coroutine.wait(0.1)
+                continue
             end
-            coroutine.wait(0.1)
-            continue
         end
 
         if path:GetAge() > 0.4 then path:Compute(self, target:GetPos()) end
