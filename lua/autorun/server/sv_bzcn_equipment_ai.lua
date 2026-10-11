@@ -305,6 +305,14 @@ function BZCN.AttackRuntimeMelee(ent, target)
     if weapon.SetNextPrimaryFire and afterNext <= now then
         weapon:SetNextPrimaryFire(now + math.max(tonumber(ent.BZCNClassProfile and ent.BZCNClassProfile.AttackDelay) or 0.45, 0.08))
     end
+    if ent.BZCNClassProfile and ent.BZCNClassProfile.FurryStyle then
+        timer.Simple(0.4, function()
+            if IsValid(ent) and not ent.BZCNFurryGrab and IsValid(weapon)
+                and isfunction(weapon.SetFists) then
+                pcall(weapon.SetFists, weapon, false)
+            end
+        end)
+    end
     hook.Run("BZCN_NPCMeleeWeaponAttack", ent, target, weapon)
     return true
 end
