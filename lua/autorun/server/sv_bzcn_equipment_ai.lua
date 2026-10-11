@@ -1284,6 +1284,27 @@ hook.Add("EntityRemoved", "BZCN_CleanupFurryAssimilation", function(ent)
     if not ent then return end
     if ent.BZCNFurryGrab then BZCN.StopFurryAssimilation(ent) end
 
+    -- A disconnect during a player-driven grab must release the victim lock
+    -- too; otherwise no remaining player Think loop can finish recovery.
+    local playerGrab = ent.BZCNPlayerFurryGrab
+    if istable(playerGrab) then
+        ent.BZCNPlayerFurryGrab = nil
+        local target = playerGrab.target
+        if IsValid(target) then
+            local organ = target.organism or target.BZCN_Organism or {}
+            if not target.BZCNFurryConversionPending
+                and (tonumber(organ.assimilated) or 0) < 0.999 then
+                SetFurryAssimilationLock(target, ent, false)
+            end
+            if playerGrab.forcedDowned and target:GetNW2Bool("BZCNNPCDowned", false) then
+                local support = hg and hg.BZCNNPCSupport
+                if support and isfunction(support.Recover) then
+                    pcall(support.Recover, target, playerGrab.rag, false)
+                end
+            end
+        end
+    end
+
     -- If a held target's ragdoll disappears, clear the alias and simulated
     -- input instead of leaving the NextBot stuck in the grab pose.
     for _, owner in ipairs(ents.FindByClass("npc_bzcn_*")) do
