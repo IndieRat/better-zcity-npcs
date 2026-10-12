@@ -1748,6 +1748,13 @@ function ENT:ChaseEnemy(target)
         local desiredSpeed = baseSpeed * physiologySpeed
         if crawling then
             desiredSpeed = baseSpeed * physiologySpeed * 0.42
+        elseif profile.ZombieStyle == true then
+            -- Zombies keep a slow, dragging pursuit even when the stamina
+            -- director marks them as sprinting; never inherit human sprint speed.
+            desiredSpeed = baseSpeed * physiologySpeed * (sprinting and 1.08 or 1)
+        elseif profile.HeadcrabStyle == true then
+            -- Headcrabs are fast little hoppers, not human sprinters.
+            desiredSpeed = baseSpeed * physiologySpeed * (sprinting and 1.10 or 1)
         elseif sprinting then
             local globalSprintSpeed = BZCN and isfunction(BZCN.GetSprintMoveSpeed)
                 and BZCN.GetSprintMoveSpeed(self) or baseSpeed * 1.45
