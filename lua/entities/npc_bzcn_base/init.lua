@@ -149,7 +149,8 @@ local function UpdatePursuitStamina(self, wantsSprint)
     local sprinting = wantsSprint and stamina > 0 and (alreadySprinting or canStart)
 
     if sprinting then
-        stamina = math.max(stamina - (tonumber(profile.SprintStaminaDrain) or 24) * dt, 0)
+        stamina = math.max(stamina - (tonumber(profile.SprintStaminaDrain) or 24)
+            * math.Clamp(tonumber(profile.FurryStaminaExhaustMul) or 1, 0.25, 2) * dt, 0)
         if stamina <= 0 then
             sprinting = false
             self.BZCNStaminaExhaustedUntil = now + (tonumber(profile.SprintExhaustionPause) or 1.5)
@@ -209,7 +210,7 @@ function ENT:Initialize()
         self.loco:SetAcceleration(700)
         self.loco:SetDeceleration(900)
         self.loco:SetStepHeight(18)
-        self.loco:SetJumpHeight(48)
+        self.loco:SetJumpHeight(48 * math.Clamp(tonumber(profile.FurryJumpPowerMul) or 1, 0.5, 2))
         -- Keep managed NextBots from converging on the same exact point and
         -- interpenetrating when following/chasing in a crowd.
         if isfunction(self.loco.SetAvoidance) then self.loco:SetAvoidance(true) end
@@ -1684,7 +1685,7 @@ function ENT:ChaseEnemy(target)
                     direction.z = 0
                     if direction:LengthSqr() > 1 then
                         direction:Normalize()
-                        self.BZCNNextPounceAt = now + 2.8
+                        self.BZCNNextPounceAt = now + (tonumber(profile.FurryPounceCooldown) or 3.2)
                         self.BZCNNPCPounce = {
                             target = target, direction = direction, started = now,
                             expires = now + 0.9
@@ -1706,7 +1707,7 @@ function ENT:ChaseEnemy(target)
                             and not self:GetNW2Bool("BZCNNPCDowned", false) then
                             local ok, result = pcall(launchSupport.EnterDownedState, self, "furry_pounce")
                             if ok and result ~= false then
-                                timer.Simple(0.08, function()
+                                timer.Simple(0.025, function()
                                     if not IsValid(self) or not istable(self.BZCNNPCPounce) then return end
                                     local rag = IsValid(self.BZCNNPCRagdoll) and self.BZCNNPCRagdoll
                                         or (IsValid(self.FakeRagdoll) and self.FakeRagdoll or nil)
@@ -1727,7 +1728,7 @@ function ENT:ChaseEnemy(target)
                                         phys:Wake()
                                         -- Preserve inherited movement instead of replacing it with a fixed launch speed.
                                         local inherited = phys:GetVelocity()
-                                        local launchImpulse = direction * 285 + Vector(0, 0, 115)
+                                        local launchImpulse = direction * math.max(285, (tonumber(self.BZCNClassProfile and self.BZCNClassProfile.Speed) or 235) * 1.2) + Vector(0, 0, 115)
                                         phys:SetVelocity(inherited + launchImpulse)
 
                                         -- The shared fake actor keeps an aim target and a stable per-tick
@@ -2232,7 +2233,7 @@ function ENT:TryBZCNClimb()
     if high.Hit and not furry and not crawling then return false end
     local speed = math.max(tonumber(profile.Speed) or 175, 100)
     local forwardSpeed = crawling and 70 or math.Clamp(speed * (furry and 0.95 or 0.62), 90, 240)
-    local upwardSpeed = crawling and 135 or furry and 255 or 190
+    local upwardSpeed = crawling and 135 or furry and math.max(255, speed * 0.95) or 190
 
     self.BZCNNextClimbAttemptAt = CurTime() + (furry and 0.45 or 0.8)
     self.BZCNWallClimbUntil = CurTime() + 0.45
