@@ -811,6 +811,18 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.BZCN_Faction = profile.Faction or profile.ClassName
     ent.BZCN_TeamName = profile.TeamName or profile.Faction or profile.ClassName
 
+    -- Z-City's headcrabzombie class exposes the classic zombie bodygroup, which
+    -- keeps its silhouette consistent after a managed-NPC conversion too.
+    if profile.ZombieStyle == true and isfunction(ent.GetBodyGroups)
+        and isfunction(ent.SetBodygroup) then
+        for _, group in ipairs(ent:GetBodyGroups() or {}) do
+            if group.id == 1 and (tonumber(group.num) or 0) > 1 then
+                ent:SetBodygroup(1, 1)
+                break
+            end
+        end
+    end
+
     if SERVER then
         ent:SetNW2Bool("BZCNManaged", true)
         ent:SetNW2String("BZCNTeamName", ent.BZCN_TeamName)
