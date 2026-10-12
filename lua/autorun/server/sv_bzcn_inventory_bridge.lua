@@ -85,15 +85,20 @@ end
 
 local function FindVisibleRagdoll(source, preferred)
     if IsValid(preferred) and preferred:GetClass() == "prop_ragdoll" then return preferred end
-    for _, candidate in ipairs({
-        source.BZCNNPCRagdoll,
-        source.FakeRagdoll,
-        source.ragdoll,
-        SafeCall(source, "GetRagdollEntity"),
-        SafeCall(source, "GetNWEntity", "FakeRagdoll"),
-        SafeCall(source, "GetNWEntity", "ragdoll"),
-        SafeCall(source, "GetNW2Entity", "FakeRagdoll")
-    }) do
+    -- Build this list incrementally: ipairs stops at the first nil, and most
+    -- of these ragdoll fields are intentionally absent on a newly-spawned NPC.
+    local candidates = {}
+    local function AddCandidate(candidate)
+        if candidate ~= nil then candidates[#candidates + 1] = candidate end
+    end
+    AddCandidate(source.BZCNNPCRagdoll)
+    AddCandidate(source.FakeRagdoll)
+    AddCandidate(source.ragdoll)
+    AddCandidate(SafeCall(source, "GetRagdollEntity"))
+    AddCandidate(SafeCall(source, "GetNWEntity", "FakeRagdoll"))
+    AddCandidate(SafeCall(source, "GetNWEntity", "ragdoll"))
+    AddCandidate(SafeCall(source, "GetNW2Entity", "FakeRagdoll"))
+    for _, candidate in ipairs(candidates) do
         if IsValid(candidate) and candidate:GetClass() == "prop_ragdoll" then return candidate end
     end
     for _, candidate in ipairs(ents.FindByClass("prop_ragdoll")) do
