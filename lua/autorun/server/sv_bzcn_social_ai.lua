@@ -634,7 +634,7 @@ end)
 timer.Create("BZCN_Social_IdleActivity", 3, 0, function()
     local now = CurTime()
     for _, npc in ipairs(ents.FindByClass("npc_bzcn_*")) do
-        if not IsManagedNPC(npc) or IsUnavailableForSocial(npc) then continue end
+        if not IsManagedNPC(npc) or not CanUseSocialEmote(npc) then continue end
         if IsValid(npc.BZCNEnemy) and EntityIsHostileTo(npc, npc.BZCNEnemy) then continue end
         if now < (npc.BZCNNextIdleSocialAt or 0) then continue end
 
