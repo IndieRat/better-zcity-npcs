@@ -168,13 +168,17 @@ function FakeActor:UpdateCrawl(dt)
 
     -- Drive horizontal pelvis movement without shadow-controlling the whole
     -- body upright. Alternate small hand pushes; injured arms contribute less.
-    local speed = tonumber(self.config.crawlSpeed) or 24
+    local speed = tonumber(self.config.crawlSpeed) or 42
     local velocity = pelvis:GetVelocity()
     local horizontal = Vector(velocity.x, velocity.y, 0)
     local correction = direction * speed - horizontal
-    local maxChange = math.max(5, (tonumber(self.config.crawlAcceleration) or 38) * dt)
+    local maxChange = math.max(8, (tonumber(self.config.crawlAcceleration) or 95) * dt)
     if correction:Length() > maxChange then correction:Normalize(); correction = correction * maxChange end
     pelvis:SetVelocity(Vector(velocity.x + correction.x, velocity.y + correction.y, velocity.z))
+    -- Add a small horizontal body drive as well as the velocity correction.
+    -- This keeps crawling effective on high-friction floors and when a bone's
+    -- velocity is damped by constraints, without lifting the pelvis.
+    pelvis:ApplyForceCenter(direction * 1800)
 
     local now = CurTime()
     if now >= (self.nextCrawlStroke or 0) then
@@ -182,21 +186,24 @@ function FakeActor:UpdateCrawl(dt)
         local side = self.crawlSide or 1
         self.crawlSide = -side
         local right = side > 0
-        local hand = GetPhysicsForBone(rag, right and "ValveBiped.Bip01_R_Hand" or "ValveBiped.Bip01_L_Hand")
+        local handName = right and "ValveBiped.Bip01_R_Hand" or "ValveBiped.Bip01_L_Hand"
+        local forearmName = right and "ValveBiped.Bip01_R_Forearm" or "ValveBiped.Bip01_L_Forearm"
+        local hand = GetPhysicsForBone(rag, handName) or GetPhysicsForBone(rag, forearmName)
         local damage = self.injury[right and "rightarm" or "leftarm"] or 0
         if IsValid(hand) and damage < 85 then
-            -- Only stroke when the hand is actually near a surface. Applying
-            -- force in mid-air never creates traction and makes the body skate.
+            -- Trace a little farther: hands often sit above the floor while
+            -- the forearms are the actual contact points on a prone ragdoll.
             local handPos = hand:GetPos()
             local ground = util.TraceLine({
-                start = handPos + Vector(0, 0, 2),
-                endpos = handPos - Vector(0, 0, 10),
+                start = handPos + Vector(0, 0, 4),
+                endpos = handPos - Vector(0, 0, 22),
                 filter = rag,
                 mask = MASK_SOLID
             })
             if ground.Hit and not ground.HitSky then
                 local strength = math.Clamp(1 - damage / 100, 0.15, 1)
-                hand:ApplyForceCenter(direction * (350 * strength))
+                hand:ApplyForceCenter(direction * (1800 * strength) + Vector(0, 0, 250 * strength))
+                hand:Wake()
             end
         end
     end
