@@ -1715,15 +1715,27 @@ function ENT:ChaseEnemy(target)
         -- caused two independent launch controllers to race each other.
 
         if profile.HeadcrabStyle == true and visible and distance > 58 and distance < 290
+            and (not BZCN.RuleEnabled or BZCN.RuleEnabled("headcrab_pounce"))
             and now >= (self.BZCNNextPounceAt or 0) and self:OnGround() then
             local direction = goalPos - self:GetPos()
             direction.z = 0
             if direction:LengthSqr() > 1 then
                 direction:Normalize()
-                self.BZCNNextPounceAt = now + 1.9
+                self.BZCNNextPounceAt = now + (tonumber(profile.HeadcrabPounceCooldown) or 2.15)
+                self.BZCNHeadcrabPounce = {
+                    target = target, direction = direction, startedAt = now,
+                    startPos = self:GetPos(), expires = now + 0.85
+                }
+                local leap = self.FindSequence and self:FindSequence({
+                    "jumpattack", "jump_attack", "attack_jump", "attack1", "attack"
+                }) or -1
+                if leap and leap >= 0 and isfunction(self.AddGestureSequence) then
+                    pcall(self.AddGestureSequence, self, leap)
+                end
                 self.loco:Jump()
-                self.loco:SetVelocity(direction * 245 + Vector(0, 0, 155))
-                hook.Run("BZCN_HeadcrabPounce", self, target)
+                self.loco:SetVelocity(direction * 325 + Vector(0, 0, 205))
+                self:EmitSound("npc/headcrab/attack1.wav", 68, math.random(95, 108), 0.8)
+                hook.Run("BZCN_HeadcrabPounce", self, target, direction)
             end
         end
         local sprintStart = tonumber(profile.SprintStartRange) or 275
