@@ -153,7 +153,8 @@ end
 function FakeActor:UpdateCrawl(dt)
     local rag = self.ragdoll
     if not IsValid(rag) then return end
-    self:UpdateUpperPose()
+    -- Crawl is locomotion only. Do not apply head/spine shadow targets here;
+    -- stacked shadow control can pump torque into the ragdoll and launch it.
     local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis") or rag:GetPhysicsObject()
     if not IsValid(pelvis) then return end
 
@@ -185,7 +186,7 @@ function FakeActor:UpdateCrawl(dt)
         local damage = self.injury[right and "rightarm" or "leftarm"] or 0
         if IsValid(hand) and damage < 85 then
             local strength = math.Clamp(1 - damage / 100, 0.15, 1)
-            hand:ApplyForceCenter(direction * (32 * strength) + Vector(0, 0, 6 * strength))
+            hand:ApplyForceCenter(direction * (12 * strength))
         end
     end
 end
@@ -198,33 +199,16 @@ function FakeActor:Update(dt)
     dt = math.Clamp(tonumber(dt) or FrameTime(), 0, 0.05)
     local aim = self.aimTarget
     if self.mode == "crawl" then self:UpdateCrawl(dt); return end
-    if self.mode == "loose" then self:UpdateUpperPose(true); return end
-    if self.mode ~= "aim" and self.mode ~= "pounce" then return end
-    self:UpdateUpperPose()
-    local root = self.ragdoll:GetPhysicsObject()
-    if not IsValid(root) or not root.ComputeShadowControl then return end
 
-    local currentPos, currentAng = root:GetPos(), root:GetAngles()
-    local velocity = root:GetVelocity()
-    local correction = (self.moveVelocity - velocity) * (self.config.gain or 0.7)
-    local maxCorrection = self.config.maxCorrection or 45
-    if correction:Length() > maxCorrection then correction = correction:GetNormalized() * maxCorrection end
-    local targetPos = currentPos + (velocity + correction) * dt
-    local targetAng = currentAng
-    if isvector(aim) then
-        local desired = (aim - self.ragdoll:WorldSpaceCenter()):Angle()
-        targetAng = LerpAngle(self.config.aimWeight or 0.2, currentAng, Angle(desired.p, desired.y, currentAng.r))
+    -- Match the important safety property of Z-City's player fake controller:
+    -- never shadow-control the ragdoll root. The player controller drives
+    -- selected physics bones toward animated bone transforms; this NPC proxy
+    -- has no equivalent live pose source, so forcing a root target is unsafe.
+    -- Aim/pounce may steer the AI state, but must not manufacture lift or
+    -- teleport-like momentum through ComputeShadowControl.
+    if self.mode == "loose" or self.mode == "aim" or self.mode == "pounce" then
+        return
     end
-    root:ComputeShadowControl({
-        secondstoarrive = math.max(dt * 2, 0.02),
-        pos = targetPos, angle = targetAng,
-        maxangular = self.config.maxAngular or 180,
-        maxangulardamp = self.config.maxAngularDamp or 100,
-        maxspeed = self.config.maxSpeed or 90,
-        maxspeeddamp = self.config.maxSpeedDamp or 45,
-        dampfactor = self.config.dampFactor or 0.45,
-        teleportdistance = 0, deltatime = dt
-    })
 end
 
 function FakeActor:Destroy()
