@@ -1172,7 +1172,7 @@ local function TraceFurryGrab(attacker, target, weapon)
         if distance < 1 or distance > range + 1 then return nil end
         return util.TraceHull({
             start = eye, endpos = endPos, mins = mins, maxs = maxs,
-            mask = MASK_SHOT, filter = filter
+            mask = MASK_SOLID, filter = filter
         })
     end
 
@@ -1281,12 +1281,12 @@ function BZCN.TraceRuntimeHands(attacker, target, requestedReach)
     if IsValid(attacker.BZCNHeldWeaponProxy) then filter[#filter + 1] = attacker.BZCNHeldWeaponProxy end
     if downed and IsValid(rag) and target ~= rag then filter[#filter + 1] = target end
 
-    local tr = util.TraceLine({start = eye, endpos = endPos, filter = filter, mask = MASK_SHOT})
+    local tr = util.TraceLine({start = eye, endpos = endPos, filter = filter, mask = MASK_SOLID})
     if not tr.Hit or tr.HitWorld then
         tr = util.TraceHull({
             start = eye, endpos = endPos,
             mins = Vector(-5, -5, -5), maxs = Vector(5, 5, 5),
-            filter = filter, mask = MASK_SHOT
+            filter = filter, mask = MASK_SOLID
         })
     end
     return tr
@@ -1488,7 +1488,7 @@ hook.Add("KeyPress", "BZCN_PlayerFurryManagedNPCGrab", function(ply, button)
         start = startPos,
         endpos = startPos + ply:GetAimVector() * 96,
         filter = {ply, weapon},
-        mask = MASK_SHOT
+        mask = MASK_SOLID
     })
     if not trace or not IsValid(trace.Entity) then return end
     local target = ResolveManagedNPCFromFurryEntity(trace.Entity)
