@@ -98,8 +98,12 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
         end
 
         local launchTime = CurTime()
-        local boostVelocity = direction * math.Clamp(groundSpeed + 360, 520, 720)
-            + Vector(0, 0, 275)
+        -- Keep the pounce as a short tackle, not a rocket launch. The old
+        -- 520-720 horizontal burst plus 275 vertical speed could carry the
+        -- bot/ragdoll far beyond the target, especially when movement already
+        -- had residual momentum.
+        local boostVelocity = direction * math.Clamp(groundSpeed + 150, 340, 460)
+            + Vector(0, 0, 145)
         local pounceState = {
             target = target,
             direction = direction,
@@ -156,13 +160,21 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
                         phys:Wake()
                         local inherited = phys:GetVelocity()
                         local launchVelocity = isvector(pounceState.boostVelocity)
-                            and pounceState.boostVelocity or (direction * 520 + Vector(0, 0, 275))
-                        -- Carry the actual upright boost into the ragdoll. Preserve
-                        -- a portion of the old lateral velocity so the transition
-                        -- doesn't erase a strafing/run-up component.
-                        local inheritedSide = Vector(inherited.x, inherited.y, 0)
-                            - direction * Vector(inherited.x, inherited.y, 0):Dot(direction)
-                        phys:SetVelocity(launchVelocity + inheritedSide * 0.35)
+                            and pounceState.boostVelocity or (direction * 400 + Vector(0, 0, 145))
+                        -- Keep some lateral run-up momentum, but don't stack an
+                        -- unbounded inherited velocity onto the launch. This is
+                        -- the main safeguard against intermittent runaway pounces.
+                        local inheritedHorizontal = Vector(inherited.x, inherited.y, 0)
+                        local inheritedSide = inheritedHorizontal
+                            - direction * inheritedHorizontal:Dot(direction)
+                        local velocity = launchVelocity + inheritedSide * 0.2
+                        local horizontal = Vector(velocity.x, velocity.y, 0)
+                        if horizontal:Length() > 480 then
+                            horizontal:Normalize()
+                            horizontal = horizontal * 480
+                        end
+                        velocity = Vector(horizontal.x, horizontal.y, math.Clamp(velocity.z, -120, 180))
+                        phys:SetVelocity(velocity)
                         if BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
                             local actor = BZCN.FakeActor.Attach(ent, rag, {
                                 gain = 1.5, maxCorrection = 100, maxSpeed = 720,
