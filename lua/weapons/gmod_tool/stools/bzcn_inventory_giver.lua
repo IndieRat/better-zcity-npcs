@@ -168,7 +168,7 @@ local function ParseConfiguredInventory(tool)
         if SafeKey(name) and count then
             count = math.Clamp(math.floor(count), 0, 99999)
             local ammoID = game and game.GetAmmoID and game.GetAmmoID(name) or -1
-            inventory.Ammo[ammoID and ammoID >= 0 and ammoID or name] = count
+            if isnumber(ammoID) and ammoID >= 0 then inventory.Ammo[ammoID] = count end
         end
     end
     for _, id in ipairs(SplitList(tool:GetClientInfo("attachments"), 32)) do
@@ -195,6 +195,22 @@ local function WriteInventory(ent, inventory)
         -- player's existing weapons, give configured missing ones, and sync the
         -- inventory table without pretending a boolean marker is a live SWEP.
         local playerWeapons = {}
+        local playerAmmo = {}
+        if isfunction(ent.GetAmmo) then
+            local ok, liveAmmo = pcall(ent.GetAmmo, ent)
+            if ok and istable(liveAmmo) then playerAmmo = table.Copy(liveAmmo) end
+        end
+        -- The inventory UI may only specify a few ammo types; merge them into
+        -- the live snapshot so unspecified ammunition is neither lost from the
+        -- inventory record nor changed on the player.
+        for ammoKey, amount in pairs(inventory.Ammo) do
+            local ammoID = isnumber(ammoKey) and ammoKey
+                or (game and game.GetAmmoID and game.GetAmmoID(tostring(ammoKey)) or -1)
+            if isnumber(ammoID) and ammoID >= 0 then
+                playerAmmo[ammoID] = math.Clamp(math.floor(tonumber(amount) or 0), 0, 99999)
+            end
+        end
+        inventory.Ammo = playerAmmo
         ent.inventory = inventory
         ent.Inventory = inventory
         for class in pairs(inventory.Weapons) do
@@ -224,9 +240,9 @@ local function WriteInventory(ent, inventory)
         ent.Inventory = inventory
 
         for ammoKey, amount in pairs(inventory.Ammo) do
-            local ammoName = isnumber(ammoKey) and game.GetAmmoName(ammoKey) or tostring(ammoKey)
+            local ammoName = isnumber(ammoKey) and game.GetAmmoName(ammoKey) or nil
             if isstring(ammoName) and ammoName ~= "" then
-                ent:SetAmmo(math.Clamp(math.floor(tonumber(amount) or 0), 0, 99999), ammoName)
+                pcall(ent.SetAmmo, ent, math.Clamp(math.floor(tonumber(amount) or 0), 0, 99999), ammoName)
             end
         end
 
