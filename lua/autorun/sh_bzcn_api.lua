@@ -35,7 +35,88 @@ BZCN.HumanNamePool = BZCN.HumanNamePool or {
     "Sofia", "Taylor", "Theo", "Toby", "Valerie", "Wes", "Yuri", "Zoe"
 }
 
-function BZCN.GetRandomHumanName()
+-- Gender-aware fallback pools for models that are not registered in Z-City's
+-- appearance catalogue. Prefer its own name generator when it is available.
+BZCN.HumanNamePoolsByGender = BZCN.HumanNamePoolsByGender or {
+    [1] = {
+        "Mike", "Dave", "Michel", "John", "Fred", "Michiel", "Steven", "Sergio",
+        "Joel", "Samuel", "Larry", "Sean", "Thomas", "Jose", "Bobby", "Richard",
+        "David", "Alex", "Andre", "Ben", "Caleb", "Cameron", "Charlie", "Chris",
+        "Cody", "Daniel", "Darius", "Eli", "Ethan", "Felix", "Gabriel", "Henry",
+        "Isaac", "Jamie", "Jesse", "Jordan", "Kai", "Keith", "Kieran", "Leo",
+        "Logan", "Luca", "Micah", "Mikhail", "Nathan", "Noah", "Oliver", "Russell",
+        "Sam", "Sean", "Simon", "Theo", "Toby", "Wes", "Yuri"
+    },
+    [2] = {
+        "Denise", "Joyce", "Jane", "Sara", "Emily", "Charlotte", "Cathy", "Ruth",
+        "Julia", "Tanya", "Wanda", "Elizabeth", "Nicole", "Stacey", "Mary", "Anna",
+        "Diana", "Amelia", "Brooke", "Chloe", "Daphne", "Eden", "Ella", "Eva",
+        "Grace", "Harper", "Iris", "Jade", "Jasmine", "Jordan", "Kayla", "Kim",
+        "Laura", "Maya", "Nadia", "Nora", "Sofia", "Valerie", "Zoe"
+    }
+}
+
+local function ResolveHumanSex(input)
+    if input == 1 or input == 2 then return input end
+    if isbool(input) then return input and 2 or 1 end
+    if not isstring(input) then return nil end
+
+    local lowered = string.lower(input)
+    if string.find(lowered, "female", 1, true) then return 2 end
+    if string.find(lowered, "male", 1, true) then return 1 end
+
+    local appearance = hg and hg.Appearance
+    local playerModels = appearance and appearance.PlayerModels
+    if istable(playerModels) then
+        for sexIndex = 1, 2 do
+            for modelName, modelInfo in pairs(playerModels[sexIndex] or {}) do
+                if string.lower(tostring(modelName)) == lowered then return sexIndex end
+                if istable(modelInfo) then
+                    local modelPath = modelInfo.mdl or modelInfo.model
+                    if isstring(modelPath) and string.lower(modelPath) == lowered then
+                        return sexIndex
+                    end
+                end
+            end
+        end
+    end
+
+    -- Z-City and stock citizen model families both encode sex in the path.
+    if string.find(lowered, "/f/", 1, true)
+        or string.find(lowered, "female", 1, true)
+        or string.find(lowered, "alyx", 1, true)
+        or string.find(lowered, "mossman", 1, true) then return 2 end
+    if string.find(lowered, "/m/", 1, true)
+        or string.find(lowered, "male", 1, true)
+        or string.find(lowered, "combine_soldier", 1, true)
+        or string.find(lowered, "metrocop", 1, true) then return 1 end
+    return nil
+end
+
+function BZCN.GetModelSex(modelOrSex)
+    if isentity(modelOrSex) and IsValid(modelOrSex) then
+        modelOrSex = modelOrSex:GetModel()
+    end
+    return ResolveHumanSex(modelOrSex)
+end
+
+function BZCN.GetRandomHumanName(modelOrSex)
+    local sexIndex = ResolveHumanSex(modelOrSex)
+    if sexIndex then
+        local appearance = hg and hg.Appearance
+        if appearance and isfunction(appearance.GenerateRandomName) then
+            local ok, name = pcall(appearance.GenerateRandomName, sexIndex)
+            if ok and isstring(name) and name ~= "" then return name end
+        end
+        local nativeNames = appearance and appearance.RandomNames
+        if istable(nativeNames) and istable(nativeNames[sexIndex]) and #nativeNames[sexIndex] > 0 then
+            return nativeNames[sexIndex][math.random(#nativeNames[sexIndex])]
+        end
+        local genderNames = BZCN.HumanNamePoolsByGender
+            and BZCN.HumanNamePoolsByGender[sexIndex] or {}
+        if #genderNames > 0 then return genderNames[math.random(#genderNames)] end
+    end
+
     local names = BZCN.HumanNamePool or {}
     if #names == 0 then return "Alex" end
     return names[math.random(#names)]
@@ -906,15 +987,17 @@ function BZCN.ApplyClass(ent, className, resetInventory)
         ent:SetNW2String("BZCNClass", profile.ClassName)
         ent:SetNW2String("PlayerClassName", profile.PlayerClassName)
         local displayName = profile.Name or profile.ClassName
-        if istable(profile.DisplayNames) and #profile.DisplayNames > 0 then
+        if profile.UseGenderAwareName == true and isfunction(BZCN.GetRandomHumanName) then
+            displayName = BZCN.GetRandomHumanName(profile.Model) or displayName
+        elseif istable(profile.DisplayNames) and #profile.DisplayNames > 0 then
             displayName = profile.DisplayNames[math.random(#profile.DisplayNames)]
-            -- Give Combine/Civil Protection variants a short unit number so
-            -- the world identifier reads like an individual's name, not a class badge.
-            if profile.ClassName == "Combine" then
-                displayName = displayName .. " " .. string.format("%02d", math.random(1, 24))
-            elseif profile.ClassName == "Metrocop" then
-                displayName = displayName .. " " .. string.format("%02d", math.random(1, 18))
-            end
+        end
+        -- Give Combine/Civil Protection variants a short unit number so the
+        -- world identifier reads like an individual's name, not a class badge.
+        if profile.ClassName == "Combine" then
+            displayName = displayName .. " " .. string.format("%02d", math.random(1, 24))
+        elseif profile.ClassName == "Metrocop" then
+            displayName = displayName .. " " .. string.format("%02d", math.random(1, 18))
         end
         ent.BZCNDisplayName = displayName
         ent.PlayerName = displayName
@@ -992,7 +1075,10 @@ end
 -- keeps its short unit number suffix, preserving distinction without generic labels.
 for _, className in ipairs({"default", "Combine", "Metrocop", "Rebel", "civilian_companion"}) do
     local profile = BZCN.Classes[className]
-    if profile then profile.DisplayNames = CopyTable(BZCN.HumanNamePool) end
+    if profile then
+        profile.DisplayNames = CopyTable(BZCN.HumanNamePool)
+        profile.UseGenderAwareName = true
+    end
 end
 
 function BZCN.GetWeaponModel(ent, weaponClass)
