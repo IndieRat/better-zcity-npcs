@@ -106,7 +106,7 @@ BZCN.RegisterClass("Combine", {
     DisplayNames = {"Overwatch Unit", "Combine Unit", "Overwatch Soldier"},
     PlayerClassName = "Combine", TeamName = "Combine",
     Model = "models/player/combine_soldier.mdl", Health = 140, Speed = 180,
-    Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
+    Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
     CanScavengeWeapons = true, AnimationClass = "overwatch", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
     MedicalRange = 300, WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
@@ -122,7 +122,7 @@ BZCN.RegisterClass("Metrocop", {
     Model = "models/player/police.mdl", Health = 115, Speed = 172,
     -- Civil Protection starts watchful instead of treating an ordinary player as
     -- hostile on sight. Attacks and recent ally-threat memory still escalate.
-    Faction = "Combine", EnemyPlayers = false, EnemyFactions = {"Rebel", "furry"},
+    Faction = "Combine", EnemyPlayers = false, EnemyFactions = {"Rebel", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 160, HelpRange = 1350, HelpMemory = 10,
     AnimationClass = "metrocop", AnimationHoldType = "smg", Ranged = false, WeaponDamage = 10,
     WeaponRange = 1150, AttackDelay = 0.38, MedicalRange = 320, CanScavengeWeapons = true,
@@ -136,7 +136,7 @@ BZCN.RegisterClass("Rebel", {
     -- not a second line in the world-space identifier.
     DisplayNames = {"Alex", "Alyx", "Barney", "Casey", "Eli", "Isaac", "Jamie", "Jordan", "Leon", "Mikhail", "Russell", "Sam"},
     Model = "models/player/group03/male_04.mdl", Health = 115, Speed = 185,
-    Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry"},
+    Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
     AnimationClass = "citizen_male", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
     MedicalRange = 320, CanScavengeWeapons = true, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
@@ -200,7 +200,7 @@ BZCN.RegisterClass("headcrab", {
     BaseSpeedOverride = 230, HeadcrabPounceCooldown = 2.15,
     -- Headcrabs share the zombie faction and won't hunt their own infected hosts.
     Faction = "zombie", EnemyPlayers = true,
-    EnemyFactions = {"default", "Combine", "Metrocop", "Rebel", "furry"},
+    EnemyFactions = {"default", "civilian", "Combine", "Metrocop", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 750, FollowDistance = 80, HelpRange = 500, HelpMemory = 4,
     HeadcrabStyle = true, Ranged = false, MeleeDamage = 9, MeleeRange = 38, AttackDelay = 0.62,
     AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
@@ -213,14 +213,13 @@ BZCN.RegisterClass("headcrab_zombie", {
     Model = "models/zcity/player/zombie_classic.mdl", Health = 155, Speed = 132,
     BaseSpeedOverride = 132,
     Faction = "zombie", EnemyPlayers = true,
-    EnemyFactions = {"default", "Combine", "Metrocop", "Rebel", "furry"},
+    EnemyFactions = {"default", "civilian", "Combine", "Metrocop", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 850, FollowDistance = 80, HelpRange = 600, HelpMemory = 5,
     ZombieStyle = true, Ranged = false, MeleeDamage = 22, MeleeRange = 58, AttackDelay = 1.18,
     MeleeSound = "npc/zombie/claw_strike1.wav", MeleeMissSound = "npc/zombie/claw_miss1.wav",
     AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     MedicalRange = 0,
     Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {}}
-})
 
 local function NetworkKey(key, kind)
     return "BZCN_NV_" .. kind .. "_" .. tostring(key)
