@@ -16,6 +16,18 @@ TOOL.Information = {
 }
 
 if CLIENT then
+    -- TOOL.ClientConVar is normally registered by the gmod_tool loader. Some
+    -- reload/addon ordering paths leave the panel's text-entry convars absent,
+    -- causing RunConsoleCommand("tool_bzcn_inventory_giver_*", ...) to report
+    -- "Unknown command" and leaving the server with empty/default settings.
+    -- Register the same userinfo convars explicitly as a safe fallback.
+    for key, default in pairs(TOOL.ClientConVar or {}) do
+        local convarName = "tool_bzcn_inventory_giver_" .. key
+        if not GetConVar(convarName) then
+            CreateClientConVar(convarName, tostring(default or ""), true, true)
+        end
+    end
+
     language.Add("tool.bzcn_inventory_giver.name", "Inventory Giver")
     language.Add("tool.bzcn_inventory_giver.desc", "Apply a configurable Z-City inventory to a player or managed BZCN NPC.")
     language.Add("tool.bzcn_inventory_giver.left", "Apply the configured inventory to the targeted player or BZCN NPC")
