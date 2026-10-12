@@ -250,6 +250,10 @@ end
 local function TryOpenTaskDoor(ent, destination)
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("door_interaction") then return false end
     if not IsValid(ent) or not isvector(destination) then return false end
+    local profile = ent.BZCNClassProfile or {}
+    -- Native HL2 zombies/headcrabs do not operate doors. Keep this restriction
+    -- consistent in both the combat path and the idle-task path.
+    if profile.ZombieStyle == true or profile.HeadcrabStyle == true then return false end
     local startPos = ent:WorldSpaceCenter()
     local trace = util.TraceHull({
         start = startPos, endpos = destination,
