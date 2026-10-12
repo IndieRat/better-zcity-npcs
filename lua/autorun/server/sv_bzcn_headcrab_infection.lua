@@ -265,7 +265,11 @@ hook.Add("BZCN_NPCClassChanged", "BZCN_ClearHeadcrabInfectionAfterConversion", f
         organism.headcrabon = nil
         organism.headcrabevent = false
     end
+    -- Match the native headcrabzombie class: infection is consumed by the
+    -- zombie model/bodygroup, so drop the temporary pre-conversion overlay.
+    if isfunction(ent.SetNetVar) then pcall(ent.SetNetVar, ent, "headcrab", false) end
     if ent.SetNW2Bool then ent:SetNW2Bool("BZCNHeadcrabInfected", false) end
+    if ent.SetNW2Float then ent:SetNW2Float("BZCNHeadcrabInfectionAt", 0) end
 end)
 
 hook.Add("BZCN_NPCSpawned", "BZCN_InitHeadcrabInfectionState", function(ent)
