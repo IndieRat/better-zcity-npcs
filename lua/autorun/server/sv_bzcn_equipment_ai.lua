@@ -1708,6 +1708,23 @@ end
 local function ChooseMedicalClass(inventory, target, healer)
     local readout = GetMedicalReadout(target)
     local function has(class, modes)
+        -- Once a medicine has been instantiated, its live remaining supply is
+        -- authoritative. Some Z-City consumables (notably blood bags) can spawn
+        -- empty; falling back to an inventory boolean would make the AI choose
+        -- that same empty item forever and starve other valid treatments.
+        local runtime = IsValid(healer) and healer.BZCNRuntimeMedicalWeapon or nil
+        if IsValid(runtime) and runtime:GetClass() == class and istable(runtime.modeValues) then
+            if istable(modes) then
+                for _, mode in ipairs(modes) do
+                    if (tonumber(runtime.modeValues[mode]) or 0) > 0 then return true end
+                end
+                return false
+            end
+            for _, amount in pairs(runtime.modeValues) do
+                if (tonumber(amount) or 0) > 0 then return true end
+            end
+            return false
+        end
         return HasMedicalSupply(inventory, class, modes)
     end
 
