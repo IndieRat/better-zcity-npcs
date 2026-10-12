@@ -2188,10 +2188,11 @@ end)
 hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg)
     if not IsValid(target) or not dmg then return end
 
-    local owner = target.BZCNNPCOwner
-    if not IsValid(owner) and target.GetNW2Entity then
-        owner = target:GetNW2Entity("BZCNNPCOwner")
-    end
+    -- Resolve every supported ownership alias. Some Z-City ragdoll hooks
+    -- clear the Lua BZCNNPCOwner field while retaining the native RagdollOwner,
+    -- ply, or NW2 reference; damage must still reach the living NPC.
+    local owner = ResolvePhysicalVictim(target)
+    if owner == target then owner = nil end
 
     -- With native Z-City organism support, allow the ragdoll to go through
     -- Z-City's damage hook. PostEntityTakeDamage relays its *applied* damage
@@ -2268,10 +2269,8 @@ hook.Add("PostEntityTakeDamage", "BZCNNPCSupport_ZCityDamageSync", function(targ
     -- A temporary rag shares its living owner's Z-City organism. Let Z-City
     -- calculate wounds on the rag, then mirror the engine-applied (already
     -- scaled) damage onto the hidden NextBot without re-running organ tracing.
-    local owner = target.BZCNNPCOwner
-    if not IsValid(owner) and target.GetNW2Entity then
-        owner = target:GetNW2Entity("BZCNNPCOwner")
-    end
+    local owner = ResolvePhysicalVictim(target)
+    if owner == target then owner = nil end
     if IsValid(owner) and owner.BZCNNPCDowned and owner.BZCNNPCOrg
         and owner.BZCNNPCOrg.usesZCityOrganism and target ~= owner then
         if tookDamage ~= false then
