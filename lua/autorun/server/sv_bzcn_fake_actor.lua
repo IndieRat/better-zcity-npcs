@@ -631,16 +631,18 @@ function FakeActor:UpdatePounce(dt)
     }
     for _, arm in ipairs(arms) do
         local lateral = right * (arm.side * 10)
-        local shoulder = center + forward * 2 + lateral + Vector(0, 0, 5)
-        local wrist = center + forward * 23 + lateral * 1.25 + Vector(0, 0, 8)
+        local shoulder = center + forward * 3 + lateral + Vector(0, 0, 5)
+        -- Fully reach forward during a tackle; hand position follows the same
+        -- velocity-derived heading as the head/neck aim target.
+        local wrist = center + forward * 36 + lateral * 1.15 + Vector(0, 0, 7)
         local upperAngle = angle
         upperAngle:RotateAroundAxis(upperAngle:Forward(), arm.side * 11)
-        self:ShadowBone(arm.upper, upperAngle, 0.12, 52 * remaining, 38,
-            shoulder, 86, 50)
-        self:ShadowBone(arm.forearm, angle, 0.10, 60 * remaining, 42,
-            nil, 92, 50)
-        self:ShadowBone(arm.hand, angle, 0.09, 62 * remaining, 42,
-            wrist, 95, 52)
+        self:ShadowBone(arm.upper, upperAngle, 0.075, 68 * remaining, 42,
+            shoulder, 120, 58)
+        self:ShadowBone(arm.forearm, angle, 0.075, 72 * remaining, 44,
+            wrist - forward * 12, 125, 58)
+        self:ShadowBone(arm.hand, angle, 0.065, 76 * remaining, 46,
+            wrist, 135, 60)
     end
 
     -- Draw the legs back a little to keep the silhouette from folding under
