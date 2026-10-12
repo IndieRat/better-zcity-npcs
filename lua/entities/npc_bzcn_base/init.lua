@@ -422,7 +422,11 @@ local nativeNPCFaction = {
     npc_eli = "default", npc_kleiner = "default", npc_magnusson = "default",
     npc_mossman = "default", npc_odessa = "default",
     npc_alyx = "Rebel", npc_vortigaunt = "Rebel", npc_rollermine_hacked = "Rebel",
-    npc_turret_floor_resistance = "Rebel"
+    npc_turret_floor_resistance = "Rebel",
+    npc_fastzombie = "zombie", npc_fastzombie_torso = "zombie",
+    npc_headcrab = "zombie", npc_headcrab_black = "zombie", npc_headcrab_fast = "zombie",
+    npc_poisonzombie = "zombie", npc_zombie = "zombie",
+    npc_zombie_torso = "zombie", npc_zombine = "zombie"
 }
 
 local playerClassFaction = {
