@@ -29,10 +29,15 @@ end
 
 local function SquadFaction(ent)
     local class = ClassKey(ent)
-    if ent.BZCNGoodCopDefected or class == "rebel" then return "Rebel" end
-    -- Metrocops share Combine's disposition faction in Z-City, but remain
-    -- human solo officers: they must never be elected into Combine squads.
-    if class == "combine" then return "Combine" end
+    local profile = ent.BZCNClassProfile or {}
+    local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+    if ent.BZCNGoodCopDefected or class == "rebel" or faction == "rebel"
+        or string.find(class, "rebel", 1, true) then
+        return "Rebel"
+    end
+    -- Metrocops share Combine disposition in Z-City, but remain solo officers.
+    if class == "metrocop" or class == "police" then return nil end
+    if class == "combine" or faction == "combine" then return "Combine" end
     return nil
 end
 
@@ -132,4 +137,169 @@ hook.Add("BZCN_Squad_GetStatus", "BZCN_SquadStatus", function(ent)
         slot = ent.BZCNSquadSlot,
         task = ent.BZCNGroupTask or "idle"
     }
+end)
+
+
+-- Combat coordination shares real, recently seen threats but never grants a
+-- squad member wallhacks: ChaseEnemy may follow a last-known position, while
+-- AttackTarget still requires that member's own current hostile sense record.
+local COMBAT_THINK_INTERVAL = 0.4
+local COMBAT_MEMORY = 4
+
+local function IsValidCombatTarget(member, target)
+    if not IsManaged(member) or not IsValid(target) or target == member
+        or target:Health() <= 0 or (target:IsPlayer() and not target:Alive()) then return false end
+    if BZCNCombatActor and isfunction(BZCNCombatActor.IsIncapacitated)
+        and BZCNCombatActor.IsIncapacitated(target) then return false end
+    if not isfunction(member.IsBZCNEnemy) then return false end
+    local ok, hostile = pcall(member.IsBZCNEnemy, member, target)
+    return ok and hostile == true
+end
+
+local function GetVisibleThreats(member)
+    local out = {}
+    if not BZCN or not isfunction(BZCN.GetLastAdapterContext) then return out end
+    local context = BZCN.GetLastAdapterContext(member)
+    local sense = context and context.sense
+    if not sense then return out end
+    for _, record in ipairs(sense.Hostiles or {}) do
+        local target = record.Entity
+        if record.Visible == true and IsValidCombatTarget(member, target) then
+            out[#out + 1] = {entity = target, distance = member:GetPos():DistToSqr(target:GetPos())}
+        end
+    end
+    return out
+end
+
+local function ClearCombatOrder(member)
+    member.BZCNSquadCombatTarget = nil
+    member.BZCNSquadCombatPosition = nil
+    member.BZCNSquadCombatSeenAt = nil
+    member.BZCNSquadCombatUntil = nil
+    member.BZCNSquadCombatRole = nil
+    if member.SetNW2Entity then member:SetNW2Entity("BZCNSquadCombatTarget", NULL) end
+    if member.SetNW2Vector then member:SetNW2Vector("BZCNSquadCombatPosition", vector_origin) end
+    if member.SetNW2String then
+        member:SetNW2String("BZCNSquadCombatRole", "")
+        member:SetNW2String("BZCNGroupTask", "idle")
+    end
+end
+
+local function CombatRole(member, leader)
+    local slot = math.max(tonumber(member.BZCNSquadSlot) or 1, 1)
+    if member == leader or slot == 1 then return "lead" end
+    local profile = member.BZCNClassProfile or {}
+    local weaponClass = member.BZCN_SelectedWeapon or profile.WeaponClass or ""
+    local isMedical = BZCN and isfunction(BZCN.IsMedicalWeaponClass)
+        and BZCN.IsMedicalWeaponClass(weaponClass)
+    local ranged = profile.Ranged == true and weaponClass ~= "weapon_hands_sh" and not isMedical
+    if ranged and slot >= 4 and slot % 2 == 0 then return "support" end
+    if slot % 2 == 0 then return "flank_left" end
+    return "flank_right"
+end
+
+local function PublishCombatOrder(leader, members, target, position, seenAt)
+    local now = CurTime()
+    local changed = leader.BZCNSquadCombatTarget ~= target
+    leader.BZCNSquadCombatTarget = target
+    leader.BZCNSquadCombatPosition = position
+    leader.BZCNSquadCombatSeenAt = seenAt
+    leader.BZCNSquadCombatUntil = now + COMBAT_MEMORY
+    for _, member in ipairs(members) do
+        local role = CombatRole(member, leader)
+        local roleChanged = member.BZCNSquadCombatRole ~= role
+        member.BZCNSquadCombatTarget = target
+        member.BZCNSquadCombatPosition = position
+        member.BZCNSquadCombatSeenAt = seenAt
+        member.BZCNSquadCombatUntil = now + COMBAT_MEMORY
+        member.BZCNSquadCombatRole = role
+        if member.SetNW2Entity then member:SetNW2Entity("BZCNSquadCombatTarget", target) end
+        if member.SetNW2Vector then member:SetNW2Vector("BZCNSquadCombatPosition", position or vector_origin) end
+        if member.SetNW2String then
+            member:SetNW2String("BZCNSquadCombatRole", role)
+            member:SetNW2String("BZCNGroupTask", target and ("engage_" .. role) or "idle")
+        end
+        if roleChanged then
+            hook.Run("BZCN_SquadCombatRoleChanged", member, role, target)
+        end
+    end
+    if changed then hook.Run("BZCN_SquadCombatOrder", leader, members, target, position) end
+end
+
+hook.Add("Think", "BZCN_SquadCombatCoordinator", function()
+    local now = CurTime()
+    if (BZCN.NextSquadCombatThink or 0) > now then return end
+    BZCN.NextSquadCombatThink = now + COMBAT_THINK_INTERVAL
+
+    local processed = {}
+    for _, seed in ipairs(ents.GetAll()) do
+        if not IsManaged(seed) or processed[seed] then continue end
+        local leader = seed.BZCNSquadLeader
+        if not IsValid(leader) or not IsManaged(leader) or leader.BZCNSquadID ~= seed.BZCNSquadID then
+            ClearCombatOrder(seed)
+            processed[seed] = true
+            continue
+        end
+        if leader ~= seed then continue end
+
+        local members = {}
+        for _, candidate in ipairs(ents.GetAll()) do
+            if IsManaged(candidate) and candidate.BZCNSquadID == leader.BZCNSquadID
+                and candidate.BZCNSquadLeader == leader then
+                members[#members + 1] = candidate
+                processed[candidate] = true
+            end
+        end
+        if #members == 0 then continue end
+
+        local chosen, chosenDist, chosenMember
+        for _, member in ipairs(members) do
+            for _, threat in ipairs(GetVisibleThreats(member)) do
+                if not chosenDist or threat.distance < chosenDist then
+                    chosen, chosenDist, chosenMember = threat.entity, threat.distance, member
+                end
+            end
+        end
+
+        local position, seenAt
+        if IsValid(chosen) then
+            position = chosen:GetPos()
+            seenAt = now
+        else
+            local remembered = leader.BZCNSquadCombatTarget
+            local lastSeen = tonumber(leader.BZCNSquadCombatSeenAt) or 0
+            if IsValidCombatTarget(leader, remembered) and now - lastSeen <= COMBAT_MEMORY
+                and isvector(leader.BZCNSquadCombatPosition) then
+                chosen = remembered
+                position = leader.BZCNSquadCombatPosition
+                seenAt = lastSeen
+            else
+                -- A member may see the target while the leader's view is blocked.
+                for _, member in ipairs(members) do
+                    local candidate = member.BZCNEnemy or member.BZCNCombatTarget
+                    local lastPos = member.BZCNEnemyMemory
+                    if IsValidCombatTarget(member, candidate) and istable(lastPos)
+                        and isvector(lastPos.Position) and now - (tonumber(lastPos.Time) or 0) <= COMBAT_MEMORY then
+                        chosen = candidate
+                        position = lastPos.Position
+                        seenAt = tonumber(lastPos.Time) or now
+                        break
+                    end
+                end
+            end
+        end
+
+        if IsValid(chosen) and isvector(position) and now - (tonumber(seenAt) or 0) <= COMBAT_MEMORY then
+            PublishCombatOrder(leader, members, chosen, position, seenAt)
+        else
+            for _, member in ipairs(members) do ClearCombatOrder(member) end
+        end
+    end
+
+    -- Sweep stale metadata when actors are removed or become incapacitated.
+    for _, member in ipairs(ents.GetAll()) do
+        if IsManaged(member) and not member.BZCNSquadID and member.BZCNSquadCombatRole then
+            ClearCombatOrder(member)
+        end
+    end
 end)
