@@ -152,7 +152,7 @@ BZCN.RegisterClass("furry", {
     -- player-only hooks to a NextBot. Sprint drains less stamina and jumps higher.
     FurrySpeedGainClassMul = 5, FurryJumpPowerMul = 1.5, FurryStaminaExhaustMul = 0.75,
     FurryPounceCooldown = 3.2, SprintStaminaDrain = 18, SprintStaminaRecovery = 22, SprintSpeedMultiplier = 1.55,
-    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
+    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel", "zombie"},
     FollowAllies = true, FollowRange = 800, FollowDistance = 125, HelpRange = 1000, HelpMemory = 8,
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
     SmartFurryChance = 0.22,
@@ -183,7 +183,7 @@ BZCN.RegisterClass("furry_companion", {
     Model = "models/eradium/protogen_player.mdl", Health = 135, Speed = 235, BaseSpeedOverride = 235,
     FurrySpeedGainClassMul = 5, FurryJumpPowerMul = 1.5, FurryStaminaExhaustMul = 0.75,
     FurryPounceCooldown = 3.2, SprintStaminaDrain = 18, SprintStaminaRecovery = 22, SprintSpeedMultiplier = 1.55,
-    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
+    Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel", "zombie"},
     Companion = true, FurryStyle = true, SmartFurry = true, CanScavengeWeapons = true,
     FollowAllies = true, FollowRange = 2400, FollowDistance = 120, HelpRange = 1800, HelpMemory = 15,
     Ranged = false, MeleeDamage = 16, MeleeRange = 74, AttackDelay = 0.72,
@@ -203,6 +203,7 @@ BZCN.RegisterClass("headcrab", {
     EnemyFactions = {"default", "civilian", "Combine", "Metrocop", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 750, FollowDistance = 80, HelpRange = 500, HelpMemory = 4,
     HeadcrabStyle = true, Ranged = false, MeleeDamage = 9, MeleeRange = 38, AttackDelay = 0.62,
+    MeleeSound = "npc/headcrab/attack1.wav", MeleeMissSound = "npc/headcrab/attack2.wav",
     AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {}},
     HullMins = Vector(-10, -10, 0), HullMaxs = Vector(10, 10, 24)
