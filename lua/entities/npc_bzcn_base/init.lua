@@ -87,6 +87,29 @@ local function UpdateSwimState(self)
     return true
 end
 
+local NON_COMBAT_WEAPON_CLASSES = {
+    weapon_hands_sh = true,
+    weapon_medkit_sh = true,
+    weapon_bandage_sh = true,
+    weapon_bigbandage_sh = true,
+    weapon_bloodbag = true,
+    weapon_painkillers = true,
+    weapon_morphine = true,
+    weapon_adrenaline = true,
+    weapon_tourniquet = true,
+    weapon_naloxone = true,
+    weapon_betablock = true,
+    weapon_thiamine = true,
+    weapon_fentanyl = true
+}
+
+local function IsBZCNNonCombatWeapon(class)
+    class = string.lower(tostring(class or ""))
+    if NON_COMBAT_WEAPON_CLASSES[class] then return true end
+    return BZCN and isfunction(BZCN.IsMedicalWeaponClass)
+        and BZCN.IsMedicalWeaponClass(class) == true or false
+end
+
 local function GetBZCNPhysiologyPenalty(self)
     local org = self.organism or self.BZCN_Organism or {}
     local pain = math.Clamp(tonumber(org.pain) or 0, 0, 100)
@@ -464,10 +487,7 @@ function ENT:IsBZCNEnemy(target)
             or actor.BZCN_SelectedWeapon
             or (actor.GetNW2String and actor:GetNW2String("BZCNWeaponClass", ""))
         weaponClass = string.lower(tostring(weaponClass or ""))
-        return weaponClass ~= "" and weaponClass ~= "weapon_hands_sh"
-            and weaponClass ~= "weapon_medkit_sh" and weaponClass ~= "weapon_bandage_sh"
-            and weaponClass ~= "weapon_bigbandage_sh"
-            and weaponClass ~= "weapon_painkiller_sh" and weaponClass ~= "weapon_painkillers_sh"
+        return weaponClass ~= "" and not IsBZCNNonCombatWeapon(weaponClass)
     end
 
     -- Metro police have Combine training but human hesitation: an unarmed
@@ -640,6 +660,33 @@ function ENT:FindEnemy()
             end
         end
         return false
+    end
+
+    -- Squadmates can share an authentic last-known target position. This only
+    -- initiates pursuit: AttackTarget still requires this NPC to see a hostile.
+    local squadLeader = IsValid(self.BZCNSquadLeader) and self.BZCNSquadLeader or nil
+    local sharedTarget = self.BZCNSquadCombatTarget
+        or (IsValid(squadLeader) and squadLeader.BZCNSquadCombatTarget)
+    local sharedPosition = self.BZCNSquadCombatPosition
+        or (IsValid(squadLeader) and squadLeader.BZCNSquadCombatPosition)
+    local sharedSeenAt = tonumber(self.BZCNSquadCombatSeenAt)
+        or (IsValid(squadLeader) and tonumber(squadLeader.BZCNSquadCombatSeenAt)) or 0
+    if IsValid(sharedTarget) and CurTime() - sharedSeenAt <= 4
+        and isvector(sharedPosition) and self:IsBZCNEnemy(sharedTarget) then
+        if IsVisibleHostile(sharedTarget) then
+            best = sharedTarget
+            bestDistance = self:GetPos():DistToSqr(sharedTarget:GetPos())
+            priorityTarget = true
+        else
+            best = sharedTarget
+            bestDistance = self:GetPos():DistToSqr(sharedPosition)
+            priorityTarget = true
+            self.BZCNEnemyMemory = {
+                Entity = sharedTarget,
+                Position = sharedPosition,
+                Time = sharedSeenAt
+            }
+        end
     end
 
     if IsValid(preferred) and IsVisibleHostile(preferred) then
@@ -926,13 +973,7 @@ end
 function ENT:PlayBZCNAttackAnimation()
     local profile = self:GetBZCNProfile()
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
-    local ranged = profile.Ranged == true
-        and weaponClass ~= "weapon_hands_sh"
-        and weaponClass ~= "weapon_medkit_sh"
-        and weaponClass ~= "weapon_bandage_sh"
-        and weaponClass ~= "weapon_bigbandage_sh"
-        and weaponClass ~= "weapon_painkiller_sh"
-        and weaponClass ~= "weapon_painkillers_sh"
+    local ranged = profile.Ranged == true and not IsBZCNNonCombatWeapon(weaponClass)
 
     -- IXAnims' generic "attack" entry is often a full-body melee animation.
     -- For guns, request the model's actual ranged-fire gesture instead, so the
@@ -1177,10 +1218,7 @@ function ENT:AttackTarget(target)
     if now < (self.LastAttack or 0) then return end
 
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
-    local meleeOnlyWeapon = weaponClass == "weapon_hands_sh"
-        or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
-        or weaponClass == "weapon_bigbandage_sh"
-        or weaponClass == "weapon_painkiller_sh" or weaponClass == "weapon_painkillers_sh"
+    local meleeOnlyWeapon = IsBZCNNonCombatWeapon(weaponClass)
 
     local kickSupport = hg and hg.BZCNNPCSupport
     if profile.FurryStyle ~= true and isfunction(kickSupport and kickSupport.PerformKick)
@@ -1370,10 +1408,7 @@ function ENT:ChaseEnemy(target)
     local stuckCount = 0
     local profile = self:GetBZCNProfile()
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
-    local meleeOnlyWeapon = weaponClass == "weapon_hands_sh"
-        or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
-        or weaponClass == "weapon_bigbandage_sh"
-        or weaponClass == "weapon_painkiller_sh" or weaponClass == "weapon_painkillers_sh"
+    local meleeOnlyWeapon = IsBZCNNonCombatWeapon(weaponClass)
     local hasRangedWeapon = profile.Ranged == true and not meleeOnlyWeapon
         and profile.FurryStyle ~= true
     local impulseTracking = profile.FurryStyle == true
@@ -1492,6 +1527,39 @@ function ENT:ChaseEnemy(target)
 
         local goalPos = (visible or impulseTracking) and ((BZCNCombatActor and BZCNCombatActor.GetTargetPosition
             and BZCNCombatActor.GetTargetPosition(target)) or target:GetPos()) or lastSeenPos
+
+        -- Combat formations use non-overlapping engagement points. The leader
+        -- keeps the direct approach; wing members move to offset positions,
+        -- while ranged support holds a useful firing lane behind the push.
+        local role = self.BZCNSquadCombatRole
+        local sameSquadTarget = self.BZCNSquadCombatTarget == target
+        local lastSquadSight = tonumber(self.BZCNSquadCombatSeenAt) or 0
+        if sameSquadTarget and CurTime() - lastSquadSight <= 4
+            and isvector(goalPos) and (role == "flank_left" or role == "flank_right" or role == "support") then
+            local origin = isvector(self.BZCNSquadCombatPosition)
+                and (visible and target:GetPos() or self.BZCNSquadCombatPosition) or goalPos
+            local radial = self:GetPos() - origin
+            radial.z = 0
+            if radial:LengthSqr() < 1 then
+                radial = Vector(math.cos(math.rad(self:GetAngles().y)), math.sin(math.rad(self:GetAngles().y)), 0)
+            end
+            radial:Normalize()
+            local side = Vector(-radial.y, radial.x, 0)
+            local slot = math.max(tonumber(self.BZCNSquadSlot) or 2, 2)
+            local sideSign = role == "flank_left" and -1 or 1
+            if role == "support" then
+                local standOff = math.Clamp((tonumber(profile.WeaponRange) or 900) * 0.42, 240, 460)
+                local sideOffset = ((slot % 2 == 0) and -1 or 1) * math.Clamp(45 + (slot - 3) * 12, 45, 120)
+                goalPos = origin + radial * standOff + side * sideOffset
+            else
+                local rangedWing = hasRangedWeapon
+                local forwardOffset = rangedWing and 165 or 48
+                local sideOffset = rangedWing and 140 or 46
+                goalPos = origin + radial * forwardOffset + side * sideSign * sideOffset
+            end
+            goalPos = Vector(goalPos.x, goalPos.y, origin.z)
+        end
+
         local loseDistance = tonumber(self.LoseTargetDist) or 1400
         if not impulseTracking and self:GetPos():DistToSqr(goalPos) > loseDistance * loseDistance then return end
         if not visible and not impulseTracking
@@ -1935,12 +2003,7 @@ function ENT:RunBehaviour()
                     or self.BZCNClass == "default" or self.BZCNClass == "civilian")
                 and (self:GetBZCNProfile().Ranged == true
                     or (isstring(self.BZCN_SelectedWeapon) and self.BZCN_SelectedWeapon ~= ""
-                        and self.BZCN_SelectedWeapon ~= "weapon_hands_sh"
-                        and self.BZCN_SelectedWeapon ~= "weapon_medkit_sh"
-                        and self.BZCN_SelectedWeapon ~= "weapon_bandage_sh"
-                        and self.BZCN_SelectedWeapon ~= "weapon_bigbandage_sh"
-                        and self.BZCN_SelectedWeapon ~= "weapon_painkiller_sh"
-                        and self.BZCN_SelectedWeapon ~= "weapon_painkillers_sh"))) then
+                        and not IsBZCNNonCombatWeapon(self.BZCN_SelectedWeapon))) then
             local threat = self.BZCNFleeThreat
             if self.loco and IsValid(threat) then
                 local away = self:GetPos() - threat:GetPos()
