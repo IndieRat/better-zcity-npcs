@@ -848,6 +848,10 @@ end
 
 local function TryOpenDoorToward(bot, destination)
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("door_interaction") then return false end
+    if IsValid(bot) then
+        local profile = bot.BZCNClassProfile or {}
+        if profile.ZombieStyle == true or profile.HeadcrabStyle == true then return false end
+    end
     if not IsValid(bot) or not isvector(destination)
         or CurTime() < (bot.BZCNNextDoorUseAt or 0) then return false end
 
