@@ -646,7 +646,13 @@ function BZCN.AttackRuntimeMelee(ent, target, trace)
     if not IsValid(weapon) then return false end
 
     local reach = math.min(tonumber(weapon.ReachDistance) or 40, 40)
-    if distance > reach + 8 then return true end
+    local tracePoint = isvector(trace.HitPos) and trace.HitPos or target:WorldSpaceCenter()
+    local handOrigin = isfunction(ent.EyePos) and ent:EyePos() or ent:WorldSpaceCenter()
+    -- A fake-ragdolled target's hidden owner origin can be metres away from the
+    -- arm that was actually hit. Validate reach against the traced hand contact,
+    -- not the hidden living entity's center.
+    if not isvector(tracePoint) or not isvector(handOrigin)
+        or handOrigin:Distance(tracePoint) > reach + 3 then return true end
     PlaceRuntimeWeapon(ent, weapon)
     if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
     timer.Simple(0.35, function()
