@@ -2110,6 +2110,15 @@ timer.Create("BZCNNPCSupport_PounceContact", 0.05, 0, function()
             attacker.BZCNNPCPounce = nil
             continue
         end
+        -- A furry pounce is a mid-air tackle, not a proximity melee hit.
+        -- The director records the launch origin; require both real takeoff and
+        -- a little upward/forward displacement before resolving contact. This
+        -- prevents ground-level overlap from consuming the pounce repeatedly.
+        local pounceStart = pounce.startPos or attacker:GetPos()
+        local hasTakenOff = attacker.loco and not attacker.loco:IsOnGround()
+        local movedFromLaunch = attacker:GetPos():Distance(pounceStart) >= 18
+        if not hasTakenOff or not movedFromLaunch then continue end
+
         if attacker:WorldSpaceCenter():DistToSqr(target:WorldSpaceCenter()) > 56 * 56 then continue end
         local startPos = attacker:WorldSpaceCenter()
         local endPos = target:WorldSpaceCenter()
