@@ -123,6 +123,24 @@ Human NPCs share the same base movement speed as Z-City's ordinary player walk s
 
 These are compatibility-oriented Lua changes; accessory availability and exact clothing/animation results depend on the relevant Z-City content being mounted and supported by each model.
 
+### BZCN Fancy Patch and Add 2
+
+The second pass adds an upright run-up/boost to furry pounces, followed by a delayed fake-ragdoll handoff. The boost velocity is carried into the ragdoll, and a dedicated contact resolver preserves the impact after the NPC enters its downed state. The **Furry pounce build-up ragdoll** rule can disable the delayed ragdoll stage; **Furry pounce / ragdoll tackle** still controls whether the pounce itself is allowed.
+
+Managed headcrabs now use their own small collision hull, leap attacks, creature movement/attack sequences, and native headcrab sounds. A successful headcrab leap can start Z-City's native infection timer on a player (through the native `AddHeadcrab` path) or start a matching infection timer on a managed NPC. Managed NPC victims transition to the `headcrab_zombie` profile after the infection delay. The zombie profile uses Z-City's `models/zcity/player/zombie_classic.mdl`, bodygroup 1, zombie cloth materials, slow movement, claw attacks, and no ordinary social gestures or door interactions. Headcrabs and zombies share the zombie faction.
+
+New options are added automatically to **Utilities → User → Better ZCity NPCs** in the game-rules panel:
+
+- **Headcrab leap attacks** and **Headcrab infection and zombification** control the new headcrab behavior.
+- **Combine / Rebel squad tactics** can switch the squad director off.
+- **Zombie horde mind** is experimental and defaults off; enabling it allows managed zombies/headcrabs to join loose shared horde squads.
+- **Civilian panic spreads** allows nearby civilians to copy a civilian's flight response to a furry threat.
+- **Furry pounce build-up ragdoll** toggles the delayed transition after the boost.
+
+The new **Inventory Giver** tool is under **Tools → Better ZCity → Inventory Giver**. Configure comma-separated weapon classes, item IDs, ammo counts (`Pistol:120,SMG1:90`), attachment IDs, and armor assignments (`head=combine_helmet,torso=vest3)). Left-click a player or managed BZCN NPC to apply the setup; right-click copies a target's inventory into the tool fields. Reload clears managed-NPC inventory data. On players, configured missing weapons are given and configured ammo is set, while unrelated physical weapons, live ammo, and worn armor are preserved. The tool is admin-only (except single-player), and only registered SWEPs are given. Its item/attachment fields update Z-City inventory data; they do not conjure missing content or install attachments onto weapons automatically.
+
+These changes are statically reviewed against the current Z-City source, but still need live multiplayer testing for model/material availability, pounce timing, infection progression, and compatibility with server-side inventory/armor modifications.
+
 ## Injury signals and fake-ragdoll compatibility
 
 The injury bridge also uses the public [Z-City NPC Integration (zcnpci)](https://forge.owouw.us/ToasterPanic/zcnpci) addon as a design reference for damage-stage handling and ragdoll compatibility; this addon does not copy its active-ragdoll controller. For managed NextBots, it records available `ScaleNPCDamage` hitgroups and consumes `HomigradDamage` when present, then evaluates Z-City organism state after the damage tick. The incapacity checks include `otrub`, low consciousness, high pain, active stun/light-stun timers, serious leg damage/amputation, fire, and zcnpci-style leg-specific impact thresholds. These are server-side knockdown decisions layered over Z-City's native organism; they do not replace its wound calculation.
@@ -144,3 +162,4 @@ The server-side medical AI checks Z-City organism wounds, blood loss, internal b
 - Z-City furry class: https://github.com/uzelezz123/Z-City/tree/main/lua/homigrad/playerclass/classes/furry
 - Z-City NPC Integration (injury/ragdoll design reference): https://forge.owouw.us/ToasterPanic/zcnpci
 - Z-City's organism-backed native NPC conversion: https://github.com/uzelezz123/Z-City/blob/main/lua/homigrad/sv_npcstuff.lua
+- Z-City's headcrab zombie player class (pinned): https://github.com/uzelezz123/Z-City/blob/6464efc2cd9fcfe0c822195a7102d6afe1d86956/lua/homigrad/playerclass/classes/sh_headcrabzombie.lua
