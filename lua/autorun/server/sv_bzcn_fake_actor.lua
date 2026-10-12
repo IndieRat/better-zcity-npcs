@@ -14,6 +14,7 @@ function FakeActor.New(owner, ragdoll, config)
         injury = {}, nextCrawlStroke = 0, crawlSide = 1, crawlGrip = nil,
         crawlReach = nil, downSince = nil, nextLookScanAt = 0,
         lookTarget = nil, autoLookTarget = true, manualMode = nil,
+        posture = nil, postureChosenAt = nil, wasDowned = false,
         physiology = {canMove = false, canMoveHead = false, canCrawl = false, conscious = false}
     }, FakeActor)
     return actor
@@ -200,9 +201,33 @@ function FakeActor:RefreshPhysiology()
     }
 
     local downed = injury.downed == true or owner.BZCNNPCDowned == true
-    local crawlDelay = math.Clamp(tonumber(self.config.autoCrawlDelay) or 0.9, 0.35, 2.5)
+    local now = CurTime()
+    if downed and not self.wasDowned then
+        self.downSince = now
+        self.postureChosenAt = now
+        -- Choose a stable recovery posture once per knockdown. Sitting is the
+        -- default for a conscious, mobile torso; crawling is reserved for bodies
+        -- already face-down so the controller doesn't drag a supine body belly-up.
+        local sitChance = 0.62
+        if not canMove or not canMoveHead then sitChance = 0 end
+        if (tonumber(injury.leftleg) or 0) >= 70 or (tonumber(injury.rightleg) or 0) >= 70 then
+            sitChance = math.min(sitChance, 0.35)
+        end
+        if (tonumber(injury.shock) or 0) > 60 or (tonumber(injury.pain) or 0) > 70 then
+            sitChance = math.min(sitChance, 0.3)
+        end
+        self.posture = math.Rand(0, 1) < sitChance and "sit" or "crawl"
+        self.nextCrawlStroke = now + math.Rand(0.8, 1.25)
+    elseif not downed and self.wasDowned then
+        self.posture = nil
+        self.postureChosenAt = nil
+    end
+    self.wasDowned = downed
+
+    local crawlDelay = math.Clamp(tonumber(self.config.autoCrawlDelay) or 1.45, 0.65, 3.0)
     local wantsCrawl = injury.crawling == true
-        or (downed and canCrawl and (CurTime() - (self.downSince or CurTime())) >= crawlDelay)
+        or (downed and canCrawl and self.posture == "crawl"
+            and (now - (self.downSince or now)) >= crawlDelay)
     self.autoCrawl = wantsCrawl and canCrawl or false
 
     -- Pounce is a short flight posture, not a permanent mode. Once its window
@@ -220,6 +245,8 @@ function FakeActor:RefreshPhysiology()
     end
     if self.manualMode then
         self.mode = self.manualMode
+    elseif downed and self.posture == "sit" and canMove then
+        self.mode = "sit"
     else
         self.mode = self.autoCrawl and "crawl" or "loose"
     end
@@ -329,6 +356,56 @@ function FakeActor:UpdateUpperPose()
         self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.1, 100, 60)
         if rag.SetEyeTarget then
             rag:SetEyeTarget(rag:WorldSpaceCenter() + look:Forward() * 10000)
+        end
+    end
+end
+
+function FakeActor:UpdateSit(dt)
+    local rag = self.ragdoll
+    if not IsValid(rag) or not (self.physiology and self.physiology.canMove) then return end
+    local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis")
+    local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+    local head = GetPhysicsForBone(rag, "ValveBiped.Bip01_Head1")
+    if not IsValid(pelvis) or not IsValid(spine) then return end
+
+    -- Low-energy seated recovery: upright spine, legs forward, optional arm brace.
+    local yaw = rag:GetAngles().y
+    local upright = Angle(0, yaw, 0)
+    upright:RotateAroundAxis(upright:Forward(), 90)
+    upright:RotateAroundAxis(upright:Up(), 90)
+    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.15, 0.75)
+    self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.18, 55 * power, 38)
+    if IsValid(head) and self.physiology.canMoveHead then
+        local headAngle = Angle(-10, yaw, 0)
+        headAngle:RotateAroundAxis(headAngle:Forward(), 90)
+        headAngle:RotateAroundAxis(headAngle:Up(), 90)
+        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.14, 72 * power, 48)
+    end
+
+    local basis = Angle(0, yaw, 0)
+    local forward, right = basis:Forward(), basis:Right()
+    for _, leg in ipairs({
+        {side = -1, thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf"},
+        {side = 1, thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf"}
+    }) do
+        local thighPos = pelvis:GetPos() + forward * 17 + right * (leg.side * 8) + Vector(0, 0, -5)
+        self:ShadowBone(leg.thigh, upright, 0.2, 45 * power, 35, thighPos, 80, 45)
+        self:ShadowBone(leg.calf, upright, 0.22, 36 * power, 30)
+    end
+
+    -- Arms brace beside the hips when usable; the pose does not depend on them.
+    for _, arm in ipairs({
+        {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand"},
+        {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand"}
+    }) do
+        if (tonumber(self.injury[arm.side < 0 and "leftarm" or "rightarm"]) or 0) < 90 then
+            local brace = pelvis:GetPos() - forward * 4 + right * (arm.side * 13) - Vector(0, 0, 9)
+            local armAngle = Angle(0, yaw, arm.side * 15)
+            armAngle:RotateAroundAxis(armAngle:Forward(), 90)
+            armAngle:RotateAroundAxis(armAngle:Up(), 90)
+            self:ShadowBone(arm.upper, armAngle, 0.16, 48 * power, 36, brace, 85, 48)
+            self:ShadowBone(arm.forearm, armAngle, 0.18, 42 * power, 34)
+            self:ShadowBone(arm.hand, armAngle, 0.16, 48 * power, 36, brace, 85, 48)
         end
     end
 end
@@ -573,7 +650,10 @@ function FakeActor:Update(dt)
     self:UpdateLookTarget()
     self:UpdateUpperPose()
 
-    if self.mode == "crawl" then
+    if self.mode == "sit" then
+        self:UpdateSit(dt)
+        return
+    elseif self.mode == "crawl" then
         self:UpdateCrawl(dt)
         return
     elseif self.mode == "pounce" then
