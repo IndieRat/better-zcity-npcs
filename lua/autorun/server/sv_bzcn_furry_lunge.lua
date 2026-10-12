@@ -27,7 +27,8 @@ local function CanLunge(ent, target)
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("furry_tackles") then return false end
     if ent:Health() <= 0 or ent:GetNW2Bool("BZCNNPCDowned", false)
         or ent:GetNW2Bool("BZCNNPCGettingUp", false) then return false end
-    if istable(ent.BZCNFurryGrab) or istable(ent.BZCNNPCPounce) then return false end
+    if istable(ent.BZCNFurryGrab) or istable(ent.BZCNNPCPounce)
+        or istable(ent.BZCNFurryPounceState) then return false end
     if CurTime() < (ent.BZCNFurryLungeCooldown or 0) then return false end
     local profile = ent.BZCNClassProfile or {}
     if profile.Ranged == true then return false end
@@ -107,7 +108,7 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
             startPos = ent:GetPos(),
             boostUntil = launchTime + 0.16
         }
-        ent.BZCNNPCPounce = pounceState
+        ent.BZCNFurryPounceState = pounceState
         ent.BZCNNextPounceAt = launchTime + math.Rand(2.4, 3.5)
         ent.BZCNFurryLungeCooldown = ent.BZCNNextPounceAt
         ent.BZCNFurryLungeTarget = nil
@@ -125,7 +126,7 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
         local buildUpEnabled = not BZCN.RuleEnabled or BZCN.RuleEnabled("furry_pounce_build_up")
         if buildUpEnabled then
             timer.Simple(0.16, function()
-                if not IsValid(ent) or ent.BZCNNPCPounce ~= pounceState
+                if not IsValid(ent) or ent.BZCNFurryPounceState ~= pounceState
                     or not ManagedFurry(ent) or ent:GetNW2Bool("BZCNNPCDowned", false) then return end
                 local support = hg and hg.BZCNNPCSupport
                 if not support or not isfunction(support.EnterDownedState) then return end
@@ -133,7 +134,7 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
                 if not ok or entered == false then return end
 
                 timer.Simple(0.025, function()
-                    if not IsValid(ent) or ent.BZCNNPCPounce ~= pounceState then return end
+                    if not IsValid(ent) or ent.BZCNFurryPounceState ~= pounceState then return end
                     local rag = IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll
                         or (IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or nil)
                     if not IsValid(rag) and isfunction(support.GetNPCHealthTable) then
@@ -178,9 +179,55 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
     end
 end)
 
+-- The legacy pounce resolver intentionally clears BZCNNPCPounce as soon as
+-- the attacker enters its downed state. Staged pounces use their own state so
+-- they can finish after the boost has transitioned into ragdoll physics.
+timer.Create("BZCN_FurryStagedPounceContact", 0.04, 0, function()
+    local now = CurTime()
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        local pounce = IsValid(ent) and ent.BZCNFurryPounceState or nil
+        if not istable(pounce) then continue end
+        local target = pounce.target
+        if not IsValid(target) or target:Health() <= 0 or now > (pounce.expires or 0)
+            or ent:Health() <= 0 then
+            ent.BZCNFurryPounceState = nil
+            continue
+        end
+        if now - (tonumber(pounce.startedAt) or now) < 0.10 then continue end
+
+        local support = hg and hg.BZCNNPCSupport
+        local rag = IsValid(pounce.rag) and pounce.rag
+            or (IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll
+            or (IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or nil))
+        local attackerCenter = IsValid(rag) and rag:WorldSpaceCenter() or ent:WorldSpaceCenter()
+        local targetCenter = target:WorldSpaceCenter()
+        if attackerCenter:DistToSqr(targetCenter) > 76 * 76 then continue end
+
+        local line = util.TraceLine({
+            start = attackerCenter, endpos = targetCenter,
+            filter = {ent, rag, target}, mask = MASK_SOLID
+        })
+        if line.Hit and line.Fraction < 0.98 then continue end
+
+        local direction = targetCenter - attackerCenter
+        direction.z = 0
+        if direction:LengthSqr() < 1 then direction = pounce.direction or ent:GetForward() end
+        direction:Normalize()
+        local applied = support and isfunction(support.PerformKick)
+            and support.PerformKick(ent, target, targetCenter, direction, 16, 9000, true, "furry_pounce")
+        if applied then
+            ent.BZCNFurryPounceState = nil
+            ent.LastAttack = now + 0.6
+            hook.Run("BZCNNPC_PounceHit", ent, target)
+            hook.Run("BZCN_FurryPounceImpact", ent, target, targetCenter)
+        end
+    end
+end)
+
 hook.Add("BZCN_NPCSpawned", "BZCN_FurryLungeInit", function(ent)
     if not ManagedFurry(ent) then return end
     ent.BZCNFurryLungeCooldown = 0
     ent.BZCNFurryLungeTarget = nil
     ent.BZCNFurryRunupStartedAt = nil
+    ent.BZCNFurryPounceState = nil
 end)
