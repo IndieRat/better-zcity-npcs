@@ -1840,8 +1840,11 @@ local function EnsureFurryGrabFakeUpBridge()
                 if not IsValid(npc) then continue end
                 local state = npc.BZCNFurryGrab
                 if istable(state) and state.target == ply then
-                    -- Do not schedule a second FakeUp from the release helper;
-                    -- the original getup call below is the recovery request.
+                    -- Clear the assimilation lock before the native FakeUp
+                    -- call below. StopFurryAssimilation(..., false) deliberately
+                    -- skips target restoration, which otherwise leaves the
+                    -- player's "Should Fake Up" hook locked and rejects recovery.
+                    SetFurryAssimilationLock(ply, npc, false)
                     BZCN.StopFurryAssimilation(npc, false)
                 end
             end
