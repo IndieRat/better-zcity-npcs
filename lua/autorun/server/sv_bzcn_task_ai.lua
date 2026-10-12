@@ -17,10 +17,14 @@ local TASK_POOLS = {
         {"squad", 4}, {"hold", 4}, {"cover", 4}, {"pickup", 2}, {"rescue", 2}, {"sit", 1}
     },
     metrocop = {
-        {"guard", 5}, {"patrol", 2}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}, {"rescue", 2}, {"sit", 2}
+        -- Civil Protection mostly holds an observation post. Small patrols and
+        -- errands exist, but should be the exception rather than its default.
+        {"guard", 12}, {"observe", 7}, {"hold", 5}, {"talk", 1},
+        {"patrol", 1}, {"pickup", 1}, {"rescue", 1}, {"sit", 2}
     },
     rebel = {
-        {"guard", 4}, {"squad", 4}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 2}, {"sit", 1}
+        {"guard", 3}, {"squad", 4}, {"regroup", 4}, {"cover", 3},
+        {"pickup", 3}, {"rescue", 5}, {"talk", 3}, {"hold", 2}, {"sit", 1}
     },
     headcrab = {
         {"hunt", 6}, {"patrol", 2}, {"climb", 3}, {"hold", 1}
@@ -128,6 +132,96 @@ local function AreCompatible(a, b)
         if ok and result then return false end
     end
     return true
+end
+
+-- "Human" is an internal social category only; it is not written to the HUD
+-- or used as a Z-City player class. Civilian, Rebel and Metrocop NPCs qualify.
+-- Real players qualify regardless of their current PlayerClassName.
+local function HumanSocialClass(ent)
+    if not IsValid(ent) then return nil end
+    local class = string.lower(tostring(ent.PlayerClassName
+        or (ent.GetNW2String and ent:GetNW2String("PlayerClassName", "")) or ent.BZCNClass or ""))
+
+    if ent:IsPlayer() then
+        if class == "metrocop" or class == "police" then return "metrocop" end
+        if class == "rebel" then return "rebel" end
+        if class == "default" or class == "civilian" or class == "citizen" then return "civilian" end
+        return "player"
+    end
+
+    local kind = GetKind(ent)
+    if kind == "civilian" or kind == "metrocop" or kind == "rebel" then return kind end
+    return nil
+end
+
+local function SocialHostile(a, b)
+    for _, pair in ipairs({{a, b}, {b, a}}) do
+        local actor, target = pair[1], pair[2]
+        if IsValid(actor) and isfunction(actor.IsBZCNEnemy) then
+            local ok, result = pcall(actor.IsBZCNEnemy, actor, target)
+            if ok and result then return true end
+        end
+    end
+    return false
+end
+
+local function IsSocialAvailable(ent)
+    if not IsValid(ent) or not HumanSocialClass(ent) or ent:Health() <= 0 then return false end
+    if ent:IsPlayer() then
+        return ent:Alive() and not (istable(ent.organism) and ent.organism.otrub == true)
+    end
+    return IsAvailable(ent)
+end
+
+local function AreSocialCompatible(a, b)
+    return IsValid(a) and IsValid(b) and a ~= b
+        and HumanSocialClass(a) ~= nil and HumanSocialClass(b) ~= nil
+        and not SocialHostile(a, b)
+end
+
+local function GetHumanBond(a, b)
+    if not IsValid(a) or not IsValid(b) or not istable(a.BZCNHumanBonds) then return 0 end
+    return math.Clamp(tonumber(a.BZCNHumanBonds[b]) or 0, 0, 100)
+end
+
+function BZCN.AddHumanBond(a, b, amount, reason)
+    if not AreSocialCompatible(a, b) then return 0 end
+    amount = math.Clamp(tonumber(amount) or 0, -20, 20)
+    if amount == 0 then return GetHumanBond(a, b) end
+
+    local function update(actor, other)
+        if not istable(actor.BZCNHumanBonds) then
+            actor.BZCNHumanBonds = setmetatable({}, {__mode = "k"})
+        end
+        actor.BZCNHumanBonds[other] = math.Clamp((tonumber(actor.BZCNHumanBonds[other]) or 0) + amount, 0, 100)
+        actor.BZCNHumanBondUpdatedAt = CurTime()
+        actor.BZCNHumanBondReason = reason or "social"
+        return actor.BZCNHumanBonds[other]
+    end
+
+    local score = update(a, b)
+    update(b, a)
+    hook.Run("BZCN_HumanBondChanged", a, b, score, reason or "social")
+    return score
+end
+
+local function FindSocialMate(ent, radius, requireHome)
+    local ownClass = HumanSocialClass(ent)
+    if not ownClass then return nil end
+    local home = EnsureHome(ent)
+    local best, bestScore
+    for _, other in ipairs(ents.FindInSphere(ent:GetPos(), radius)) do
+        if other == ent or not AreSocialCompatible(ent, other)
+            or not IsSocialAvailable(other) or istable(other.BZCNConversation) then continue end
+        if requireHome and IsManaged(other)
+            and other:GetPos():DistToSqr(home) > (ent.BZCNTaskHomeRadius * 1.8) ^ 2 then continue end
+
+        local distance = ent:GetPos():DistToSqr(other:GetPos())
+        local score = distance - GetHumanBond(ent, other) * 1800
+        if HumanSocialClass(other) == ownClass then score = score - 18000 end
+        if not bestScore or score < bestScore then best, bestScore = other, score end
+    end
+    return best
 end
 
 local function FindMate(ent, radius, requireHome)
@@ -300,51 +394,61 @@ end
 
 local function FindGuardPost(ent)
     local home = EnsureHome(ent)
-    local bestDoor, bestScore
-    local doorClasses = {"prop_door_rotating", "func_door", "func_door_rotating", "func_movelinear"}
-    for _, class in ipairs(doorClasses) do
-        for _, door in ipairs(ents.FindByClass(class)) do
-            if not IsValid(door) then continue end
-            local distance = door:GetPos():DistToSqr(home)
-            if distance > 1400 * 1400 then continue end
-            local score = distance + math.Rand(0, 95000)
-            if not bestScore or score < bestScore then bestDoor, bestScore = door, score end
+    local bestPoint, bestScore
+    local eyeOffset = Vector(0, 0, 62)
+    local angles = {}
+    for index = 0, 7 do angles[#angles + 1] = index * (math.pi / 4) end
+
+    -- Sample a stable set of nearby walkable points and favour places with
+    -- broad horizontal sightlines. This is an observation post, not a patrol
+    -- waypoint; once chosen it remains cached on the officer.
+    local candidates = {home}
+    for _, radius in ipairs({90, 155, 225, 295}) do
+        for _, angle in ipairs(angles) do
+            candidates[#candidates + 1] = home + Vector(math.cos(angle), math.sin(angle), 0) * radius
         end
     end
 
-    local civilianCenter, civilians = Vector(0, 0, 0), 0
-    for _, other in ipairs(ents.FindInSphere(home, 1200)) do
-        if not IsManaged(other) or other == ent then continue end
-        local profile = other.BZCNClassProfile or {}
-        local faction = string.lower(tostring(profile.Faction or other.BZCN_Faction or ""))
-        local class = string.lower(tostring(other.BZCNClass or other.PlayerClassName or ""))
-        if faction == "civilian" or class == "default" or profile.CivilianStyle == true then
-            civilianCenter = civilianCenter + other:GetPos()
-            civilians = civilians + 1
+    for _, rawPoint in ipairs(candidates) do
+        local point = NavPoint(ent, rawPoint, 300)
+        local ground = util.TraceLine({
+            start = point + Vector(0, 0, 120),
+            endpos = point - Vector(0, 0, 260),
+            filter = ent, mask = MASK_SOLID
+        })
+        if not ground.Hit or ground.HitSky then continue end
+        point = ground.HitPos + Vector(0, 0, 4)
+
+        local score = -home:DistToSqr(point) * 0.00018
+        for _, angle in ipairs(angles) do
+            local direction = Vector(math.cos(angle), math.sin(angle), 0)
+            local trace = util.TraceLine({
+                start = point + eyeOffset,
+                endpos = point + eyeOffset + direction * 480,
+                filter = ent, mask = MASK_VISIBLE
+            })
+            if not trace.Hit then
+                score = score + 18
+            elseif isnumber(trace.Fraction) then
+                score = score + math.Clamp(trace.Fraction, 0, 1) * 5
+            end
+        end
+
+        local clearance = util.TraceHull({
+            start = home + Vector(0, 0, 16),
+            endpos = point + Vector(0, 0, 16),
+            mins = Vector(-12, -12, 0),
+            maxs = Vector(12, 12, 58),
+            filter = ent, mask = MASK_SOLID
+        })
+        if clearance.Hit then score = score - 22 end
+        score = score + math.Rand(0, 0.75)
+        if not bestScore or score > bestScore then
+            bestPoint, bestScore = point, score
         end
     end
-    if civilians > 0 then civilianCenter = civilianCenter / civilians end
 
-    local selected
-    if IsValid(bestDoor) and (civilians == 0 or bestDoor:GetPos():DistToSqr(home) < civilianCenter:DistToSqr(home) * 1.4) then
-        local direction = ent:GetPos() - bestDoor:GetPos()
-        direction.z = 0
-        if direction:LengthSqr() < 1 then direction = Vector(1, 0, 0) end
-        direction:Normalize()
-        selected = bestDoor:GetPos() + direction * math.Rand(72, 128)
-    elseif civilians > 0 then
-        local angle = math.Rand(0, math.pi * 2)
-        selected = civilianCenter + Vector(math.cos(angle), math.sin(angle), 0) * math.Rand(140, 260)
-    elseif IsValid(bestDoor) then
-        selected = bestDoor:GetPos() + Vector(math.Rand(-100, 100), math.Rand(-100, 100), 0)
-    else
-        local angle = math.Rand(0, math.pi * 2)
-        selected = home + Vector(math.cos(angle), math.sin(angle), 0) * math.Rand(180, 320)
-    end
-
-    local area = navmesh.GetNearestNavArea(selected, false, 320, false, true)
-    if IsValid(area) then selected = area:GetClosestPointOnArea(selected) end
-    return selected
+    return bestPoint or NavPoint(ent, home, 300)
 end
 
 local function ChooseHomePoint(ent, radius)
@@ -354,8 +458,75 @@ local function ChooseHomePoint(ent, radius)
     return NavPoint(ent, home + Vector(math.cos(angle) * distance, math.sin(angle) * distance, 0), 300)
 end
 
+-- Movement for Combine/Rebel squads runs only inside RunBehaviour's coroutine.
+-- The global director elects leaders but must never call loco:Approach itself.
+local function SetGroupTask(ent, task)
+    ent.BZCNGroupTask = task
+    if ent.SetNW2String then ent:SetNW2String("BZCNGroupTask", task) end
+end
+
+local function RunSquadIdleTask(ent, kind)
+    local leader = ent.BZCNSquadLeader
+    if not IsValid(leader) then return false end
+
+    local now = CurTime()
+    local isLeader = leader == ent
+    if isLeader then
+        local goal = ent.BZCNSquadGoal
+        local arrived = isvector(goal) and ent:GetPos():DistToSqr(goal) <= 105 * 105
+        local expired = (ent.BZCNSquadGoalUntil or 0) <= now
+        if not isvector(goal) or arrived or expired then
+            ent.BZCNSquadGoal = nil
+            ent.BZCNSquadGoalUntil = nil
+            if (ent.BZCNNextSquadPatrolAt or 0) > now then
+                ent.loco:SetDesiredSpeed(0)
+                SetGroupTask(ent, "hold")
+                local mate = FindMate(ent, 520, false)
+                if IsValid(mate) then ent.loco:FaceTowards(mate:GetPos()) end
+                coroutine.wait(math.Rand(0.65, 1.2))
+                return true
+            end
+            goal = ChooseHomePoint(ent, kind == "combine" and 470 or 340)
+            ent.BZCNSquadGoal = goal
+            ent.BZCNSquadGoalUntil = now + 18
+        end
+
+        if isvector(goal) and ent:GetPos():DistToSqr(goal) > 105 * 105 then
+            SetGroupTask(ent, "patrol")
+            MoveTo(ent, goal, math.Clamp(ent:GetPos():Distance(goal) / 115, 2.4, 4.8),
+                kind == "combine" and 0.48 or 0.40)
+        else
+            ent.loco:SetDesiredSpeed(0)
+            ent.BZCNSquadGoal = nil
+            ent.BZCNSquadGoalUntil = nil
+            ent.BZCNNextSquadPatrolAt = CurTime() + math.Rand(7, 13)
+            SetGroupTask(ent, "hold")
+            coroutine.wait(math.Rand(0.8, 1.4))
+        end
+        return true
+    end
+
+    local gapSqr = ent:GetPos():DistToSqr(leader:GetPos())
+    if gapSqr > 275 * 275 then
+        local forward = leader:GetForward()
+        local side = leader:GetRight()
+        local slot = math.max((tonumber(ent.BZCNSquadSlot) or 2) - 2, 0)
+        local sideSign = ((tonumber(ent.BZCNSquadSlot) or 2) % 2 == 0) and 1 or -1
+        local destination = leader:GetPos() - forward * (105 + slot * 34) + side * (sideSign * 54)
+        destination = NavPoint(ent, destination, 260)
+        SetGroupTask(ent, gapSqr > 560 * 560 and "regroup" or "follow")
+        MoveTo(ent, destination, 2.6, kind == "combine" and 0.44 or 0.38)
+    else
+        ent.loco:SetDesiredSpeed(0)
+        ent.loco:FaceTowards(leader:GetPos())
+        SetGroupTask(ent, "follow")
+        coroutine.wait(math.Rand(0.65, 1.2))
+    end
+    return true
+end
+
 local function StartConversation(a, b)
-    if not AreCompatible(a, b) or GetKind(a) ~= "civilian" then return nil end
+    if not AreSocialCompatible(a, b) then return nil end
     local now = CurTime()
     local pair = a.BZCNConversation
     if istable(pair) and pair.untilTime > now and istable(pair.members) then
@@ -373,14 +544,13 @@ local function StartConversation(a, b)
         untilTime = now + math.Rand(7, 12)
     }
 
-    -- Invite one extra civilian already standing nearby. The conversation
-    -- stays a small circle; nobody lines up behind one speaker.
+    -- Invite up to two nearby H participants (including a real player) while
+    -- keeping the group small and avoiding anyone already in another chat.
     local center = (a:GetPos() + b:GetPos()) * 0.5
     for _, candidate in ipairs(ents.FindInSphere(center, 260)) do
         if #pair.members >= 3 then break end
-        if candidate == a or candidate == b or not AreCompatible(a, candidate)
-            or GetKind(candidate) ~= "civilian" or not IsAvailable(candidate)
-            or istable(candidate.BZCNConversation) then continue end
+        if candidate == a or candidate == b or not AreSocialCompatible(a, candidate)
+            or not IsSocialAvailable(candidate) or istable(candidate.BZCNConversation) then continue end
         if candidate:GetPos():DistToSqr(center) <= 260 * 260 then
             pair.members[#pair.members + 1] = candidate
         end
@@ -407,7 +577,8 @@ local function RunConversation(ent)
         and istable(pair.members) and #pair.members >= 2
     if validGroup then
         for _, member in ipairs(pair.members) do
-            if not IsAvailable(member) or member.BZCNConversation ~= pair then
+            if not IsSocialAvailable(member) or member.BZCNConversation ~= pair
+                or ent:GetPos():DistToSqr(member:GetPos()) > 560 * 560 then
                 validGroup = false
                 break
             end
@@ -416,11 +587,32 @@ local function RunConversation(ent)
 
     if not validGroup then
         ClearConversation(pair)
-        local mate = FindMate(ent, 330, true)
-        if IsValid(mate) then pair = StartConversation(ent, mate) else pair = nil end
+        local mate = FindSocialMate(ent, 620, true)
+        if IsValid(mate) then
+            if ent:GetPos():DistToSqr(mate:GetPos()) > 185 * 185 then
+                local away = ent:GetPos() - mate:GetPos()
+                away.z = 0
+                if away:LengthSqr() < 1 then away = ent:GetForward() end
+                away:Normalize()
+                local destination = NavPoint(ent, mate:GetPos() + away * 112, 220)
+                if ent.loco then ent.loco:FaceTowards(mate:WorldSpaceCenter()) end
+                ent.BZCNHumanInterestTarget = mate
+                ent.BZCNHumanInterestUntil = CurTime() + 5
+                MoveTo(ent, destination, 2.7, 0.36)
+                coroutine.wait(0.05)
+                return
+            end
+            pair = StartConversation(ent, mate)
+        else
+            pair = nil
+        end
     end
     if not istable(pair) or not istable(pair.members) then
         if ent.loco then ent.loco:SetDesiredSpeed(0) end
+        local interest = ent.BZCNHumanInterestTarget
+        if IsValid(interest) and (ent.BZCNHumanInterestUntil or 0) > CurTime() then
+            ent.loco:FaceTowards(interest:WorldSpaceCenter())
+        end
         coroutine.wait(0.7)
         return
     end
@@ -436,6 +628,13 @@ local function RunConversation(ent)
         ent.loco:SetDesiredSpeed(0)
         ent.loco:FaceTowards(center)
     end
+    -- A real player does not run this NPC coroutine; skip their silent turn
+    -- rather than stalling the whole conversation waiting for an AI callback.
+    local turnMember = pair.members[pair.turn]
+    if IsValid(turnMember) and turnMember:IsPlayer() and CurTime() >= pair.nextAt then
+        pair.turn = (pair.turn % #pair.members) + 1
+        pair.nextAt = CurTime() + 0.25
+    end
     if CurTime() >= pair.nextAt and pair.turn == side then
         local social = BZCN.Social
         if social and isfunction(social.PlayGesture) then
@@ -444,6 +643,9 @@ local function RunConversation(ent)
         if social and isfunction(social.PlayPhrase) then
             social.PlayPhrase(ent, side == 1 and "ambient" or "answer",
                 side == 1 and "Satisfied" or nil, true)
+        end
+        for _, other in ipairs(pair.members) do
+            if other ~= ent and IsValid(other) then BZCN.AddHumanBond(ent, other, 1.2, "conversation") end
         end
         pair.turn = (side % #pair.members) + 1
         pair.nextAt = CurTime() + math.Rand(1.2, 2.5)
@@ -569,7 +771,8 @@ hook.Add("BZCN_NPCSpawned", "BZCN_TaskDirectorHome", function(ent)
                 ent:SetNW2Vector("BZCNGuardPost", ent.BZCNGuardPost)
             end
             ent.BZCNCurrentTask = "guard"
-            ent.BZCNTaskUntil = CurTime() + math.Rand(9, 18)
+            ent.BZCNTaskUntil = CurTime() + (kind == "metrocop" and math.Rand(55, 95) or math.Rand(15, 26))
+            if ent.SetNW2String then ent:SetNW2String("BZCNCurrentTask", "guard") end
         end)
     end
     if kind == "metrocop" then
@@ -695,9 +898,33 @@ end
 
 function Tasks.RunIdleTask(ent)
     if not IsAvailable(ent) then return false end
-    local task = PickTask(ent)
     local kind = GetKind(ent)
     local home = EnsureHome(ent)
+
+    -- Squad membership is only meaningful for Combine soldiers and Rebels.
+    -- Metrocops deliberately remain solo officers despite sharing Combine's
+    -- gameplay faction for disposition/targeting.
+    if kind == "combine" or kind == "rebel" then
+        if RunSquadIdleTask(ent, kind) then return true end
+    end
+
+    -- Alertness is a stationary observation state, not a target-acquisition or
+    -- attack order. Existing NPC combat behavior remains in its own layer.
+    if kind == "metrocop" and (ent.BZCNMetrocopAlertUntil or 0) > CurTime() then
+        ent.loco:SetDesiredSpeed(0)
+        local focus = ent.BZCNMetrocopAlertFocus
+        if IsValid(focus) then ent.loco:FaceTowards(focus:WorldSpaceCenter()) end
+        SetGroupTask(ent, "observe")
+        coroutine.wait(0.2)
+        return true
+    elseif kind == "metrocop" and ent.BZCNMetrocopAlertness ~= "calm" then
+        ent.BZCNMetrocopAlertness = "calm"
+        ent.BZCNMetrocopAlertFocus = nil
+        if ent.SetNW2String then ent:SetNW2String("BZCNMetrocopAlertness", "calm") end
+        if ent.SetNW2Entity then ent:SetNW2Entity("BZCNMetrocopAlertFocus", NULL) end
+    end
+
+    local task = PickTask(ent)
 
     if task == "pickup" then
         if Tasks.TryPickupWeapon(ent) then coroutine.wait(0.25) return true end
