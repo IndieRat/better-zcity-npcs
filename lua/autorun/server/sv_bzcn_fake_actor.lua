@@ -82,7 +82,8 @@ function FakeActor:SetInjuryState(state)
             and self.owner.organism and self.owner.organism.rarmamputated == true or false
     }
 
-    if self.injury.downed then
+    local ownerDowned = IsValid(self.owner) and self.owner.BZCNNPCDowned == true
+    if self.injury.downed or ownerDowned then
         self.downSince = self.downSince or CurTime()
     else
         self.downSince = nil
