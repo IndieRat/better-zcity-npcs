@@ -191,7 +191,11 @@ local function ParseConfiguredInventory(tool)
     return inventory, rejectedWeapons
 end
 
-local function WriteInventory(ent, inventory)
+local function WriteInventory(ent, inventory, clearVirtualItems)
+    if ent:IsPlayer() and hg and isfunction(hg.RenewInv) then
+        pcall(hg.RenewInv, ent)
+    end
+
     inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
     inventory.Items = istable(inventory.Items) and inventory.Items or {}
     inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
@@ -203,7 +207,7 @@ local function WriteInventory(ent, inventory)
         -- managed NPC/corpse loot stores class-info tables. Preserve the
         -- player's existing weapons, give configured missing ones, and sync the
         -- inventory table without pretending a boolean marker is a live SWEP.
-        local oldInventory = {}
+        local oldInventory
         if isfunction(ent.GetNetVar) then
             local ok, result = pcall(ent.GetNetVar, ent, "Inventory", {})
             if ok and istable(result) then oldInventory = result end
@@ -253,9 +257,9 @@ local function WriteInventory(ent, inventory)
             end
         end
         for class in pairs(VIRTUAL_WEAPON_ITEMS) do
-            if oldWeapons[class] ~= nil or inventory.Weapons[class] ~= nil then
-                playerWeapons[class] = true
-            end
+            local configured = inventory.Weapons[class] ~= nil
+            local previouslyOwned = oldWeapons[class] ~= nil and not clearVirtualItems
+            if configured or previouslyOwned then playerWeapons[class] = true end
         end
         inventory.Weapons = playerWeapons
         ent.inventory = inventory
@@ -374,7 +378,7 @@ function TOOL:Reload(trace)
 
     local target = ResolveActor(trace.Entity)
     if not IsValid(target) then return false end
-    WriteInventory(target, {Weapons = {}, Items = {}, Ammo = {}, Attachments = {}, Armor = {}})
+    WriteInventory(target, {Weapons = {}, Items = {}, Ammo = {}, Attachments = {}, Armor = {}}, true)
     if target:IsPlayer() then
         ply:ChatPrint("[BZCN] Cleared extra inventory entries for " .. target:Nick()
             .. ". Their physical weapons, live ammo, and worn armor were preserved.")
