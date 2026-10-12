@@ -908,13 +908,18 @@ function Tasks.RunIdleTask(ent)
         ent.loco:SetDesiredSpeed(0)
         local focus = ent.BZCNMetrocopAlertFocus
         if IsValid(focus) then ent.loco:FaceTowards(focus:WorldSpaceCenter()) end
-        SetGroupTask(ent, "observe")
+        ent.BZCNMetrocopTask = "observe"
+        if ent.SetNW2String then ent:SetNW2String("BZCNMetrocopTask", "observe") end
         coroutine.wait(0.2)
         return true
     elseif kind == "metrocop" and ent.BZCNMetrocopAlertness ~= "calm" then
         ent.BZCNMetrocopAlertness = "calm"
         ent.BZCNMetrocopAlertFocus = nil
-        if ent.SetNW2String then ent:SetNW2String("BZCNMetrocopAlertness", "calm") end
+        ent.BZCNMetrocopTask = "post"
+        if ent.SetNW2String then
+            ent:SetNW2String("BZCNMetrocopAlertness", "calm")
+            ent:SetNW2String("BZCNMetrocopTask", "post")
+        end
         if ent.SetNW2Entity then ent:SetNW2Entity("BZCNMetrocopAlertFocus", NULL) end
     end
 
