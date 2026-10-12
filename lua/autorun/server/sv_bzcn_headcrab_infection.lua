@@ -116,18 +116,28 @@ local function HandlePounce(ent, now)
     end
     if now - (tonumber(pounce.startedAt) or now) < 0.10 then return end
 
+    local targetBody = BZCNCombatActor and BZCNCombatActor.GetVisibleBody
+        and BZCNCombatActor.GetVisibleBody(target) or target
+    if IsValid(target.BZCNNPCRagdoll) then targetBody = target.BZCNNPCRagdoll end
+    if IsValid(target.FakeRagdoll) then targetBody = target.FakeRagdoll end
+    if not IsValid(targetBody) then targetBody = target end
+
     local center = ent:WorldSpaceCenter()
-    local targetCenter = target:WorldSpaceCenter()
+    local targetCenter = targetBody:WorldSpaceCenter()
     local distanceSqr = center:DistToSqr(targetCenter)
-    local hit = distanceSqr <= 76 * 76
-    if not hit and distanceSqr <= 105 * 105 then
-        local tr = util.TraceHull({
-            start = center, endpos = targetCenter,
-            mins = Vector(-6, -6, -6), maxs = Vector(6, 6, 6),
-            filter = {ent}, mask = MASK_SHOT
-        })
-        hit = tr.Entity == target
-    end
+    if distanceSqr > 105 * 105 then return end
+
+    -- Check the visible body, not just the owner's hidden origin; don't let
+    -- proximity alone infect a target through a wall.
+    local trace = util.TraceHull({
+        start = center, endpos = targetCenter,
+        mins = Vector(-6, -6, -6), maxs = Vector(6, 6, 6),
+        filter = {ent}, mask = MASK_SHOT
+    })
+    local traceTouchesTarget = trace.Entity == targetBody or trace.Entity == target
+    local unobstructed = not trace.Hit or traceTouchesTarget
+    local hit = unobstructed and (distanceSqr <= 76 * 76
+        or (traceTouchesTarget and distanceSqr <= 105 * 105))
     if not hit then return end
 
     local infected = MarkInfected(target, ent)
@@ -197,8 +207,10 @@ local function ConvertManagedInfected(target, organism, now)
     target.BZCNHeadcrabPainStage = nil
     target.BZCNHeadcrabNameStage = nil
     if target.SetNW2Bool then target:SetNW2Bool("BZCNHeadcrabInfected", false) end
-    if target.SetNW2String then target:SetNW2String("BZCNDisplayName", "Headcrab Zombie") end
-    if target.SetNWString then target:SetNWString("PlayerName", "Headcrab Zombie") end
+    if target.SetNW2String then target:SetNW2String("BZCNDisplayName", "Zombie") end
+    if target.SetNWString then target:SetNWString("PlayerName", "Zombie") end
+    target.BZCNDisplayName = "Zombie"
+    target.PlayerName = "Zombie"
     target:EmitSound("npc/zombie/zombie_alert" .. math.random(1, 3) .. ".wav", 78, math.random(70, 82))
     hook.Run("BZCN_HeadcrabInfectionComplete", target, "headcrab_zombie")
 end
