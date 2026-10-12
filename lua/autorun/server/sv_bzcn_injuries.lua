@@ -169,11 +169,28 @@ hook.Add("Should Fake Up", "BZCNNPCSupport_AssimilationLock", function(ent)
     if IsAssimilationLocked(owner) then return false end
 end)
 
+local function HasFatalZCityOrganDamage(owner)
+    if not IsValid(owner) then return false end
+    local org = owner.organism or owner.BZCN_Organism
+    if not istable(org) then return false end
+
+    -- Z-City deliberately keeps fakePlayer organisms "alive" in Org Think;
+    -- unlike real Players, managed NextBots never receive Player:Kill() when
+    -- the brain/head/heart becomes non-viable. Bridge terminal organ states
+    -- into the NPC's actual death lifecycle without replacing native wounds.
+    return (tonumber(org.skull) or 0) >= 0.98
+        or (tonumber(org.brain) or 0) >= 0.98
+        or (tonumber(org.heart) or 0) >= 0.98
+        or (tonumber(org.blood) or 5000) <= 0
+end
+
 local function FinalizeManagedNPCDeath(owner, sourceDamage)
     if not IsValid(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner))
-        or owner:Health() > 0 or owner.BZCNDeathHandled then
+        or (owner:Health() > 0 and not HasFatalZCityOrganDamage(owner))
+        or owner.BZCNDeathHandled then
         return false
     end
+    if owner:Health() > 0 then owner:SetHealth(0) end
 
     local fatalInfo = DamageInfo()
     fatalInfo:SetDamage(math.max(tonumber(sourceDamage and sourceDamage:GetDamage()) or 0, 0))
@@ -214,7 +231,9 @@ local function QueueManagedNPCDeathCheck(ent, sourceDamage)
     timer.Simple(0, function()
         if not IsValid(owner) then return end
         owner.BZCNNPCDeathCheckQueued = nil
-        if owner:Health() > 0 or owner.BZCNDeathHandled then return end
+        if owner.BZCNDeathHandled then return end
+        if owner:Health() > 0 and not HasFatalZCityOrganDamage(owner) then return end
+        if owner:Health() > 0 then owner:SetHealth(0) end
 
         local snapshot = DamageInfo()
         snapshot:SetDamage(math.max(tonumber(amount) or 0, 0))
@@ -2376,7 +2395,7 @@ timer.Create("BZCNNPCSupport_StateSync", 0.25, 0, function()
     for ent, state in pairs(tracked) do
         if not IsValid(ent) then
             tracked[ent] = nil
-        elseif ent:Health() <= 0 then
+        elseif ent:Health() <= 0 or HasFatalZCityOrganDamage(ent) then
             FinalizeManagedNPCDeath(ent, nil)
             tracked[ent] = nil
         else
