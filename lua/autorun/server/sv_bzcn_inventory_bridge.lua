@@ -115,7 +115,10 @@ local function PublishInventory(rag, source)
     rag.inventory = inventory
     rag.Inventory = inventory
 
-    local armor = ReadData(source, "Armor") or source.armors or inventory.Armor
+    -- The class-profile Inventory.Armor table is a loadout description
+    -- (for example head = "combine_helmet"), not necessarily the live
+    -- Z-City Armor netvar shape that sh_inventory.lua indexes as loot.
+    local armor = ReadData(source, "Armor") or source.armors
     armor = istable(armor) and CopyForLoot(armor) or {}
     rag.armors = armor
     rag.Armor = armor
