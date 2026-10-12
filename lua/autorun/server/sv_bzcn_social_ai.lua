@@ -747,3 +747,31 @@ hook.Add("InitPostEntity", "BZCN_Social_WrapExistingHealingSWEPs", function()
         for _, ent in ipairs(ents.GetAll()) do AttachHealingTrust(ent) end
     end)
 end)
+
+-- Optional panic cascade: once one civilian runs from a nearby furry, witnesses
+-- may copy the flight response. A short cooldown and random chance keep crowds
+-- from behaving like a perfectly synchronized single entity.
+timer.Create("BZCN_CivilianPanicSpread", 0.7, 0, function()
+    if BZCN.RuleEnabled and not BZCN.RuleEnabled("civilian_panic_spread") then return end
+    local now = CurTime()
+    for _, source in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not IsCivilianNPC(source) or not IsValid(source.BZCNFleeThreat)
+            or (source.BZCNFleeUntil or 0) <= now
+            or not IsFurryThreat(source.BZCNFleeThreat)
+            or now < (source.BZCNNextPanicSpreadAt or 0) then continue end
+
+        source.BZCNNextPanicSpreadAt = now + math.Rand(0.8, 1.6)
+        local furry = source.BZCNFleeThreat
+        for _, witness in ipairs(ents.FindInSphere(source:GetPos(), 330)) do
+            if witness == source or not IsCivilianNPC(witness)
+                or (witness.BZCNFleeUntil or 0) > now
+                or (witness.BZCNCuriousUntil or 0) > now then continue end
+            if math.random(1, 3) ~= 1 then
+                FleeFromFurry(witness, furry)
+                hook.Run("BZCN_CivilianPanicSpread", source, witness, furry)
+            end
+            break
+        end
+    end
+end)
+
