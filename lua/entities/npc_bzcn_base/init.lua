@@ -1476,6 +1476,10 @@ function ENT:ChaseEnemy(target)
     while IsValid(target) and self:IsBZCNEnemy(target) do
         local now = CurTime()
         local visible = HasSenseRecord(self, target, true)
+        -- Share the current visible chase target with BodyUpdate. This prevents
+        -- velocity-facing from rotating the model away from an enemy mid-strafe.
+        self.BZCNBodyFacingTarget = visible and target or nil
+        self.BZCNBodyFacingUntil = now + 0.25
 
         -- A pounce is a short, physics-driven tackle. Check contact before
         -- yielding to the leap so a furry can knock the target down on impact.
