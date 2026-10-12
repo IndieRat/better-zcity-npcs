@@ -311,8 +311,18 @@ local function PublishZCityWoundTables(ent, owner, state)
     -- never copied snapshots that can diverge after a fake/get-up transition.
     local function Publish(target)
         if not IsValid(target) or not isfunction(target.SetNetVar) then return end
-        pcall(target.SetNetVar, target, "wounds", org.wounds)
-        pcall(target.SetNetVar, target, "arterialwounds", org.arterialwounds)
+
+        -- Avoid re-sending the same table on every adapter tick. Native Z-City
+        -- wound handlers publish in-place additions/removals themselves; this
+        -- bridge republishes when a transition replaces the backing array.
+        if target.BZCNPublishedWounds ~= org.wounds then
+            local ok = pcall(target.SetNetVar, target, "wounds", org.wounds)
+            if ok then target.BZCNPublishedWounds = org.wounds end
+        end
+        if target.BZCNPublishedArterialWounds ~= org.arterialwounds then
+            local ok = pcall(target.SetNetVar, target, "arterialwounds", org.arterialwounds)
+            if ok then target.BZCNPublishedArterialWounds = org.arterialwounds end
+        end
     end
 
     Publish(owner)
