@@ -7,8 +7,24 @@ BZCN = BZCN or {}
 
 local MEDICAL_WEAPONS = {
     weapon_medkit_sh = true,
-    weapon_bandage_sh = true
+    weapon_bandage_sh = true,
+    weapon_bigbandage_sh = true,
+    weapon_bloodbag = true,
+    weapon_painkillers = true,
+    weapon_morphine = true,
+    weapon_adrenaline = true,
+    weapon_tourniquet = true,
+    weapon_naloxone = true,
+    weapon_betablock = true,
+    weapon_thiamine = true,
+    weapon_fentanyl = true
 }
+
+-- Shared classification for combat, scavenging and inventory code. These are
+-- real Z-City SWEP classes, but none should ever be treated as a firearm.
+function BZCN.IsMedicalWeaponClass(class)
+    return isstring(class) and MEDICAL_WEAPONS[string.lower(class)] == true
+end
 
 local function GetInventory(ent)
     if not IsValid(ent) then return {} end
@@ -95,6 +111,21 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     if not IsValid(weapon) then return nil end
 
     weapon:SetOwner(owner)
+    if MEDICAL_WEAPONS[class] then
+        -- Preserve partial supplies across a hidden SWEP being recreated.
+        -- Inventory entries can be a class-only marker or a saved item record.
+        local inventory = GetInventory(owner)
+        local saved = istable(inventory.Weapons) and inventory.Weapons[class] or nil
+        if IsValid(saved) and istable(saved.modeValues) then
+            weapon.modeValues = table.Copy(saved.modeValues)
+        elseif istable(saved) and istable(saved.modeValues) then
+            weapon.modeValues = table.Copy(saved.modeValues)
+        end
+        if istable(saved) then
+            if isstring(saved.bloodtype) then weapon.bloodtype = saved.bloodtype end
+            if saved.furryinfected ~= nil then weapon.furryinfected = saved.furryinfected end
+        end
+    end
     weapon:SetNoDraw(true)
     weapon:SetSolid(SOLID_NONE)
     weapon:SetMoveType(MOVETYPE_NONE)
@@ -1468,6 +1499,97 @@ local function NeedsMedicalAttention(target)
     return true, score
 end
 
+local function GetMedicalReadout(target)
+    local org = target.organism or target.BZCN_Organism
+    local hasOrganism = istable(org) and (org.owner ~= nil or org.fakePlayer == true
+        or org.blood ~= nil or org.wounds ~= nil or org.arterialwounds ~= nil)
+    if not hasOrganism then org = {} end
+    local blood = tonumber(org.blood) or 5000
+    local maximum = math.max(tonumber(org.maxBlood) or 5000, 1)
+    local pulse = tonumber(org.pulse) or tonumber(org.pulseadd) or 0
+    return {
+        org = org,
+        hasOrganism = hasOrganism,
+        wounds = WoundCount(org.wounds),
+        arterial = WoundCount(org.arterialwounds),
+        blood = blood,
+        maxBlood = maximum,
+        internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0),
+        pain = tonumber(org.pain) or 0,
+        shock = tonumber(org.shock) or 0,
+        pulse = pulse,
+        adrenaline = tonumber(org.adrenalineAdd) or 0,
+        needsUnconsciousAid = org.otrub == true or org.needotrub == true
+    }
+end
+
+local function HasMedicalSupply(inventory, class, modes)
+    if not istable(inventory) or not istable(inventory.Weapons)
+        or inventory.Weapons[class] == nil or not GetStored(class) then return false end
+
+    local saved = inventory.Weapons[class]
+    local values = IsValid(saved) and saved.modeValues or (istable(saved) and saved.modeValues) or nil
+    if not istable(values) then return true end
+    if istable(modes) then
+        for _, mode in ipairs(modes) do
+            if (tonumber(values[mode]) or 0) > 0 then return true end
+        end
+        return false
+    end
+    for _, amount in pairs(values) do
+        if (tonumber(amount) or 0) > 0 then return true end
+    end
+    return false
+end
+
+local function ChooseMedicalClass(inventory, target, healer)
+    local readout = GetMedicalReadout(target)
+    local function has(class, modes)
+        return HasMedicalSupply(inventory, class, modes)
+    end
+
+    -- Stop ongoing blood loss first; transfusion alone does not seal wounds.
+    if readout.hasOrganism and (readout.arterial > 0 or readout.wounds > 0
+        or readout.internalBleed > 0 or readout.blood < 4500) then
+        if has("weapon_medkit_sh", {1, 3, 4}) then return "weapon_medkit_sh" end
+        if readout.arterial > 0 and has("weapon_tourniquet", {1}) then return "weapon_tourniquet" end
+        if (readout.wounds > 0 or readout.arterial > 0 or readout.blood < 4600)
+            and has("weapon_bigbandage_sh", {1}) then return "weapon_bigbandage_sh" end
+        if (readout.wounds > 0 or readout.arterial > 0 or readout.blood < 4600)
+            and has("weapon_bandage_sh", {1}) then return "weapon_bandage_sh" end
+    end
+
+    -- A blood bag is only used for significant blood loss, after available
+    -- wound care has been considered. UseMedicalItem checks compatibility.
+    if readout.hasOrganism and readout.blood < 3500 and has("weapon_bloodbag", {1}) then
+        return "weapon_bloodbag"
+    end
+
+    if readout.hasOrganism and readout.pain >= 45 then
+        if has("weapon_painkillers", {1}) then return "weapon_painkillers" end
+        if has("weapon_medkit_sh", {2}) then return "weapon_medkit_sh" end
+    end
+
+    if readout.hasOrganism and (readout.needsUnconsciousAid or readout.shock >= 78
+        or (readout.pulse > 0 and readout.pulse < 42)) then
+        if has("weapon_adrenaline", {1}) then return "weapon_adrenaline" end
+    end
+
+    if readout.hasOrganism and (readout.pulse >= 135 or readout.adrenaline >= 3.0)
+        and has("weapon_betablock", {1}) then
+        return "weapon_betablock"
+    end
+
+    -- Don't use opioid/injection items automatically: their native effects are
+    -- incremental and dose-sensitive. Medkit/painkiller treatment is predictable.
+    if not readout.hasOrganism and target:Health() < target:GetMaxHealth() then
+        if has("weapon_medkit_sh", {1}) then return "weapon_medkit_sh" end
+        if has("weapon_bigbandage_sh", {1}) then return "weapon_bigbandage_sh" end
+        if has("weapon_bandage_sh", {1}) then return "weapon_bandage_sh" end
+    end
+    return nil
+end
+
 local function IsAllyToHealer(healer, target)
     if healer == target then return true end
     if not IsValid(healer) or not IsValid(target) then return false end
@@ -1502,6 +1624,69 @@ local function IsAllyToHealer(healer, target)
     return false
 end
 
+local function UseBloodBag(healer, target, med, org)
+    if not IsValid(med) or not istable(org) then return false end
+    local supply = math.max(tonumber(med.modeValues and med.modeValues[1]) or 0, 0)
+    if supply <= 0 then return false end
+    if (tonumber(org.blood) or 5000) >= 4200 then return false end
+
+    local donorType = tostring(med.bloodtype or "o-")
+    local recipientType = tostring(org.bloodtype or "o-")
+    local bloodTypes = hg and hg.organism and hg.organism.bloodtypes
+    local compatible = istable(bloodTypes) and istable(bloodTypes[donorType])
+        and bloodTypes[donorType][recipientType] == true
+    if not compatible then return false end
+
+    local targetClass = string.lower(tostring(target.PlayerClassName
+        or (target.GetNW2String and target:GetNW2String("PlayerClassName", "")) or ""))
+    local profile = target.BZCNClassProfile or {}
+    local isFurry = profile.FurryStyle == true or targetClass == "furry"
+        or string.lower(tostring(target.BZCN_Faction or "")) == "furry"
+    if (donorType == "c-" or med.furryinfected == true) and not isFurry then
+        return false
+    end
+
+    local current = math.max(tonumber(org.blood) or 0, 0)
+    local maximum = math.max(tonumber(org.maxBlood) or 5000, 1)
+    local restored = math.min(300, maximum - current, supply * 500)
+    if restored < 1 then return false end
+    org.blood = current + restored
+    org.hemotransfusionshock = tonumber(org.hemotransfusionshock) or 0
+    med.modeValues[1] = math.max(supply - restored / 500, 0)
+    if istable(target.BZCNNPCOrg) then target.BZCNNPCOrg.blood = org.blood end
+    if target.SetNW2Float then target:SetNW2Float("BZCNNPCBlood", org.blood) end
+    hook.Run("BZCN_NPCBloodTransfused", healer, target, restored, donorType, recipientType)
+    return true
+end
+
+local function PersistMedicalSupply(healer, class, med)
+    local inventory = GetInventory(healer)
+    inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    local values = IsValid(med) and istable(med.modeValues) and med.modeValues or nil
+    local anySupply = false
+    if values then
+        for _, amount in pairs(values) do
+            if (tonumber(amount) or 0) > 0 then anySupply = true break end
+        end
+    end
+
+    if not anySupply then
+        inventory.Weapons[class] = nil
+        if IsValid(med) then med:Remove() end
+    else
+        inventory.Weapons[class] = {
+            modeValues = table.Copy(values),
+            bloodtype = IsValid(med) and med.bloodtype or nil,
+            furryinfected = IsValid(med) and med.furryinfected or nil
+        }
+    end
+    if BZCN.SetNetVar then
+        BZCN.SetNetVar(healer, "Inventory", inventory)
+    else
+        healer.inventory = inventory
+    end
+end
+
 local function UseMedicalItem(healer, target, class)
     local med = ConfigureWeaponEntity(healer, class, "BZCNRuntimeMedicalWeapon")
     if not IsValid(med) then return false end
@@ -1531,18 +1716,29 @@ local function UseMedicalItem(healer, target, class)
     local blood = tonumber(org.blood) or 5000
     local pain = tonumber(org.pain) or 0
     local shock = tonumber(org.shock) or 0
-    local hasMedkit = med:GetClass() == "weapon_medkit_sh"
+    local class = med:GetClass()
+    local hasMedkit = class == "weapon_medkit_sh"
+    local isBandage = class == "weapon_bandage_sh" or class == "weapon_bigbandage_sh"
 
     if hasMedkit and internalBleed > 0 and med.modeValues[3] > 0 then actions[#actions + 1] = 3 end
     if hasMedkit and arterialCount > 0 and med.modeValues[4] > 0 then actions[#actions + 1] = 4 end
     if hasMedkit and (pain >= 65 or shock >= 75) and (target == healer or org.otrub)
         and med.modeValues[2] > 0 then actions[#actions + 1] = 2 end
-    if (woundCount > 0 or arterialCount > 0 or blood < 4600) and med.modeValues[1] > 0 then
+    if (hasMedkit or isBandage)
+        and (woundCount > 0 or arterialCount > 0 or blood < 4600)
+        and med.modeValues[1] > 0 then actions[#actions + 1] = 1 end
+    if class == "weapon_painkillers" and pain >= 45 and med.modeValues[1] > 0 then
         actions[#actions + 1] = 1
-    end
-    if #actions == 0 and hasMedkit and target == healer and (pain >= 75 or shock >= 80)
-        and med.modeValues[2] > 0 then
-        actions[#actions + 1] = 2
+    elseif class == "weapon_tourniquet" and arterialCount > 0 and med.modeValues[1] > 0 then
+        actions[#actions + 1] = 1
+    elseif class == "weapon_adrenaline"
+        and (shock >= 78 or org.otrub or org.needotrub or (tonumber(org.pulse) or 0) < 42)
+        and med.modeValues[1] > 0 then
+        actions[#actions + 1] = 1
+    elseif class == "weapon_betablock"
+        and ((tonumber(org.pulse) or 0) >= 135 or (tonumber(org.adrenalineAdd) or 0) >= 3)
+        and med.modeValues[1] > 0 then
+        actions[#actions + 1] = 1
     end
 
     local applied = false
@@ -1550,16 +1746,18 @@ local function UseMedicalItem(healer, target, class)
     local targetHasOrganism = istable(targetOrg) and (targetOrg.owner ~= nil
         or targetOrg.fakePlayer == true or targetOrg.blood ~= nil
         or targetOrg.wounds ~= nil or targetOrg.arterialwounds ~= nil)
-    if not targetHasOrganism then
+    if class == "weapon_bloodbag" then
+        if targetHasOrganism then applied = UseBloodBag(healer, target, med, targetOrg) end
+    elseif not targetHasOrganism then
         -- Fallback first aid for ordinary Source NPCs that have no Z-City
-        -- organism table: improve their engine health instead of trying to run
-        -- the organism-only medkit implementation on an empty table.
+        -- organism table: improve engine health only for actual wound-care kits.
+        local supportsBasicFirstAid = hasMedkit or isBandage
         local currentHealth = math.max(tonumber(target:Health()) or 0, 0)
         local maxHealth = math.max(tonumber(target:GetMaxHealth()) or 100, 1)
-        local healAmount = hasMedkit and 24 or 12
+        local healAmount = hasMedkit and 24 or (class == "weapon_bigbandage_sh" and 18 or 12)
         local newHealth = math.min(maxHealth, currentHealth + healAmount)
         local availableSupply = tonumber(med.modeValues and med.modeValues[1]) or 0
-        if availableSupply > 0 and newHealth > currentHealth then
+        if supportsBasicFirstAid and availableSupply > 0 and newHealth > currentHealth then
             target:SetHealth(newHealth)
             med.modeValues[1] = math.max(availableSupply - 8, 0)
             applied = true
@@ -1597,7 +1795,7 @@ local function UseMedicalItem(healer, target, class)
     -- when its supply is exhausted. Restore the NPC's combat loadout afterward
     -- so healing one ally doesn't permanently delete its rifle/pistol.
     if isstring(previousWeaponClass) and previousWeaponClass ~= ""
-        and previousWeaponClass ~= "weapon_medkit_sh" and previousWeaponClass ~= "weapon_bandage_sh"
+        and not MEDICAL_WEAPONS[previousWeaponClass]
         and healer.BZCN_SelectedWeapon ~= previousWeaponClass then
         local inventory = GetInventory(healer)
         if istable(inventory.Weapons) and inventory.Weapons[previousWeaponClass] then
@@ -1609,6 +1807,7 @@ local function UseMedicalItem(healer, target, class)
         healer.BZCNLastMedicalUse = CurTime()
         healer.BZCNLastMedicalTarget = target
         healer.BZCNLastMedicalClass = class
+        PersistMedicalSupply(healer, class, med)
 
         -- If the consumable still has supply, briefly display its real Z-City
         -- world model and pause the actor as it treats the selected patient.
@@ -1620,7 +1819,7 @@ local function UseMedicalItem(healer, target, class)
             end
         end
         if remainingSupply and isstring(previousWeaponClass) and previousWeaponClass ~= ""
-            and previousWeaponClass ~= "weapon_medkit_sh" and previousWeaponClass ~= "weapon_bandage_sh" then
+            and not MEDICAL_WEAPONS[previousWeaponClass] then
             BZCN.SelectWeapon(healer, class)
             local finishAt = CurTime() + 0.85
             healer.BZCNMedicalUntil = finishAt
@@ -1654,14 +1853,7 @@ function BZCN.TryUseMedicalItem(ent)
     if now < (ent.BZCNNextMedicalUse or 0) or now - (ent.BZCNLastMedicalUse or 0) < 4 then return false end
 
     local inventory = GetInventory(ent)
-    local class
-    for _, preferred in ipairs({"weapon_medkit_sh", "weapon_bandage_sh"}) do
-        if istable(inventory.Weapons) and inventory.Weapons[preferred] then
-            class = preferred
-            break
-        end
-    end
-    if not class then return false end
+    if not istable(inventory.Weapons) then return false end
 
     local candidates = {{entity = ent, distance = 0}}
     local maxRange = tonumber(ent.BZCNClassProfile and ent.BZCNClassProfile.MedicalRange) or 320
@@ -1675,20 +1867,22 @@ function BZCN.TryUseMedicalItem(ent)
         end
     end
 
-    local best, bestScore
+    local best, bestScore, bestClass
     for _, record in ipairs(candidates) do
         local target = record.entity
         local needed, score = NeedsMedicalAttention(target)
-        if needed and (not best or score > bestScore
+        local selectedClass = needed and ChooseMedicalClass(inventory, target, ent) or nil
+        if selectedClass and (not best or score > bestScore
             or (score == bestScore and record.distance < best.distance)) then
             best = {entity = target, distance = record.distance}
             bestScore = score
+            bestClass = selectedClass
         end
     end
-    if not best then return false end
+    if not best or not bestClass then return false end
 
     ent.BZCNNextMedicalUse = now + 2
-    local ok = UseMedicalItem(ent, best.entity, class)
+    local ok = UseMedicalItem(ent, best.entity, bestClass)
     if ok then ent.BZCNNextMedicalUse = CurTime() + 5 end
     return ok
 end
