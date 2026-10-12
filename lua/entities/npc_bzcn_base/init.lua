@@ -179,6 +179,12 @@ function ENT:Initialize()
     -- with the shared class template here.
     self.BZCNClassProfile = self.BZCNClassProfile or profile
     self.BZCN_Faction = profile.Faction or className
+    self.PlayerClassName = self.PlayerClassName or className
+    if self.SetNW2String then
+        self:SetNW2String("BZCNClassName", tostring(self.BZCNClassProfile.Name or self.BZCNClassProfile.PrintName or className))
+        self:SetNW2String("PlayerClassName", tostring(self.PlayerClassName))
+        self:SetNW2String("BZCNFaction", tostring(self.BZCN_Faction))
+    end
 
     -- Give each spawned NPC a valid random choice from its class loadout.
     -- Only select weapons that were added to that NPC's inventory and actually
