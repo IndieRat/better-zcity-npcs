@@ -816,6 +816,15 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     -- model-specific fallback cloth materials, and a dark-red tint for ordinary
     -- citizens. Remember the pre-infection class before ApplyClass overwrites it.
     if profile.ZombieStyle == true then
+        -- The native headcrabzombie class removes accessories on infection;
+        -- don't leave civilian hats/glasses cached on the converted NextBot.
+        if SERVER and isfunction(ent.SetNetVar) then
+            pcall(ent.SetNetVar, ent, "Accessories", "")
+        end
+        if istable(ent.CurAppearance) then
+            ent.CurAppearance.AAttachments = ""
+        end
+
         if isfunction(ent.GetBodyGroups) and isfunction(ent.SetBodygroup) then
             for _, group in ipairs(ent:GetBodyGroups() or {}) do
                 if group.id == 1 and (tonumber(group.num) or 0) > 1 then
