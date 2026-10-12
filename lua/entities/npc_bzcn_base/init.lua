@@ -1090,6 +1090,35 @@ function ENT:PlayBZCNAttackAnimation()
         return false
     end
 
+    if profile.HeadcrabStyle == true or profile.ZombieStyle == true then
+        local creatureSequences = profile.HeadcrabStyle == true and {
+            "attack1", "attack2", "attack3", "jumpattack", "jump_attack", "attack"
+        } or {
+            "attack1", "attack2", "attack3", "zombie_attack_01",
+            "melee_attack1", "attack01", "attack"
+        }
+        local creatureSequence = self:FindSequence(creatureSequences)
+        if creatureSequence >= 0 then
+            -- Prefer an overlay where the model provides one; otherwise use a
+            -- timed full-body override so its native monster attack actually plays.
+            if isfunction(self.AddGestureSequence) then
+                local ok = pcall(self.AddGestureSequence, self, creatureSequence)
+                if ok then return true end
+            end
+            self.BZCNActionSequence = creatureSequence
+            local duration = 0.8
+            local durationOK, sequenceDuration = pcall(self.SequenceDuration, self, creatureSequence)
+            if durationOK and isnumber(sequenceDuration) and sequenceDuration > 0 then
+                duration = math.Clamp(sequenceDuration, 0.3, 1.5)
+            end
+            self.BZCNActionSequenceEnd = CurTime() + duration
+            self:ResetSequence(creatureSequence)
+            self:SetCycle(0)
+            self:SetPlaybackRate(1)
+            return true
+        end
+    end
+
     local sequence = -1
     local modelClass = self.GetBZCNAnimationClass and self:GetBZCNAnimationClass()
     local animationClass = modelClass and hg and hg.IXAnims and hg.IXAnims[modelClass]
