@@ -1,5 +1,5 @@
--- Furry NPC run-up and leap. Uses the existing BZCNNPCPounce contact resolver
--- in sv_bzcn_injuries.lua so the leap and its landing share one hit path.
+-- Furry NPC run-up and leap. The upright burst hands its velocity to a fake
+-- ragdoll after a short build-up; this file also resolves its delayed impact.
 if not SERVER then return end
 
 local function ManagedFurry(ent)
