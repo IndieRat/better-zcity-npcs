@@ -212,8 +212,26 @@ timer.Create("BZCN_HeadcrabPounceContacts", 0.05, 0, function()
 end)
 
 timer.Create("BZCN_HeadcrabInfectionProgression", 0.5, 0, function()
-    if not RuleEnabled("headcrab_infection") then return end
     local now = CurTime()
+
+    -- The native Z-City Org Think owns player-class conversion. Drop BZCN's
+    -- visual marker once that transition finishes, or once native infection ends.
+    for _, ply in ipairs(player.GetAll()) do
+        if not IsValid(ply) or not ply:GetNW2Bool("BZCNHeadcrabInfected", false) then continue end
+        local organism = ReadOrganism(ply)
+        local infectedAt = organism and tonumber(organism.headcrabon) or nil
+        local attached
+        if isfunction(ply.GetNetVar) then
+            local ok, value = pcall(ply.GetNetVar, ply, "headcrab")
+            if ok then attached = value end
+        end
+        if IsZombieAlready(ply) or (not infectedAt and (attached == nil or attached == false or attached == "")) then
+            ply:SetNW2Bool("BZCNHeadcrabInfected", false)
+            ply:SetNW2Float("BZCNHeadcrabInfectionAt", 0)
+        end
+    end
+
+    if not RuleEnabled("headcrab_infection") then return end
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if not IsManaged(ent) or IsZombieAlready(ent) then continue end
         local organism = ReadOrganism(ent)
