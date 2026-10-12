@@ -309,17 +309,17 @@ local function PublishZCityWoundTables(ent, owner, state)
     -- Z-City's blood/visual integrations also read these NetVar keys. Publish
     -- the same tables on both the standing NextBot and its temporary ragdoll,
     -- never copied snapshots that can diverge after a fake/get-up transition.
-    local function Publish(target)
+    local function Publish(target, force)
         if not IsValid(target) or not isfunction(target.SetNetVar) then return end
 
-        -- Avoid re-sending the same table on every adapter tick. Native Z-City
-        -- wound handlers publish in-place additions/removals themselves; this
-        -- bridge republishes when a transition replaces the backing array.
-        if target.BZCNPublishedWounds ~= org.wounds then
+        -- Table identity detects Org Clear replacing an array. The native
+        -- organism also mutates wound entries in place, so callers mirroring a
+        -- native wound-publication cycle can force a network refresh.
+        if force or target.BZCNPublishedWounds ~= org.wounds then
             local ok = pcall(target.SetNetVar, target, "wounds", org.wounds)
             if ok then target.BZCNPublishedWounds = org.wounds end
         end
-        if target.BZCNPublishedArterialWounds ~= org.arterialwounds then
+        if force or target.BZCNPublishedArterialWounds ~= org.arterialwounds then
             local ok = pcall(target.SetNetVar, target, "arterialwounds", org.arterialwounds)
             if ok then target.BZCNPublishedArterialWounds = org.arterialwounds end
         end
@@ -328,6 +328,34 @@ local function PublishZCityWoundTables(ent, owner, state)
     Publish(owner)
     if ent ~= owner then Publish(ent) end
 end
+
+-- Z-City's organism module republishes the living owner's wound NetVars on
+-- its Org Think cadence (sv_organism.lua, "Main"). Wounds are mutated in place,
+-- so the table-identity guard above cannot detect those updates for a separate
+-- temporary ragdoll. Mirror each completed native publication to that rag.
+hook.Add("Org Think", "BZCNNPCSupport_WoundNetVarMirror", function(owner, org)
+    if not IsValid(owner) or not owner.BZCNNPCDowned or not istable(org) then return end
+
+    timer.Simple(0, function()
+        if not IsValid(owner) or not owner.BZCNNPCDowned then return end
+        local rag = owner.BZCNNPCRagdoll
+        local current = owner.organism
+        if not IsValid(rag) or not istable(current) or current ~= org
+            or not isfunction(rag.SetNetVar) then return end
+
+        -- Main sets sendPlyTime immediately before publishing the owner's
+        -- NetVars. Defer until hooks finish, then mirror only when that native
+        -- publication schedule advances; this avoids network-spamming every
+        -- Org Think while keeping ragdoll blood/wound visuals in step.
+        local schedule = current.sendPlyTime
+        if schedule == nil or rag.BZCNNPCWoundPublishSchedule == schedule then return end
+        rag.BZCNNPCWoundPublishSchedule = schedule
+        pcall(rag.SetNetVar, rag, "wounds", current.wounds or {})
+        pcall(rag.SetNetVar, rag, "arterialwounds", current.arterialwounds or {})
+        rag.BZCNPublishedWounds = current.wounds
+        rag.BZCNPublishedArterialWounds = current.arterialwounds
+    end)
+end)
 
 local function EnsureZCityOrganism(owner)
     if not IsValid(owner) then return nil, false end
