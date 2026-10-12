@@ -140,12 +140,20 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "combat_prone"
     elseif not self:OnGround() then
         state = "airborne"
-    elseif self.BZCN_Sprinting and speed > 12 then
-        state = "sprinting"
-    elseif speed > runThreshold then
-        state = "running"
-    elseif speed > walkThreshold then
-        state = "walking"
+    else
+        -- Z-City picks ACT_MP_WALK below ~150 units/s and ACT_MP_RUN beyond it.
+        -- Mark sprint only after the bot has physically accelerated past normal
+        -- running speed, rather than switching the animation on a sprint flag.
+        local baseSpeed = BZCN and isfunction(BZCN.GetBaseMoveSpeed)
+            and BZCN.GetBaseMoveSpeed(self) or (BZCN and BZCN.BaseMoveSpeed) or 190
+        local sprintThreshold = (previous == "sprinting" and 1.03 or 1.12) * baseSpeed
+        if self.BZCN_Sprinting and speed > sprintThreshold then
+            state = "sprinting"
+        elseif speed > runThreshold then
+            state = "running"
+        elseif speed > walkThreshold then
+            state = "walking"
+        end
     end
 
     if previous ~= state then
@@ -215,6 +223,20 @@ function ENT:GetBZCNMovementSequence(speed, state)
             if ok and IsUsableSequence(self, selected) then return selected end
         end
         return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
+    end
+
+    -- Z-City selects ACT_MP_RUN from actual velocity, and some models expose a
+    -- separate sprint clip. Prefer a real sprint sequence when one exists.
+    self.BZCNUsingDedicatedSprintSequence = false
+    if state == "sprinting" then
+        local sprintSequence = GetFirstSequence(self, {
+            "sprint_all", "sprint_all_01", "sprint_unarmed", "sprint_armed",
+            "sprint_forward", "sprint", "run_sprint"
+        })
+        if sprintSequence >= 0 then
+            self.BZCNUsingDedicatedSprintSequence = true
+            return sprintSequence
+        end
     end
 
     if not (hg and hg.IXAnims and istable(hg.IXAnims)) then
@@ -511,9 +533,28 @@ function ENT:BodyUpdate()
         local playbackRate = 1
         if state == "crawling" then
             playbackRate = 0.58
-        elseif state == "running" or state == "sprinting" then
-            local baseSpeed = BZCN and tonumber(BZCN.BaseMoveSpeed) or 190
-            playbackRate = math.Clamp(speed / math.max(baseSpeed, 1), 0.85, 1.85)
+            self.BZCNAnimationPlaybackRate = 1
+        else
+            local baseSpeed = BZCN and isfunction(BZCN.GetBaseMoveSpeed)
+                and BZCN.GetBaseMoveSpeed(self) or (BZCN and BZCN.BaseMoveSpeed) or 190
+            local sprintSpeed = BZCN and isfunction(BZCN.GetSprintMoveSpeed)
+                and BZCN.GetSprintMoveSpeed(self) or (BZCN and BZCN.SprintMoveSpeed) or 320
+            local sprintSpan = math.max(sprintSpeed - baseSpeed, 1)
+            local speedBlend = math.Clamp((speed - baseSpeed) / sprintSpan, 0, 1)
+            local targetRate = 1
+            if state == "running" then
+                targetRate = 0.98 + speedBlend * 0.12
+            elseif state == "sprinting" then
+                -- Dedicated sprint clips already have a faster gait; fallback
+                -- run clips get a controlled rate increase, not raw speed/base.
+                targetRate = self.BZCNUsingDedicatedSprintSequence
+                    and (1.02 + speedBlend * 0.12)
+                    or (1.04 + speedBlend * 0.38)
+            end
+            local priorRate = tonumber(self.BZCNAnimationPlaybackRate) or 1
+            local blendStep = math.max(FrameTime(), 0.01) * 4.5
+            self.BZCNAnimationPlaybackRate = math.Approach(priorRate, targetRate, blendStep)
+            playbackRate = self.BZCNAnimationPlaybackRate
         end
         if state == "crawling" then
             -- Keep the model's prone clip intact. BodyMoveXY drives ordinary
@@ -530,12 +571,10 @@ function ENT:BodyUpdate()
                 self:SetPlaybackRate(playbackRate)
                 self:FrameAdvance()
             else
-                -- BodyMoveXY updates pose params; apply run/sprint playback after it
-                -- so a sprint visibly moves faster than an ordinary run.
+                -- BodyMoveXY updates pose parameters and may reset playback rate.
+                -- Reapply our eased rate so walk/run/sprint transitions are smooth.
                 self:BodyMoveXY()
-                if state == "running" or state == "sprinting" then
-                    self:SetPlaybackRate(playbackRate)
-                end
+                self:SetPlaybackRate(playbackRate)
             end
         else
             self:SetPlaybackRate(playbackRate)
