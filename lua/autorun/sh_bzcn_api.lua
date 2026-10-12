@@ -4,6 +4,7 @@
 
 if SERVER then
     AddCSLuaFile()
+    AddCSLuaFile("autorun/client/cl_bzcn_fancy_visuals.lua")
     AddCSLuaFile("autorun/client/cl_bzcn_hud_bridge.lua")
     AddCSLuaFile("autorun/client/cl_bzcn_tpik_adapter.lua")
     AddCSLuaFile("autorun/client/cl_bzcn_npc_chat.lua")
@@ -13,6 +14,48 @@ end
 BZCN = BZCN or {}
 BZCN.Classes = BZCN.Classes or {}
 BZCN.Version = "0.2.0"
+
+-- Homigrad's ordinary human movement defaults are a 190 walk/base speed and
+-- a 280 run/sprint speed (the latter follows the live movement convar when set).
+BZCN.BaseMoveSpeed = math.Clamp(tonumber(BZCN.BaseMoveSpeed) or 190, 80, 800)
+BZCN.SprintMoveSpeed = math.Clamp(tonumber(BZCN.SprintMoveSpeed) or 320, 80, 1000)
+
+-- A single shared pool makes civilian, rebel, and civil-protection identities
+-- feel like one population instead of a few repeated class-specific names.
+BZCN.HumanNamePool = BZCN.HumanNamePool or {
+    "Alex", "Amelia", "Andre", "Anna", "Avery", "Bailey", "Ben", "Blake",
+    "Brooke", "Caleb", "Cameron", "Casey", "Charlie", "Chloe", "Chris",
+    "Cody", "Daniel", "Daphne", "Darius", "David", "Diana", "Eden", "Eli",
+    "Ella", "Emily", "Ethan", "Eva", "Felix", "Frankie", "Gabriel", "Grace",
+    "Harper", "Henry", "Iris", "Isaac", "Jade", "Jamie", "Jasmine", "Jesse",
+    "Jordan", "Julia", "Kai", "Kayla", "Keith", "Kieran", "Kim", "Laura",
+    "Lee", "Leo", "Logan", "Luca", "Maya", "Micah", "Mikhail", "Morgan",
+    "Nadia", "Nathan", "Noah", "Nora", "Oliver", "Parker", "Quinn", "Riley",
+    "Robin", "Rowan", "Russell", "Sam", "Sasha", "Sean", "Simon", "Skyler",
+    "Sofia", "Taylor", "Theo", "Toby", "Valerie", "Wes", "Yuri", "Zoe"
+}
+
+function BZCN.GetRandomHumanName()
+    local names = BZCN.HumanNamePool or {}
+    if #names == 0 then return "Alex" end
+    return names[math.random(#names)]
+end
+
+function BZCN.GetBaseMoveSpeed(ent)
+    local profile = IsValid(ent) and ent.BZCNClassProfile or nil
+    local override = profile and tonumber(profile.BaseSpeedOverride)
+    return math.Clamp(override or BZCN.BaseMoveSpeed or 190, 80, 800)
+end
+
+function BZCN.GetSprintMoveSpeed(ent)
+    local profile = IsValid(ent) and ent.BZCNClassProfile or nil
+    local override = profile and tonumber(profile.SprintSpeedOverride)
+    local runSpeed = override
+    local movementConVar = GetConVar and GetConVar("hg_movement_runspeed")
+    if not runSpeed and movementConVar then runSpeed = movementConVar:GetFloat() end
+    runSpeed = tonumber(runSpeed) or BZCN.SprintMoveSpeed or 320
+    return math.max(BZCN.GetBaseMoveSpeed(ent), math.Clamp(runSpeed, 80, 1000))
+end
 
 local function CopyTable(value)
     if not istable(value) then return value end
@@ -27,7 +70,9 @@ function BZCN.RegisterClass(className, definition)
     definition.ClassName = className
     definition.PlayerClassName = definition.PlayerClassName or className
     definition.Health = math.max(tonumber(definition.Health) or 100, 1)
-    definition.Speed = math.max(tonumber(definition.Speed) or 180, 1)
+    local configuredSpeed = tonumber(definition.BaseSpeedOverride)
+        or (definition.UseClassSpeed == true and tonumber(definition.Speed))
+    definition.Speed = math.Clamp(configuredSpeed or BZCN.BaseMoveSpeed or 190, 80, 800)
     definition.Inventory = definition.Inventory or {Weapons = {}, Items = {}, Armor = {}}
     definition.Inventory.Weapons = definition.Inventory.Weapons or {}
     definition.Inventory.Items = definition.Inventory.Items or {}
@@ -753,8 +798,8 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.BZCNManaged = true
     ent.BZCNClass = profile.ClassName
     ent.BZCNClassProfile = profile
-    ent.BZCNRunSpeed = tonumber(profile.Speed) or 175
-    ent.BZCNWalkSpeed = tonumber(profile.WalkSpeed) or ent.BZCNRunSpeed * 0.55
+    ent.BZCNRunSpeed = BZCN.GetBaseMoveSpeed(ent)
+    ent.BZCNWalkSpeed = tonumber(profile.WalkSpeed) or BZCN.BaseMoveSpeed
     ent.PlayerClassName = profile.PlayerClassName
     ent.IsFurry = profile.ClassName == "furry"
     ent.IsOrganism = true
@@ -848,6 +893,13 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     end
     hook.Run("BZCN_NPCClassApplied", ent, profile.ClassName, profile)
     return true
+end
+
+-- All human-profile identities draw from the same larger name list. Combine
+-- keeps its short unit number suffix, preserving distinction without generic labels.
+for _, className in ipairs({"default", "Combine", "Metrocop", "Rebel", "civilian_companion"}) do
+    local profile = BZCN.Classes[className]
+    if profile then profile.DisplayNames = CopyTable(BZCN.HumanNamePool) end
 end
 
 function BZCN.GetWeaponModel(ent, weaponClass)
