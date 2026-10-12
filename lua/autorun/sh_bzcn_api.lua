@@ -993,6 +993,12 @@ end
 function BZCN.ChangeClass(ent, className, heal)
     if not IsValid(ent) or not isstring(className) or not BZCN.Classes[className] then return false end
     if ent.GetNW2Bool and ent:GetNW2Bool("BZCNNPCDowned", false) then return false end
+    if className == "headcrab_zombie" and ent.BZCNClass ~= "headcrab_zombie" then
+        ent.BZCNHeadcrabOriginalClass = ent.BZCNHeadcrabOriginalClass
+            or ent.BZCNClass or ent.PlayerClassName or "default"
+    elseif className ~= "headcrab_zombie" then
+        ent.BZCNHeadcrabOriginalClass = nil
+    end
     local profile = BZCN.GetClass(className)
     BZCN.HideHeldWeapon(ent)
 
