@@ -855,12 +855,31 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             }
             local originalClass = ent.BZCNHeadcrabOriginalClass
                 or ent.BZCNHeadcrabOriginalFaction or "default"
-            hasZombieAppearanceFallback = fallbacks[originalClass] ~= nil
-            local materials = fallbacks[originalClass] or {
+            local oldAppearance = ent.CurAppearance
+            local oldClothes = istable(oldAppearance) and oldAppearance.AClothes or nil
+            local clothingSets = hg and hg.Appearance and hg.Appearance.Clothes
+                and hg.Appearance.Clothes[1] or nil
+            local materials = fallbacks[originalClass]
+            local keptOriginalClothes = false
+            -- Native Z-City keeps a civilian's actual shirt/pants/shoes while
+            -- applying the zombie shader textures. Preserve those choices when
+            -- this NPC had a generated appearance instead of replacing everyone
+            -- with the same generic zombie sheet.
+            if not materials and istable(oldClothes) and istable(clothingSets) then
+                materials = {
+                    main = clothingSets[oldClothes.main] or clothingSets.normal,
+                    pants = clothingSets[oldClothes.pants] or clothingSets.normal,
+                    boots = clothingSets[oldClothes.boots] or clothingSets.normal
+                }
+                keptOriginalClothes = isstring(materials.main)
+                    and isstring(materials.pants) and isstring(materials.boots)
+            end
+            materials = materials or {
                 main = "models/zombie_classic/zombie_classic_sheet",
                 pants = "models/zombie_classic/zombie_classic_sheet",
                 boots = "models/zombie_classic/zombie_classic_sheet"
             }
+            hasZombieAppearanceFallback = fallbacks[originalClass] ~= nil or keptOriginalClothes
             local slots = {
                 main = "distac/gloves/players_sheet",
                 pants = "distac/gloves/pants",
