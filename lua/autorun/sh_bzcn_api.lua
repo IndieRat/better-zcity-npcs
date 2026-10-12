@@ -1035,6 +1035,11 @@ function BZCN.ChangeClass(ent, className, heal)
     if isstring(profile.Model) and util.IsValidModel(profile.Model) then
         ent:SetModel(profile.Model)
     end
+    -- Class conversion must also reset scale; otherwise a small headcrab model
+    -- converted to a zombie keeps its old 0.8 scale even with the full zombie model.
+    if isfunction(ent.SetModelScale) then
+        ent:SetModelScale(math.Clamp(tonumber(profile.ModelScale) or 1, 0.35, 1.4), 0)
+    end
     local modelChanged = oldModel ~= ent:GetModel()
     local resetAppearance = modelChanged or profile.FurryStyle == true
 
