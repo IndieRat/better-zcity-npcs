@@ -102,7 +102,11 @@ BZCN.RegisterClass("Rebel", {
 -- conversion, UI and role callbacks are not invoked on NPC entities.
 BZCN.RegisterClass("furry", {
     Name = "Furry Specimen", PlayerClassName = "furry",
-    Model = "models/eradium/protogen_player.mdl", Health = 125, Speed = 190,
+    Model = "models/eradium/protogen_player.mdl", Health = 125, Speed = 235,
+    -- Mirror the native furry class' movement identity without applying its
+    -- player-only hooks to a NextBot. Sprint drains less stamina and jumps higher.
+    FurrySpeedGainClassMul = 5, FurryJumpPowerMul = 1.5, FurryStaminaExhaustMul = 0.75,
+    FurryPounceCooldown = 3.2, SprintStaminaDrain = 18, SprintStaminaRecovery = 22, SprintSpeedMultiplier = 1.55,
     Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
     FollowAllies = true, FollowRange = 800, FollowDistance = 125, HelpRange = 1000, HelpMemory = 8,
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
@@ -131,7 +135,9 @@ BZCN.RegisterClass("civilian_companion", {
 
 BZCN.RegisterClass("furry_companion", {
     Name = "Furry Companion", PlayerClassName = "furry",
-    Model = "models/eradium/protogen_player.mdl", Health = 135, Speed = 195,
+    Model = "models/eradium/protogen_player.mdl", Health = 135, Speed = 235,
+    FurrySpeedGainClassMul = 5, FurryJumpPowerMul = 1.5, FurryStaminaExhaustMul = 0.75,
+    FurryPounceCooldown = 3.2, SprintStaminaDrain = 18, SprintStaminaRecovery = 22, SprintSpeedMultiplier = 1.55,
     Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
     Companion = true, FurryStyle = true, SmartFurry = true, CanScavengeWeapons = true,
     FollowAllies = true, FollowRange = 2400, FollowDistance = 120, HelpRange = 1800, HelpMemory = 15,
