@@ -115,6 +115,61 @@ local function RenderNPCAccessories(ent)
     end
 end
 
+local function GetAttachedHeadcrab(ent)
+    local attached
+    if isfunction(ent.GetNetVar) then
+        local ok, value = pcall(ent.GetNetVar, ent, "headcrab")
+        if ok then attached = value end
+    end
+    if attached == nil and ent.GetNW2Bool
+        and ent:GetNW2Bool("BZCNHeadcrabInfected", false) then
+        attached = "models/nova/w_headcrab.mdl"
+    end
+    if attached == true then attached = "models/nova/w_headcrab.mdl" end
+    if not isstring(attached) or attached == "" or attached == "false" then return nil end
+    if not util.IsValidModel(attached) then return nil end
+    return attached
+end
+
+local function RenderAttachedHeadcrab(ent)
+    local modelPath = GetAttachedHeadcrab(ent)
+    if not modelPath then
+        if IsValid(ent.BZCNHeadcrabModel) then ent.BZCNHeadcrabModel:Remove() end
+        ent.BZCNHeadcrabModel = nil
+        ent.BZCNHeadcrabModelPath = nil
+        return
+    end
+
+    local body = IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or ent
+    if not IsValid(body) then return end
+    if ent.BZCNHeadcrabModelPath ~= modelPath or not IsValid(ent.BZCNHeadcrabModel) then
+        if IsValid(ent.BZCNHeadcrabModel) then ent.BZCNHeadcrabModel:Remove() end
+        local model = ClientsideModel(modelPath, RENDERGROUP_OPAQUE)
+        if not IsValid(model) then return end
+        model:SetNoDraw(true)
+        ent.BZCNHeadcrabModel = model
+        ent.BZCNHeadcrabModelPath = modelPath
+        ent:CallOnRemove("BZCN_RemoveAttachedHeadcrab", function(owner)
+            if IsValid(owner.BZCNHeadcrabModel) then owner.BZCNHeadcrabModel:Remove() end
+            owner.BZCNHeadcrabModel = nil
+        end)
+    end
+
+    local bone = body:LookupBone("ValveBiped.Bip01_Head1")
+        or body:LookupBone("ValveBiped.Bip01_Spine4")
+    if not bone then return end
+    local matrix = body:GetBoneMatrix(bone)
+    if not matrix then return end
+    local pos, ang = LocalToWorld(Vector(-1, 0, 0), Angle(-90, -90, -20),
+        matrix:GetTranslation(), matrix:GetAngles())
+    local model = ent.BZCNHeadcrabModel
+    if not IsValid(model) then return end
+    model:SetRenderOrigin(pos)
+    model:SetRenderAngles(ang)
+    model:SetupBones()
+    model:DrawModel()
+end
+
 hook.Add("PostDrawOpaqueRenderables", "BZCN_FancyNPCAccessories", function(depth, skybox)
     if skybox then return end
     if not istable(hg) or not istable(hg.Accessories) then return end
@@ -122,6 +177,7 @@ hook.Add("PostDrawOpaqueRenderables", "BZCN_FancyNPCAccessories", function(depth
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if IsManagedHumanNPC(ent) then
             RenderNPCAccessories(ent)
+            RenderAttachedHeadcrab(ent)
         end
     end
 end)
