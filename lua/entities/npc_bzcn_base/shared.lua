@@ -417,8 +417,34 @@ function ENT:TryBZCNClimb()
     return true
 end
 
+local function IsBZCNSitSequence(ent)
+    if not IsValid(ent) or not ent.GetSequenceName or not ent.GetSequence then return false end
+    local ok, name = pcall(ent.GetSequenceName, ent, ent:GetSequence())
+    if not ok or not isstring(name) then return false end
+    name = string.lower(name)
+    return name == "sit" or name == "sitting"
+        or string.sub(name, 1, 4) == "sit_"
+        or string.sub(name, 1, 8) == "sitting_"
+        or string.find(name, "_sit_", 1, true) ~= nil
+        or string.find(name, "chair_sit", 1, true) ~= nil
+end
+
 function ENT:BodyUpdate()
     if not IsValid(self) then return end
+
+    -- Preserve sit sequences started by Z-City's interaction code. Player
+    -- animation hooks are not run for NextBots, so ordinary locomotion would
+    -- otherwise replace the pose while the navigation coroutine pushes forward.
+    if IsBZCNSitSequence(self) and self:OnGround() then
+        if self.loco then
+            self.loco:SetDesiredSpeed(0)
+            local velocity = self.loco:GetVelocity()
+            self.loco:SetVelocity(Vector(0, 0, velocity.z))
+        end
+        self:SetPlaybackRate(1)
+        self:FrameAdvance()
+        return
+    end
 
     local velocity = self.loco and self.loco:GetVelocity() or self:GetVelocity()
     local speed = velocity:Length2D()
