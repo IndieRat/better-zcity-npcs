@@ -34,6 +34,14 @@ local function SquadFaction(ent)
     local class = ClassKey(ent)
     local profile = ent.BZCNClassProfile or {}
     local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+
+    -- Optional experimental horde mind: headcrabs and zombies can coordinate
+    -- in the same lightweight squad graph, without forcing this on every server.
+    if BZCN.RuleEnabled and BZCN.RuleEnabled("zombie_horde_mind")
+        and (profile.ZombieStyle == true or profile.HeadcrabStyle == true
+            or faction == "zombie" or faction == "headcrab") then
+        return "Zombie"
+    end
     if ent.BZCNGoodCopDefected or class == "rebel" or faction == "rebel"
         or string.find(class, "rebel", 1, true) then
         return "Rebel"
@@ -135,6 +143,11 @@ end
 hook.Add("Think", "BZCN_SquadMembershipDirector", function()
     if (BZCN.NextSquadDirectorThink or 0) > CurTime() then return end
     BZCN.NextSquadDirectorThink = CurTime() + THINK_INTERVAL
+
+    if BZCN.RuleEnabled and not BZCN.RuleEnabled("npc_squad_tactics") then
+        ClearNonSquadMembership({})
+        return
+    end
 
     local groups, included = FindSquads()
     ElectLeaders(groups)
