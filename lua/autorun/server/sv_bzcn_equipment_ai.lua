@@ -2241,6 +2241,49 @@ local function UpdateCompanionCarryPhysics(owner, state)
     return true
 end
 
+-- Native Z-City furry regeneration adapted to managed NPCs. The upstream
+-- player-class hook is player-only, so apply the same wound/blood recovery to
+-- furry NextBots without clearing their organism or resetting conversion state.
+hook.Add("Think", "BZCN_FurryNPCRegeneration", function()
+    local now = CurTime()
+    for _, owner in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not IsValid(owner) or not BZCN.IsManaged(owner) then continue end
+        local profile = owner.BZCNClassProfile or {}
+        if profile.FurryStyle ~= true then continue end
+        local last = tonumber(owner.BZCNFurryRegenAt) or now
+        local dt = math.Clamp(now - last, 0, 0.1)
+        owner.BZCNFurryRegenAt = now
+        if dt <= 0 then continue end
+        local org = owner.organism or owner.BZCN_Organism
+        if not istable(org) then continue end
+        org.blood = math.Approach(tonumber(org.blood) or 5000, 5000, dt * 60)
+        for _, field in ipairs({"wounds", "arterialwounds"}) do
+            if istable(org[field]) then
+                for _, wound in pairs(org[field]) do
+                    if istable(wound) and isnumber(wound[1]) then wound[1] = math.max(wound[1] - dt * 0.6, 0) end
+                end
+            end
+        end
+        org.internalBleed = math.max((tonumber(org.internalBleed) or 0) - dt * 0.6, 0)
+        local regen = dt / 60
+        for _, field in ipairs({"lleg", "rleg", "rarm", "larm", "chest", "pelvis", "spine1", "spine2", "spine3", "skull", "liver", "intestines", "heart", "stomach"}) do
+            if isnumber(org[field]) then org[field] = math.max(org[field] - regen, 0) end
+        end
+        if isnumber(org.brain) then org.brain = math.max(org.brain - regen * 0.1, 0) end
+        for _, side in ipairs({"lungsR", "lungsL"}) do
+            if istable(org[side]) then
+                for i = 1, 2 do
+                    if isnumber(org[side][i]) then org[side][i] = math.max(org[side][i] - regen, 0) end
+                end
+            end
+        end
+        for _, field in ipairs({"llegdislocation", "rlegdislocation", "rarmdislocation", "larmdislocation", "jawdislocation"}) do
+            if org[field] ~= nil then org[field] = false end
+        end
+        if isnumber(org.hungry) then org.hungry = 0 end
+    end
+end)
+
 hook.Add("Think", "BZCN_CompanionCarryRuntimeThink", function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         local state = IsValid(ent) and ent.BZCNCompanionCarry or nil
