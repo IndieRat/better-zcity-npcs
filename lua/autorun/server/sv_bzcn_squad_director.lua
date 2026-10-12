@@ -24,6 +24,9 @@ local function ClassKey(ent)
     if (not isstring(class) or class == "") and istable(ent.BZCNClassProfile) then
         class = ent.BZCNClassProfile.ClassName
     end
+    if (not isstring(class) or class == "") and isfunction(ent.GetClass) then
+        class = ent:GetClass()
+    end
     return string.lower(tostring(class or ""))
 end
 
@@ -36,8 +39,10 @@ local function SquadFaction(ent)
         return "Rebel"
     end
     -- Metrocops share Combine disposition in Z-City, but remain solo officers.
-    if class == "metrocop" or class == "police" then return nil end
-    if class == "combine" or faction == "combine" then return "Combine" end
+    if class == "metrocop" or class == "police"
+        or string.find(class, "metrocop", 1, true) ~= nil then return nil end
+    if class == "combine" or faction == "combine"
+        or string.find(class, "combine", 1, true) ~= nil then return "Combine" end
     return nil
 end
 
@@ -201,7 +206,15 @@ local function CombatRole(member, leader)
     local weaponClass = member.BZCN_SelectedWeapon or profile.WeaponClass or ""
     local isMedical = BZCN and isfunction(BZCN.IsMedicalWeaponClass)
         and BZCN.IsMedicalWeaponClass(weaponClass)
-    local ranged = profile.Ranged == true and weaponClass ~= "weapon_hands_sh" and not isMedical
+    local stored = isstring(weaponClass) and weapons and weapons.GetStored
+        and weapons.GetStored(weaponClass) or nil
+    local primary = istable(stored) and istable(stored.Primary) and stored.Primary or nil
+    local ammo = primary and primary.Ammo
+    local clip = primary and tonumber(primary.ClipSize) or 0
+    local registeredRanged = primary ~= nil and weaponClass ~= "weapon_hands_sh"
+        and isstring(ammo) and ammo ~= "" and ammo ~= "none" and clip > 0
+    local ranged = (profile.Ranged == true or registeredRanged)
+        and weaponClass ~= "weapon_hands_sh" and not isMedical
     if ranged and slot >= 4 and slot % 2 == 0 then return "support" end
     if slot % 2 == 0 then return "flank_left" end
     return "flank_right"
