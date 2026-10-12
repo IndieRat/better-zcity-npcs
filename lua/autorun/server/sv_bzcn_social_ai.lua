@@ -57,6 +57,17 @@ local function IsManagedNPC(ent)
         and not ent:IsPlayer() and ent:Health() > 0
 end
 
+local function IsStrictCombine(ent)
+    if not IsValid(ent) then return false end
+    local className = string.lower(tostring(ent.PlayerClassName
+        or (ent.GetNW2String and ent:GetNW2String("PlayerClassName", ""))
+        or ent.BZCNClass or ""))
+    local profile = ent.BZCNClassProfile or {}
+    local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+    return className == "combine" or className == "metrocop"
+        or faction == "combine"
+end
+
 local function IsFurry(ent)
     if not IsValid(ent) then return false end
     local profile = ent.BZCNClassProfile
@@ -243,7 +254,8 @@ local function ReactToPhrase(playerEnt, soundPath, context)
         local distance = npc:GetPos():DistToSqr(playerEnt:GetPos())
         if distance > 780 * 780 then continue end
 
-        local perNPCDelay = hostile and 4 or 2.5
+        local strictCombine = IsStrictCombine(npc)
+        local perNPCDelay = strictCombine and (hostile and 18 or 32) or (hostile and 4 or 2.5)
         local urgentSignal = string.find(signal, "help", 1, true)
             or string.find(signal, "medic", 1, true)
             or string.find(signal, "backup", 1, true)
@@ -252,11 +264,14 @@ local function ReactToPhrase(playerEnt, soundPath, context)
             or string.find(signal, "yell", 1, true)
             or string.find(signal, "scream", 1, true)
             or string.find(signal, "runforyourlife", 1, true)
+        if strictCombine and not urgentSignal and math.random(1, 8) ~= 1 then continue end
         if now < (npc.BZCNNextSocialReactionAt or 0) and not urgentSignal then continue end
         npc.BZCNNextSocialReactionAt = now + (urgentSignal and 0.8 or perNPCDelay)
 
-        local chosenGesture = hostile and "disagree" or gesture
-        PlayNPCGesture(npc, chosenGesture)
+        if not strictCombine then
+            local chosenGesture = hostile and "disagree" or gesture
+            PlayNPCGesture(npc, chosenGesture)
+        end
         local chosenContext = hostile and "Scared" or responseContext
         local chosenKind = hostile and "answer" or kind
         -- Emergency/help callouts outrank ambient phrase cooldowns, just as
@@ -365,9 +380,14 @@ timer.Create("BZCN_NPC_Social_Network", 0.8, 0, function()
             if not responded and CurTime() >= (npc.BZCNNextNPCSocialAt or 0)
                 and not EntityIsHostileTo(npc, other)
                 and not EntityIsHostileTo(other, npc)
-                and math.random(1, 5) == 1 then
-                npc.BZCNNextNPCSocialAt = CurTime() + math.Rand(8, 16)
-                PlayNPCGesture(npc, math.random(1, 3) == 1 and "wave" or "agree")
+                and (IsStrictCombine(npc)
+                    and math.random(1, 18) == 1 or not IsStrictCombine(npc)
+                    and math.random(1, 5) == 1) then
+                npc.BZCNNextNPCSocialAt = CurTime() + (IsStrictCombine(npc)
+                    and math.Rand(45, 80) or math.Rand(8, 16))
+                if not IsStrictCombine(npc) then
+                    PlayNPCGesture(npc, math.random(1, 3) == 1 and "wave" or "agree")
+                end
                 PlayNPCPhrase(npc, "ambient", IsFurry(npc) and nil or "Satisfied")
                 responded = true
             end
@@ -539,10 +559,12 @@ timer.Create("BZCN_Social_IdleActivity", 3, 0, function()
                 break
             end
         end
-        npc.BZCNNextIdleSocialAt = now + math.Rand(24, 45)
+        local strictCombine = IsStrictCombine(npc)
+        npc.BZCNNextIdleSocialAt = now + (strictCombine and math.Rand(75, 140) or math.Rand(24, 45))
         if not IsValid(nearbyPlayer) then continue end
+        if strictCombine and math.random(1, 5) ~= 1 then continue end
 
-        if math.random(1, 3) == 1 then
+        if not strictCombine and math.random(1, 3) == 1 then
             PlayNPCGesture(npc, IsFurry(npc) and "wave" or (math.random(1, 2) == 1 and "wave" or "agree"))
         end
         PlayNPCPhrase(npc, "ambient", IsFurry(npc) and nil or "Satisfied")
