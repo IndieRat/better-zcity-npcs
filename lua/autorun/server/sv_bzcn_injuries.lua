@@ -285,6 +285,40 @@ local function PullZCityOrganism(owner, state)
     return true
 end
 
+local function PublishZCityWoundTables(ent, owner, state)
+    if not IsValid(owner) then return end
+
+    -- The native organism is the source of truth. Keep the adapter's wound
+    -- references pointed at its current arrays; Z-City can replace these
+    -- arrays during Org Clear, so cached references must be refreshed.
+    local org = owner.organism
+    if not istable(org) then org = owner.BZCN_Organism end
+    if not istable(org) then return end
+
+    if not istable(org.wounds) then
+        org.wounds = istable(state.wounds) and state.wounds or {}
+    end
+    if not istable(org.arterialwounds) then
+        org.arterialwounds = istable(state.arterialwounds) and state.arterialwounds or {}
+    end
+
+    state.wounds = org.wounds
+    state.arterialwounds = org.arterialwounds
+    owner.BZCN_Organism = org
+
+    -- Z-City's blood/visual integrations also read these NetVar keys. Publish
+    -- the same tables on both the standing NextBot and its temporary ragdoll,
+    -- never copied snapshots that can diverge after a fake/get-up transition.
+    local function Publish(target)
+        if not IsValid(target) or not isfunction(target.SetNetVar) then return end
+        pcall(target.SetNetVar, target, "wounds", org.wounds)
+        pcall(target.SetNetVar, target, "arterialwounds", org.arterialwounds)
+    end
+
+    Publish(owner)
+    if ent ~= owner then Publish(ent) end
+end
+
 local function EnsureZCityOrganism(owner)
     if not IsValid(owner) then return nil, false end
 
@@ -488,6 +522,7 @@ local function SyncEntity(ent, state)
     SetNWBool(ent, "BZCNNPCDowned", state.downed)
     SetNWBool(ent, "BZCNNPCCrawling", state.crawling)
     SetNWBool(ent, "BZCNNPCGettingUp", state.gettingUp)
+    PublishZCityWoundTables(ent, owner, state)
 end
 
 function Support.Attach(ent)
