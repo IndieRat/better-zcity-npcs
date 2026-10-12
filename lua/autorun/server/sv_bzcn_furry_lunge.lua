@@ -215,9 +215,11 @@ timer.Create("BZCN_FurryStagedPounceContact", 0.04, 0, function()
         local targetCenter = targetBody:WorldSpaceCenter()
         if attackerCenter:DistToSqr(targetCenter) > 76 * 76 then continue end
 
+        -- Keep the trace filter dense: nil ragdolls create holes in Lua
+        -- arrays, and util.TraceLine may then stop filtering at the first hole.
         local line = util.TraceLine({
             start = attackerCenter, endpos = targetCenter,
-            filter = {ent, rag, target, targetBody}, mask = MASK_SOLID
+            filter = {ent, target, targetBody}, mask = MASK_SOLID
         })
         if line.Hit and line.Fraction < 0.98 then continue end
 
