@@ -220,6 +220,7 @@ BZCN.RegisterClass("headcrab_zombie", {
     AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     MedicalRange = 0,
     Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {}}
+})
 
 local function NetworkKey(key, kind)
     return "BZCN_NV_" .. kind .. "_" .. tostring(key)
