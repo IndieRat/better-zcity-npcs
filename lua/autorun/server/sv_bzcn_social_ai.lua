@@ -688,13 +688,15 @@ local function RestoreTrustAfterHealing(healer, target, itemClass)
     if not IsValid(healer) or not IsManagedNPC(target) then return end
     target.BZCNBefriendedPlayers = target.BZCNBefriendedPlayers or setmetatable({}, {__mode = "k"})
     target.BZCNBefriendedPlayers[healer] = CurTime() + 120
-    AddHumanBond(target, healer, 14, "healing")
     if target.BZCNHostileOffender == healer then
         target.BZCNHostileOffender = nil
         target.BZCNHostileOffenderUntil = nil
         target.BZCNOffendedAttackAt = nil
     end
     if target.BZCNEnemy == healer then target.BZCNEnemy = nil end
+    -- Clear an active grievance first so the positive care event can contribute
+    -- to the relationship instead of being rejected by the hostility gate.
+    AddHumanBond(target, healer, 14, "healing")
     hook.Run("BZCN_NPCTrustRestored", target, healer, itemClass)
     if not IsUnavailableForSocial(target) then
         PlayNPCGesture(target, "agree")
