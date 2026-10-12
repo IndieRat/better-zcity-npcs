@@ -199,7 +199,11 @@ timer.Create("BZCN_FurryStagedPounceContact", 0.04, 0, function()
             ent.BZCNFurryPounceState = nil
             continue
         end
-        if now - (tonumber(pounce.startedAt) or now) < 0.10 then continue end
+        -- Don't let an early overlap consume the impact before the boost
+        -- has handed control to the fake ragdoll (including ragdoll creation).
+        if now < (tonumber(pounce.boostUntil) or ((tonumber(pounce.startedAt) or now) + 0.16)) + 0.05 then
+            continue
+        end
 
         local support = hg and hg.BZCNNPCSupport
         local rag = IsValid(pounce.rag) and pounce.rag
