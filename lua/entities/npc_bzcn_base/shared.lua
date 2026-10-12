@@ -169,6 +169,54 @@ function ENT:GetBZCNMovementSequence(speed, state)
         airborne = {"jump_all", "jump", "jump_start", "jump_holding", "fall", "jump_fall", "run_all", "walk_all"},
         standing = {"idle_all_01", "idle_all", "idle_unarmed", "idle", "idle01", "idle_subtle"}
     }
+    local profile = self.BZCNClassProfile or {}
+
+    -- Monster player models have their own HL2 activity sets, not the citizen
+    -- IXAnims tables. Prefer real headcrab/zombie sequences before generic
+    -- citizen translations so they keep their characteristic gait and attacks.
+    if profile.HeadcrabStyle == true then
+        local creatureNames
+        if state == "airborne" or self.BZCNHeadcrabPounce then
+            creatureNames = {"jumpattack", "jump_attack", "attack_jump", "jump", "attack1", "run"}
+        elseif state == "standing" then
+            creatureNames = {"idle", "idle1", "idle2", "idle_all", "idle01"}
+        elseif state == "walking" then
+            creatureNames = {"walk", "run", "idle"}
+        else
+            creatureNames = {"run", "walk", "idle"}
+        end
+        local sequence = GetFirstSequence(self, creatureNames)
+        if sequence >= 0 then return sequence end
+        local activity = (state == "standing" and ACT_IDLE)
+            or (state == "walking" and ACT_WALK) or ACT_RUN
+        if isnumber(activity) and self.SelectWeightedSequence then
+            local ok, selected = pcall(self.SelectWeightedSequence, self, activity)
+            if ok and IsUsableSequence(self, selected) then return selected end
+        end
+        return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
+    elseif profile.ZombieStyle == true then
+        local zombieNames
+        if state == "standing" then
+            zombieNames = {"idle", "idle1", "idle2", "idle_all", "idle01"}
+        elseif state == "walking" then
+            zombieNames = {"walk", "walk_all", "run"}
+        elseif state == "airborne" then
+            zombieNames = {"jump_slam", "jump", "run"}
+        else
+            zombieNames = {"run", "run_all", "walk"}
+        end
+        local sequence = GetFirstSequence(self, zombieNames)
+        if sequence >= 0 then return sequence end
+        local activity = state == "standing" and _G.ACT_HL2MP_IDLE_ZOMBIE
+            or state == "walking" and _G.ACT_HL2MP_WALK_ZOMBIE_01
+            or _G.ACT_HL2MP_RUN_ZOMBIE
+        if isnumber(activity) and self.SelectWeightedSequence then
+            local ok, selected = pcall(self.SelectWeightedSequence, self, activity)
+            if ok and IsUsableSequence(self, selected) then return selected end
+        end
+        return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
+    end
+
     if not (hg and hg.IXAnims and istable(hg.IXAnims)) then
         return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
     end
@@ -178,7 +226,6 @@ function ENT:GetBZCNMovementSequence(speed, state)
         return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
     end
 
-    local profile = self.BZCNClassProfile or {}
     local modelPath = string.lower(self:GetModel() or "")
     if self.BZCNAnimCacheModel ~= modelPath then
         self.BZCNAnimSequenceCache = {}
