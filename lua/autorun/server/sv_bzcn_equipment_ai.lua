@@ -1444,9 +1444,15 @@ local function NeedsMedicalAttention(target)
     local healthFraction = math.Clamp(target:Health() / maxHealth, 0, 1)
     local lowHealth = target:Health() < maxHealth * 0.7
 
-    -- Native NPCs outside the organism system still need basic first aid when
-    -- they have taken recent damage and lost meaningful health.
+    -- Player damage timestamps are not guaranteed to be mirrored onto the
+    -- player entity by every Z-City damage path. Do not require that private
+    -- timestamp before offering basic aid to a visibly injured player.
     if not hasOrganism then
+        if target:IsPlayer() and lowHealth then
+            return true, 5 + (1 - healthFraction) * 10
+        end
+        -- Native NPCs outside the organism system still need recent damage
+        -- before a modest health deficit is treated as a medical need.
         if lowHealth and recentlyHurt then
             return true, 4 + (1 - healthFraction) * 8
         end
@@ -1482,7 +1488,16 @@ local function IsAllyToHealer(healer, target)
 
     if isfunction(healer.IsBZCNAlly) then
         local ok, result = pcall(healer.IsBZCNAlly, healer, target)
-        if ok then return result == true end
+        if ok and result == true then return true end
+        -- Z-City player entities may be omitted from the NPC ally table even
+        -- when they are not hostile. For players only, fall back to the
+        -- explicit enemy classifier; never treat a player marked as an enemy
+        -- as a medical ally.
+        if target:IsPlayer() and isfunction(healer.IsBZCNEnemy) then
+            local enemyOK, enemy = pcall(healer.IsBZCNEnemy, healer, target)
+            if enemyOK and enemy == false then return true end
+        end
+        if ok then return false end
     end
     return false
 end
