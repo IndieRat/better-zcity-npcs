@@ -1599,9 +1599,10 @@ local function NeedsMedicalAttention(target)
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
     local shock = tonumber(org.shock) or 0
     local pain = tonumber(org.pain) or 0
-    local pulse = tonumber(org.pulse) or 0
+    local pulse = tonumber(org.pulse) or tonumber(org.pulseadd) or 0
     local oxygen = istable(org.o2) and tonumber(org.o2[1]) or nil
     local analgesia = tonumber(org.analgesia) or 0
+    local adrenaline = tonumber(org.adrenalineAdd) or 0
     local unconscious = org.otrub == true or org.needotrub == true
         or (tonumber(org.consciousness) ~= nil and tonumber(org.consciousness) <= 0.05)
     local overdoseConcern = analgesia >= 3
@@ -1626,11 +1627,10 @@ local function NeedsMedicalAttention(target)
         return false, 0
     end
 
-    local unstableVitals = shock >= 65 or unconscious
-        or (oxygen and oxygen < 8) or (pulse > 0 and pulse < 42) or pulse >= 145
     local urgent = (internalBleed > 0) or blood < 4200 or wounds > 0
-        or (shock >= 65) or unconscious or (oxygen and oxygen < 8)
-        or (pulse > 0 and pulse < 42) or pulse >= 145 or overdoseConcern
+        or shock >= 65 or unconscious or (oxygen and oxygen < 8)
+        or (pulse > 0 and pulse < 42) or pulse >= 145
+        or (pulse >= 135 and adrenaline >= 3) or overdoseConcern
         or (lowHealth and (recentlyHurt or healthFraction <= 0.35))
     if not urgent and pain < 75 then return false, 0 end
     local score = wounds * 3 + (internalBleed > 0 and 8 or 0)
@@ -1638,7 +1638,8 @@ local function NeedsMedicalAttention(target)
         + (shock >= 65 and 4 or 0) + (unconscious and 7 or 0)
         + (oxygen and oxygen < 8 and 7 or 0)
         + (pulse > 0 and pulse < 42 and 5 or 0)
-        + (pulse >= 145 and 4 or 0) + (overdoseConcern and 10 or 0)
+        + (pulse >= 145 and 4 or 0) + (pulse >= 135 and adrenaline >= 3 and 4 or 0)
+        + (overdoseConcern and 10 or 0)
     return true, score
 end
 
@@ -1896,14 +1897,17 @@ local function UseMedicalItem(healer, target, class)
     elseif class == "weapon_naloxone"
         and ((tonumber(org.analgesia) or 0) >= 3 or (tonumber(org.analgesiaAdd) or 0) >= 3)
         and (org.otrub or org.needotrub
+            or (tonumber(org.consciousness) ~= nil and tonumber(org.consciousness) <= 0.05)
             or (istable(org.o2) and (tonumber(org.o2[1]) or 100) < 8)
-            or ((tonumber(org.pulse) or 0) > 0 and (tonumber(org.pulse) or 0) < 42))
+            or ((tonumber(org.pulse) or tonumber(org.pulseadd) or 0) > 0
+                and (tonumber(org.pulse) or tonumber(org.pulseadd) or 0) < 42))
         and med.modeValues[1] > 0 then
         actions[#actions + 1] = 1
     elseif class == "weapon_adrenaline"
         and (shock >= 78 or org.otrub or org.needotrub
+            or (tonumber(org.consciousness) ~= nil and tonumber(org.consciousness) <= 0.05)
             or (istable(org.o2) and (tonumber(org.o2[1]) or 100) < 8)
-            or (tonumber(org.pulse) or 0) < 42)
+            or (tonumber(org.pulse) or tonumber(org.pulseadd) or 0) < 42)
         and med.modeValues[1] > 0 then
         actions[#actions + 1] = 1
     elseif class == "weapon_betablock"
