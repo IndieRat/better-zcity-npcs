@@ -54,7 +54,9 @@ BZCN.RegisterClass("default", {
 })
 
 BZCN.RegisterClass("Combine", {
-    Name = "Combine Soldier", PlayerClassName = "Combine", TeamName = "Combine",
+    Name = "Combine Soldier",
+    DisplayNames = {"Overwatch Unit", "Combine Unit", "Overwatch Soldier"},
+    PlayerClassName = "Combine", TeamName = "Combine",
     Model = "models/player/combine_soldier.mdl", Health = 140, Speed = 180,
     Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
@@ -66,7 +68,9 @@ BZCN.RegisterClass("Combine", {
 -- Z-City has a separate Metrocop player class, but it belongs to the same
 -- Combine faction for friendliness and targeting.
 BZCN.RegisterClass("Metrocop", {
-    Name = "Metro Police", PlayerClassName = "Metrocop", TeamName = "Combine",
+    Name = "Metro Police",
+    DisplayNames = {"Civil Protection Officer", "Metro Police Officer", "CP Unit"},
+    PlayerClassName = "Metrocop", TeamName = "Combine",
     Model = "models/player/police.mdl", Health = 115, Speed = 172,
     -- Civil Protection starts watchful instead of treating an ordinary player as
     -- hostile on sight. Attacks and recent ally-threat memory still escalate.
@@ -751,8 +755,20 @@ function BZCN.ApplyClass(ent, className, resetInventory)
         ent:SetNW2String("BZCNTeamName", ent.BZCN_TeamName)
         ent:SetNW2String("BZCNClass", profile.ClassName)
         ent:SetNW2String("PlayerClassName", profile.PlayerClassName)
-        ent:SetNW2String("BZCNDisplayName", profile.Name or profile.ClassName)
-        if ent.SetNWString then ent:SetNWString("PlayerName", profile.Name or profile.ClassName) end
+        local displayName = profile.Name or profile.ClassName
+        if istable(profile.DisplayNames) and #profile.DisplayNames > 0 then
+            displayName = profile.DisplayNames[math.random(#profile.DisplayNames)]
+            -- Give Combine/Civil Protection variants a short unit number so
+            -- the world identifier reads like an individual's name, not a class badge.
+            if profile.ClassName == "Combine" then
+                displayName = displayName .. " " .. string.format("%02d", math.random(1, 24))
+            elseif profile.ClassName == "Metrocop" then
+                displayName = displayName .. " " .. string.format("%02d", math.random(1, 18))
+            end
+        end
+        ent.BZCNDisplayName = displayName
+        ent:SetNW2String("BZCNDisplayName", displayName)
+        if ent.SetNWString then ent:SetNWString("PlayerName", displayName) end
     end
 
     local inventory = ent:GetNetVar("Inventory")
