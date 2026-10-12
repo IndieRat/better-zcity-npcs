@@ -73,8 +73,8 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
         -- Build momentum first: the bot accelerates into a short run-up instead
         -- of trying to leap from a stationary walk. Don't take over while its
         -- normal behavior is already making progress toward another task.
-        if elapsed < 0.72 and distance > 145 then
-            local speed = math.Clamp(190 + elapsed * 230, 190, 355)
+        if elapsed < 0.38 and distance > 170 then
+            local speed = math.Clamp(245 + elapsed * 300, 245, 390)
             ent.loco:SetDesiredSpeed(speed)
             ent.loco:Approach(target:GetPos(), 1)
             ent.loco:FaceTowards(target:GetPos())
@@ -86,8 +86,8 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
 
         -- The leap requires some approach speed or meaningful run-up movement.
         -- If boxed in, abandon the attempt rather than repeatedly jumping in place.
-        if groundSpeed < 95 and runupDistance < 28 then
-            if elapsed > 1.35 then
+        if groundSpeed < 75 and runupDistance < 18 then
+            if elapsed > 0.85 then
                 ent.BZCNFurryLungeCooldown = CurTime() + 1.5
                 ent.BZCNFurryLungeTarget = nil
                 ent.BZCNFurryRunupStartedAt = nil
