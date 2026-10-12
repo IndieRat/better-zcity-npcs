@@ -113,6 +113,7 @@ function FakeActor:Update(dt)
     dt = math.Clamp(tonumber(dt) or FrameTime(), 0, 0.05)
     local aim = self.aimTarget
     if self.mode == "crawl" then self:UpdateCrawl(dt); return end
+    if self.mode ~= "aim" and self.mode ~= "pounce" then return end
     local root = self.ragdoll:GetPhysicsObject()
     if not IsValid(root) or not root.ComputeShadowControl then return end
 
