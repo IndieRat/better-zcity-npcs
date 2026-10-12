@@ -105,15 +105,24 @@ end
 
 local function ClearNonSquadMembership(included)
     for _, ent in ipairs(ents.GetAll()) do
-        if not IsManaged(ent) or included[ent] or not ent.BZCNSquadID then continue end
+        if not IsValid(ent) or ent:IsPlayer() or included[ent] or not ent.BZCNSquadID then continue end
         ent.BZCNSquadFaction = nil
         ent.BZCNSquadID = nil
         ent.BZCNSquadLeader = nil
         ent.BZCNSquadSlot = nil
         ent.BZCNSquadGoal = nil
         ent.BZCNSquadGoalUntil = nil
+        ent.BZCNSquadCombatTarget = nil
+        ent.BZCNSquadCombatPosition = nil
+        ent.BZCNSquadCombatSeenAt = nil
+        ent.BZCNSquadCombatUntil = nil
+        ent.BZCNSquadCombatRole = nil
         ent:SetNW2Entity("BZCNSquadLeader", NULL)
+        ent:SetNW2Entity("BZCNSquadCombatTarget", NULL)
+        if ent.SetNW2Vector then ent:SetNW2Vector("BZCNSquadCombatPosition", vector_origin) end
         ent:SetNW2String("BZCNSquadID", "")
+        ent:SetNW2String("BZCNSquadCombatRole", "")
+        ent:SetNW2String("BZCNGroupTask", "idle")
         ent:SetNW2Bool("BZCNSquadIsLeader", false)
     end
 end
