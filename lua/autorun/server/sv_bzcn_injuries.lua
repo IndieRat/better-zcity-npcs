@@ -1257,6 +1257,13 @@ local function EnterDownedState(owner, reason)
 
     AttachRagdollWeapon(owner, rag, state)
 
+    -- Attach a controller to the visible physical proxy. Injury values decide
+    -- whether the body stays loose or uses low-to-ground crawl locomotion.
+    if BZCN and BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
+        local actor = BZCN.FakeActor.Attach(owner, rag, {crawlSpeed = 42, crawlAcceleration = 95})
+        if actor and isfunction(actor.SetInjuryState) then actor:SetInjuryState(state) end
+    end
+
     local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
     state.recoverTimer = timerName
     local duration = math.Clamp(2.8 + state.pain / 85, 2.8, 5.8)
@@ -2338,6 +2345,8 @@ timer.Create("BZCNNPCSupport_StateSync", 0.25, 0, function()
             SyncEntity(ent, state)
             if IsValid(ent.BZCNNPCRagdoll) then
                 SyncEntity(ent.BZCNNPCRagdoll, state)
+                local actor = ent.BZCNFakeActor
+                if actor and isfunction(actor.SetInjuryState) then actor:SetInjuryState(state) end
             end
         end
     end
