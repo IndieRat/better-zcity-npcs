@@ -486,8 +486,10 @@ function ENT:BodyUpdate()
             self:FrameAdvance()
         end
         if self.loco and speed > 5 then
-            local target = IsValid(self.BZCNEnemy) and self.BZCNEnemy:Health() > 0
-                and self.BZCNEnemy or nil
+            local target = CurTime() < (self.BZCNBodyFacingUntil or 0)
+                and IsValid(self.BZCNBodyFacingTarget)
+                and self.BZCNBodyFacingTarget:Health() > 0
+                and self.BZCNBodyFacingTarget or nil
             if target then
                 local aimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetPosition
                     and BZCNCombatActor.GetTargetPosition(target) or target:WorldSpaceCenter()
