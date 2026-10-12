@@ -206,7 +206,8 @@ function ENT:Initialize()
     if self.SetUseType then self:SetUseType(SIMPLE_USE) end
 
     if self.loco then
-        self.loco:SetDesiredSpeed(profile.Speed or self.MoveSpeed or 175)
+        self.loco:SetDesiredSpeed(BZCN.GetBaseMoveSpeed and BZCN.GetBaseMoveSpeed(self)
+            or profile.Speed or self.MoveSpeed or 190)
         self.loco:SetAcceleration(700)
         self.loco:SetDeceleration(900)
         self.loco:SetStepHeight(18)
@@ -269,6 +270,47 @@ function ENT:Initialize()
             local ok, result = pcall(hg.Appearance.GetRandomAppearance)
             if ok and istable(result) then
                 appearance = result
+
+                -- Keep names consistent across human classes, and deliberately mix
+                -- clothing channels so civilians do not all wear a matching set.
+                if BZCN and isfunction(BZCN.GetRandomHumanName) then
+                    appearance.AName = BZCN.GetRandomHumanName()
+                end
+                local playerModels = hg.Appearance.PlayerModels
+                local isFemale = false
+                if istable(playerModels) and isstring(appearance.AModel) then
+                    local modelInfo = (playerModels[1] and playerModels[1][appearance.AModel])
+                        or (playerModels[2] and playerModels[2][appearance.AModel])
+                    isFemale = istable(modelInfo) and modelInfo.sex == true or false
+                end
+                local clothingSets = hg.Appearance.Clothes
+                    and hg.Appearance.Clothes[isFemale and 2 or 1]
+                if istable(clothingSets) then
+                    local themes = {}
+                    for theme in pairs(clothingSets) do themes[#themes + 1] = theme end
+                    if #themes >= 2 then
+                        local function PickTheme(except)
+                            local choices = {}
+                            for _, theme in ipairs(themes) do
+                                if theme ~= except then choices[#choices + 1] = theme end
+                            end
+                            if #choices == 0 then choices = themes end
+                            return choices[math.random(#choices)]
+                        end
+                        local mainTheme = PickTheme(nil)
+                        local pantsTheme = PickTheme(mainTheme)
+                        local bootsTheme = PickTheme(mainTheme)
+                        if bootsTheme == pantsTheme and #themes > 2 then
+                            bootsTheme = PickTheme(pantsTheme)
+                        end
+                        appearance.AClothes = {
+                            main = mainTheme,
+                            pants = pantsTheme,
+                            boots = bootsTheme
+                        }
+                    end
+                end
+
                 -- Match Z-City's own NPC conversion appearance pipeline.
                 local applied, applyResult = pcall(hg.Appearance.ForceApplyAppearance, self, appearance)
                 appearanceApplied = applied and util.IsValidModel(self:GetModel())
@@ -298,6 +340,7 @@ function ENT:Initialize()
         if appearanceApplied and appearance then self.CurAppearance = table.Copy(appearance) end
         self.BZCNClassProfile.Model = self:GetModel()
         local displayName = (appearanceApplied and appearance and appearance.AName)
+            or (BZCN and isfunction(BZCN.GetRandomHumanName) and BZCN.GetRandomHumanName())
             or "Civilian"
         self.BZCNDisplayName = displayName
         self.PlayerName = displayName
@@ -1790,7 +1833,9 @@ function ENT:ChaseEnemy(target)
         if crawling then
             desiredSpeed = baseSpeed * physiologySpeed * 0.42
         elseif sprinting then
-            desiredSpeed = baseSpeed * physiologySpeed * (tonumber(profile.SprintSpeedMultiplier) or 1.45)
+            local globalSprintSpeed = BZCN and isfunction(BZCN.GetSprintMoveSpeed)
+                and BZCN.GetSprintMoveSpeed(self) or baseSpeed * 1.45
+            desiredSpeed = globalSprintSpeed * physiologySpeed
         elseif distance > sprintStart and stamina <= 8 then
             desiredSpeed = baseSpeed * physiologySpeed * 0.78
         end
@@ -1836,14 +1881,14 @@ function ENT:ChaseEnemy(target)
         self.loco:SetDesiredSpeed(desiredSpeed)
         local mustCompute = now >= nextPathCompute and (
             not path:IsValid()
-            or path:GetAge() > 0.4
+            or path:GetAge() > 0.65
             or not isvector(pathGoal)
-            or pathGoal:DistToSqr(goalPos) > 64 * 64
+            or pathGoal:DistToSqr(goalPos) > 128 * 128
         )
         if mustCompute then
             local computed = TryComputePathToGoal(path, self, goalPos)
             pathGoal = goalPos
-            nextPathCompute = now + (computed and 0.4 or 0.85)
+            nextPathCompute = now + (computed and 0.55 or 0.85)
             if not computed then
                 TryOpenDoorToward(self, goalPos)
                 self.BZCNPathRetries = (self.BZCNPathRetries or 0) + 1
