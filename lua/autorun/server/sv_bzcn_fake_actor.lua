@@ -117,7 +117,7 @@ function FakeActor:GetLookAngles()
     return result
 end
 
-function FakeActor:UpdateUpperPose()
+function FakeActor:UpdateUpperPose(passive)
     local rag = self.ragdoll
     if not IsValid(rag) then return end
 
@@ -135,8 +135,15 @@ function FakeActor:UpdateUpperPose()
     headAngle:RotateAroundAxis(headAngle:Forward(), 90)
     headAngle:RotateAroundAxis(headAngle:Up(), 90)
 
-    self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.12, 55, 28)
-    self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.09, 75, 38)
+    -- In loose mode these are deliberately weak tracking forces: impacts and
+    -- gravity remain authoritative. Crawl/aim modes use firmer articulation.
+    if passive then
+        self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.18, 18, 14)
+        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.15, 28, 18)
+    else
+        self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.12, 55, 28)
+        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.09, 75, 38)
+    end
 
     if rag.SetEyeTarget then
         local eyeDirection = look:Forward()
@@ -192,6 +199,7 @@ function FakeActor:Update(dt)
     dt = math.Clamp(tonumber(dt) or FrameTime(), 0, 0.05)
     local aim = self.aimTarget
     if self.mode == "crawl" then self:UpdateCrawl(dt); return end
+    if self.mode == "loose" then self:UpdateUpperPose(true); return end
     if self.mode ~= "aim" and self.mode ~= "pounce" then return end
     self:UpdateUpperPose()
     local root = self.ragdoll:GetPhysicsObject()
