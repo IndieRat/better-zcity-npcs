@@ -241,13 +241,27 @@ function ENT:Initialize()
     local inventory = isfunction(self.GetNetVar) and self:GetNetVar("Inventory") or nil
     if not istable(inventory) then inventory = {} end
     inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    inventory.Items = istable(inventory.Items) and inventory.Items or {}
     inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
     inventory.Armor = istable(inventory.Armor) and inventory.Armor or {}
     inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
+
+    -- Keep every inventory read path pointed at the same per-NPC table.
+    -- The adapter reads inventory first, while Z-City UI/loot code may read
+    -- Inventory or the Inventory netvar. Initializing only one alias lets
+    -- callers observe different schemas and drops Items on newly spawned bots.
+    self.inventory = inventory
+    self.Inventory = inventory
+    self.armors = inventory.Armor
     if isfunction(self.SetNetVar) then
-        self.inventory = inventory
         self:SetNetVar("Inventory", inventory)
-        if not istable(self:GetNetVar("Armor")) then self:SetNetVar("Armor", {}) end
+        local armorData = isfunction(self.GetNetVar) and self:GetNetVar("Armor") or nil
+        if not istable(armorData) or next(armorData) == nil then
+            self:SetNetVar("Armor", inventory.Armor)
+        else
+            inventory.Armor = armorData
+            self.armors = armorData
+        end
     end
     local owned = inventory.Weapons
     local available = {}
