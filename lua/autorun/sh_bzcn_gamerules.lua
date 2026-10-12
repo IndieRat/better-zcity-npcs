@@ -27,6 +27,36 @@ local RULES = {
         label = "Armed civilians resist fleeing",
         help = "Civilians with a weapon or ranged loadout do not use the normal flee behavior.",
         default = "1"
+    },
+    furry_pounce_build_up = {
+        label = "Furry pounce build-up ragdoll",
+        help = "Give furry pounces a short upright launch boost before entering fake-ragdoll control.",
+        default = "1"
+    },
+    headcrab_pounce = {
+        label = "Headcrab leap attacks",
+        help = "Let managed headcrabs use charged hops to close on targets.",
+        default = "1"
+    },
+    headcrab_infection = {
+        label = "Headcrab infection and zombification",
+        help = "A successful headcrab pounce can start Z-City's infection timer and eventually turn victims into zombies.",
+        default = "1"
+    },
+    npc_squad_tactics = {
+        label = "Combine / Rebel squad tactics",
+        help = "Enable squad grouping, role selection, and coordinated combat positions.",
+        default = "1"
+    },
+    zombie_horde_mind = {
+        label = "Zombie horde mind",
+        help = "Experimental: zombie NPCs and headcrabs can form loose shared horde squads.",
+        default = "0"
+    },
+    civilian_panic_spread = {
+        label = "Civilian panic spreads",
+        help = "Nearby civilians may flee too when they see a civilian panic in response to a furry threat.",
+        default = "1"
     }
 }
 
