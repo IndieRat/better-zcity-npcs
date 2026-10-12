@@ -36,7 +36,7 @@ local function NormalizeAccessoryList(accessories)
         Add(accessories)
     elseif istable(accessories) then
         -- The stock generator uses an array, but inventory/appearance adapters
-        -- may send keyed slot maps such as {head = "fedora"} or {[name] = true.
+        -- may send keyed slot maps such as head = "fedora" or [name] = true.
         for i = 1, #accessories do Add(accessories[i]) end
         for key, value in pairs(accessories) do
             if isstring(value) then
@@ -90,6 +90,28 @@ local function RenderNPCAccessories(ent)
     -- equipment APIs that ordinary NextBots do not expose. Temporarily bridge
     -- just those lookups, restore every value immediately after drawing.
     local body = IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or ent
+
+    -- Z-City's ThatPlyIsFemale() calls Player:GetSubModels() when its model
+    -- cache is cold. NextBots do not expose that Player-only method, so seed
+    -- the exact cache fields it already understands before drawing accessories.
+    local appearance = istable(ent.CurAppearance) and ent.CurAppearance or nil
+    local sexReference = appearance and appearance.AModel or ent:GetModel()
+    local sexIndex = BZCN and isfunction(BZCN.GetModelSex)
+        and BZCN.GetModelSex(sexReference) or nil
+    if sexIndex == nil and IsValid(body) and BZCN and isfunction(BZCN.GetModelSex) then
+        sexIndex = BZCN.GetModelSex(body:GetModel())
+    end
+    -- If the custom model isn't in either sex catalogue, use the native
+    -- renderer's existing male fallback while still bypassing GetSubModels().
+    sexIndex = sexIndex or 1
+    local oldBodyCacheModel, oldBodySex
+    if IsValid(body) then
+        oldBodyCacheModel = body.CahceModel -- native misspelling is intentional
+        oldBodySex = body.bSex
+        body.CahceModel = body:GetModel()
+        body.bSex = sexIndex == 2
+    end
+
     local oldTransmit = ent.shouldTransmit
     local oldNotSeen = ent.NotSeen
     local oldBodyTransmit, oldBodyNotSeen
@@ -126,6 +148,8 @@ local function RenderNPCAccessories(ent)
     if IsValid(body) then
         body.shouldTransmit = oldBodyTransmit
         body.NotSeen = oldBodyNotSeen
+        body.CahceModel = oldBodyCacheModel
+        body.bSex = oldBodySex
     end
     if not isfunction(oldGetEquipmentBySlot) then
         ent.GetEquipmentBySlot = oldGetEquipmentBySlot
