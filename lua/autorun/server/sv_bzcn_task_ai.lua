@@ -723,7 +723,8 @@ local function FindDroppedWeapon(ent)
         if not isstring(class) or class == "" or owned[class] then continue end
         local stored = weapons and weapons.GetStored and weapons.GetStored(class)
         if not istable(stored) or not istable(stored.Primary) then continue end
-        if class == "weapon_hands_sh" or class == "weapon_medkit_sh" or class == "weapon_bandage_sh" then continue end
+        if class == "weapon_hands_sh" or (BZCN.IsMedicalWeaponClass
+            and BZCN.IsMedicalWeaponClass(class)) then continue end
         local d = ent:GetPos():DistToSqr(item:GetPos())
         if not bestDistance or d < bestDistance then best, bestDistance = item, d end
     end
@@ -809,6 +810,59 @@ function Tasks.TryPickupWeapon(ent)
     item:Remove()
     ent:EmitSound("items/ammo_pickup.wav", 60, math.random(95, 105), 0.6)
     hook.Run("BZCN_NPCWeaponScavenged", ent, class)
+    return true
+end
+
+
+-- Medical pickups are separate from firearm scavenging: retain each item's
+-- native class and treatment supply so the triage AI can choose by symptoms.
+function Tasks.TryPickupMedicalItem(ent)
+    if not IsAvailable(ent) or not BZCN.IsMedicalWeaponClass then return false end
+    local kind = GetKind(ent)
+    if kind ~= "rebel" and kind ~= "combine" and kind ~= "metrocop" then return false end
+
+    local inventory = BZCN.GetNetVar and BZCN.GetNetVar(ent, "Inventory", {}) or ent.inventory or {}
+    inventory = istable(inventory) and inventory or {}
+    inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+    inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
+
+    local best, bestDistance
+    for _, item in ipairs(ents.FindInSphere(ent:GetPos(), 112)) do
+        if not IsValid(item) or not isfunction(item.IsWeapon) or not item:IsWeapon() then continue end
+        if IsValid(item:GetOwner()) or IsValid(item:GetParent()) then continue end
+        local class = item:GetClass()
+        if not BZCN.IsMedicalWeaponClass(class) or inventory.Weapons[class] ~= nil then continue end
+        local stored = weapons and weapons.GetStored and weapons.GetStored(class)
+        if not istable(stored) then continue end
+        local distance = ent:GetPos():DistToSqr(item:GetPos())
+        if not bestDistance or distance < bestDistance then
+            best, bestDistance = item, distance
+        end
+    end
+    if not IsValid(best) then return false end
+
+    local class = best:GetClass()
+    local values = istable(best.modeValues) and table.Copy(best.modeValues) or nil
+    if not values and istable(best.modeValuesdef) then
+        values = {}
+        for mode, definition in pairs(best.modeValuesdef) do
+            values[mode] = istable(definition) and tonumber(definition[1]) or tonumber(definition)
+        end
+    end
+    inventory.Weapons[class] = {
+        modeValues = values or {},
+        bloodtype = isstring(best.bloodtype) and best.bloodtype or nil,
+        furryinfected = best.furryinfected == true or nil
+    }
+    if BZCN.SetNetVar then
+        BZCN.SetNetVar(ent, "Inventory", inventory)
+    else
+        ent.inventory, ent.Inventory = inventory, inventory
+    end
+    best:Remove()
+    ent:EmitSound("items/ammo_pickup.wav", 56, math.random(95, 105), 0.5)
+    hook.Run("BZCN_NPCMedicalSupplyScavenged", ent, class)
     return true
 end
 
@@ -921,7 +975,10 @@ timer.Create("BZCN_TaskWeaponPickup", 0.75, 0, function()
         if not IsAvailable(ent) then continue end
         local kind = GetKind(ent)
         if kind == "metrocop" or kind == "rebel" or kind == "combine" then
-            if not Tasks.TryPickupWeapon(ent) then Tasks.TryPickupAmmo(ent) end
+            if not Tasks.TryPickupWeapon(ent)
+                and not (Tasks.TryPickupMedicalItem and Tasks.TryPickupMedicalItem(ent)) then
+                Tasks.TryPickupAmmo(ent)
+            end
         end
     end
 end)
