@@ -14,13 +14,13 @@ local TASK_POOLS = {
         {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"comfort", 2}, {"hold", 1}
     },
     combine = {
-        {"squad", 4}, {"patrol", 3}, {"hold", 3}, {"cover", 3}, {"pickup", 2}, {"rescue", 2}, {"sit", 1}
+        {"squad", 4}, {"hold", 4}, {"cover", 4}, {"pickup", 2}, {"rescue", 2}, {"sit", 1}
     },
     metrocop = {
         {"guard", 5}, {"patrol", 2}, {"observe", 4}, {"hold", 2}, {"pickup", 5}, {"cover", 1}, {"rescue", 2}, {"sit", 2}
     },
     rebel = {
-        {"guard", 4}, {"squad", 4}, {"patrol", 2}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 1}, {"sit", 1}
+        {"guard", 4}, {"squad", 4}, {"regroup", 4}, {"cover", 3}, {"pickup", 3}, {"rescue", 5}, {"hold", 2}, {"sit", 1}
     },
     headcrab = {
         {"hunt", 6}, {"patrol", 2}, {"climb", 3}, {"hold", 1}
