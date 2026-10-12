@@ -122,8 +122,11 @@ local function DrawNPCPanel(npc, body, trace)
     local org = MirrorOrganism(npc)
     if not org then return end
 
-    local className = npc:GetNW2String("BZCNClass", "NPC")
-    local name = npc:GetNW2String("BZCNDisplayName", className)
+    local internalClass = npc:GetNW2String("BZCNClass", "NPC")
+    local className = npc:GetNW2String("BZCNClassName",
+        npc:GetNW2String("PlayerClassName", internalClass))
+    local name = npc:GetNW2String("BZCNDisplayName",
+        npc:GetNWString("PlayerName", className))
     local downed = npc:GetNW2Bool("BZCNNPCDowned", false)
     local crawling = npc:GetNW2Bool("BZCNNPCCrawling", false)
     local gettingUp = npc:GetNW2Bool("BZCNNPCGettingUp", false)
@@ -138,7 +141,7 @@ local function DrawNPCPanel(npc, body, trace)
     surface.SetDrawColor(95, 170, 225, 230)
     surface.DrawOutlinedRect(x, y, w, h, 1)
     draw.SimpleText(name, "BZCN_NPCHudTitle", x + 12, y + 9, Color(225, 238, 250), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-    draw.SimpleText(className .. "  ·  #" .. npc:EntIndex(), "BZCN_NPCHudBody", x + 12, y + 32, Color(145, 185, 215), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+    draw.SimpleText(className .. "  ·  " .. internalClass .. "  ·  #" .. npc:EntIndex(), "BZCN_NPCHudBody", x + 12, y + 32, Color(145, 185, 215), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 
     local healthFraction = math.Clamp(health / math.max(maxHealth, 1), 0, 1)
     draw.RoundedBox(3, x + 12, y + 58, w - 24, 9, Color(45, 50, 58, 255))
@@ -161,7 +164,8 @@ local function DrawNPCPanel(npc, body, trace)
         actor = {
             Name = name,
             ClassName = className,
-            PlayerClassName = npc:GetNW2String("PlayerClassName", className),
+            InternalClass = internalClass,
+            PlayerClassName = npc:GetNW2String("PlayerClassName", internalClass),
             Health = health,
             MaxHealth = maxHealth,
             Model = npc:GetModel(),
@@ -190,6 +194,26 @@ hook.Add("HUDPaint", "BZCN_ClientHUDBridge", function()
     local npc, body = ResolveNPC(trace.Entity)
     if not IsValid(npc) then return end
     if ply:GetPos():DistToSqr(body:GetPos()) > 1600 * 1600 then return end
+
+    -- Match Z-City's native Identifier HUD: a name at the looked-at body's
+    -- world position, tinted with PlayerColor, with the class shown beneath.
+    local screen = trace.HitPos:ToScreen()
+    local size = math.max(math.min(1 - (trace.Fraction or 1), 1), 0.1)
+    local alpha = math.floor(255 * math.Clamp(size * 1.5, 0.15, 1))
+    local colorVector = npc:GetNWVector("PlayerColor", Vector(0.65, 0.78, 0.9))
+    local nameColor = Color(
+        math.Clamp(colorVector.x * 255, 0, 255),
+        math.Clamp(colorVector.y * 255, 0, 255),
+        math.Clamp(colorVector.z * 255, 0, 255), alpha
+    )
+    local label = npc:GetNW2String("BZCNDisplayName", npc:GetNWString("PlayerName", "NPC"))
+    local classLabel = npc:GetNW2String("BZCNClassName", npc:GetNW2String("BZCNClass", "NPC"))
+    draw.SimpleTextOutlined(label, "HomigradFontLarge", screen.x, screen.y + 30,
+        nameColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 1,
+        Color(0, 0, 0, alpha))
+    draw.SimpleTextOutlined(classLabel, "BZCN_NPCHudBody", screen.x, screen.y + 53,
+        Color(215, 225, 235, alpha), TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 1,
+        Color(0, 0, 0, alpha))
 
     DrawNPCPanel(npc, body, trace)
 end)
