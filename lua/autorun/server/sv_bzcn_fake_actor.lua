@@ -187,6 +187,12 @@ function FakeActor:RefreshPhysiology()
     if self.manualMode == "pounce" and (self.manualModeUntil or 0) <= CurTime() then
         self.manualMode = nil
         self.manualModeUntil = nil
+        -- The launch target is only useful during the brief flight window.
+        -- After landing, resume autonomous gaze and let the real ragdoll
+        -- momentum (rather than a stale steering vector) determine motion.
+        self.aimTarget = nil
+        self.moveVelocity = vector_origin
+        self.autoLookTarget = true
     end
     if self.manualMode then
         self.mode = self.manualMode
