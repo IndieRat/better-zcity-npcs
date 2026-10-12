@@ -95,7 +95,12 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
             continue
         end
 
-        ent.BZCNNPCPounce = {target = target, expires = CurTime() + 0.85}
+        ent.BZCNNPCPounce = {
+            target = target,
+            expires = CurTime() + 0.85,
+            startedAt = CurTime(),
+            startPos = ent:GetPos()
+        }
         ent.BZCNFurryLungeCooldown = CurTime() + math.Rand(2.4, 3.5)
         ent.BZCNFurryLungeTarget = nil
         ent.BZCNFurryRunupStartedAt = nil
