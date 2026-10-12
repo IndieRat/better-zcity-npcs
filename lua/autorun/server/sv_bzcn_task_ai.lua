@@ -149,6 +149,7 @@ local function HumanSocialClass(ent)
         return "player"
     end
 
+    if not IsManaged(ent) then return nil end
     local kind = GetKind(ent)
     if kind == "civilian" or kind == "metrocop" or kind == "rebel" then return kind end
     return nil
