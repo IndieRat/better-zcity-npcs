@@ -1330,16 +1330,23 @@ function ENT:AttackTarget(target)
     local distanceToCenter = delta:Length()
     if distanceToCenter > meleeRange then return end
 
-    -- Short hull trace must hit the target (or their Z-City fake ragdoll);
-    -- distance alone was applying damage through empty space and walls.
-    local trace = util.TraceHull({
-        start = source,
-        endpos = destination + (distanceToCenter > 0 and delta:GetNormalized() * 2 or vector_origin),
-        mins = Vector(-6, -6, -6),
-        maxs = Vector(6, 6, 6),
-        filter = self,
-        mask = MASK_SHOT
-    })
+    -- weapon_hands_sh uses an EyePos -> aim-direction trace with 40 units of
+    -- reach. Use that same trace shape for managed NPCs rather than a longer
+    -- center-to-center shortcut; keep the generic hull for other melee classes.
+    local trace
+    if weaponClass == "weapon_hands_sh" and BZCN and isfunction(BZCN.TraceRuntimeHands) then
+        trace = BZCN.TraceRuntimeHands(self, target, meleeRange)
+    end
+    if not istable(trace) then
+        trace = util.TraceHull({
+            start = source,
+            endpos = destination + (distanceToCenter > 0 and delta:GetNormalized() * 2 or vector_origin),
+            mins = Vector(-6, -6, -6),
+            maxs = Vector(6, 6, 6),
+            filter = self,
+            mask = MASK_SHOT
+        })
+    end
     local hitTarget = trace.Entity == target
     if not hitTarget and IsValid(trace.Entity) and BZCNCombatActor
         and BZCNCombatActor.ResolveTarget then
@@ -1562,8 +1569,10 @@ function ENT:ChaseEnemy(target)
                 goalPos = origin + radial * standOff + side * sideOffset
             else
                 local rangedWing = hasRangedWeapon
-                local forwardOffset = rangedWing and 165 or 22
-                local sideOffset = rangedWing and 140 or 18
+                -- Melee wings need room to approach from distinct angles instead
+                -- of piling into the leader's exact attack lane.
+                local forwardOffset = rangedWing and 165 or 38
+                local sideOffset = rangedWing and 140 or 82
                 goalPos = origin + radial * forwardOffset + side * sideSign * sideOffset
             end
             goalPos = Vector(goalPos.x, goalPos.y, origin.z)
