@@ -108,6 +108,52 @@ end
 
 Support.IsAssimilationLocked = IsAssimilationLocked
 
+-- Last-resort player fake-state repair. Normally Z-City's own ragdoll removal
+-- callback restores these fields; if another addon removes the ragdoll without
+-- running that callback, a living player can remain hidden/in the fake collision
+-- group with no ragdoll left to recover from. Only repair that impossible state:
+-- never force a valid ragdoll to stand up or bypass Should Fake Up.
+local playerFakeMissingSince = setmetatable({}, { __mode = "k" })
+hook.Add("Think", "BZCNNPCSupport_PlayerFakeStateFallback", function()
+    local now = CurTime()
+    for _, ply in ipairs(player.GetAll()) do
+        if not IsValid(ply) or not ply:Alive() then
+            playerFakeMissingSince[ply] = nil
+        else
+            local rag = ply.FakeRagdoll
+            if not IsValid(rag) then rag = ply:GetNWEntity("FakeRagdoll") end
+            local fakeMap = hg and hg.ragdollFake and hg.ragdollFake[ply]
+            local looksStuck = ply:GetRenderMode() == RENDERMODE_NONE
+                or ply:GetCollisionGroup() == COLLISION_GROUP_IN_VEHICLE
+                or (ply.GetNoDraw and ply:GetNoDraw())
+            if not IsValid(rag) and not IsValid(fakeMap) and looksStuck then
+                playerFakeMissingSince[ply] = playerFakeMissingSince[ply] or now
+                if now - playerFakeMissingSince[ply] >= 2 then
+                    ply.FakeRagdoll = nil
+                    ply.FakeRagdollOld = nil
+                    ply.OldRagdoll = nil
+                    ply.fake = false
+                    ply.needfake = false
+                    ply.needotrub = false
+                    ply.neednpcfake = false
+                    ply:SetNWEntity("FakeRagdoll", NULL)
+                    ply:SetNWEntity("FakeRagdollOld", NULL)
+                    ply:SetNoDraw(false)
+                    ply:SetRenderMode(RENDERMODE_NORMAL)
+                    ply:DrawShadow(true)
+                    ply:SetCollisionGroup(COLLISION_GROUP_PLAYER)
+                    if hg and hg.ragdollFake then hg.ragdollFake[ply] = nil end
+                    timer.Remove("faking_up" .. ply:EntIndex())
+                    playerFakeMissingSince[ply] = nil
+                    hook.Run("BZCNNPCSupport_PlayerFakeStateReset", ply)
+                end
+            else
+                playerFakeMissingSince[ply] = nil
+            end
+        end
+    end
+end)
+
 hook.Add("Should Fake Up", "BZCNNPCSupport_AssimilationLock", function(ent)
     -- Hard boundary: this hook is not allowed to participate in real player
     -- recovery. Returning nil lets Z-City's complete native hook chain proceed.
@@ -1152,6 +1198,11 @@ local function EnterDownedState(owner, reason)
         if IsValid(phys) and matrix then
             phys:SetPos(matrix:GetTranslation())
             phys:SetAngles(matrix:GetAngles())
+            -- A freshly spawned proxy must be an ordinary gravity-driven
+            -- ragdoll. Some model/physics setups retain disabled gravity or
+            -- motion on one or more bones, which looks like a floating body.
+            phys:EnableMotion(true)
+            phys:EnableGravity(true)
             phys:Wake()
             local velocity = owner:GetVelocity()
             if velocity:LengthSqr() > 1 then phys:SetVelocity(velocity) end
