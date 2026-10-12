@@ -1092,6 +1092,14 @@ local function IsDownedForFurryGrab(target, rag)
         local ok, downed = pcall(support.IsDowned, target)
         if ok and downed then return true end
     end
+    -- A player can already be fake-ragdolled before the NWBool / organism
+    -- flags synchronize. Treat the resolved live ragdoll as downed immediately;
+    -- otherwise the grab trace hits the owner entity and intermittently skips
+    -- the required arm/hand check.
+    if IsValid(rag) and rag ~= target
+        and (target:IsPlayer() or (BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(target))) then
+        return true
+    end
     local organ = target.organism or target.BZCN_Organism
         or (IsValid(rag) and rag.organism) or {}
     return istable(organ) and (organ.otrub == true or organ.unconscious == true
