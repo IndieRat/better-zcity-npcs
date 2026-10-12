@@ -273,15 +273,22 @@ function ENT:Initialize()
 
                 -- Keep names consistent across human classes, and deliberately mix
                 -- clothing channels so civilians do not all wear a matching set.
-                if BZCN and isfunction(BZCN.GetRandomHumanName) then
-                    appearance.AName = BZCN.GetRandomHumanName()
-                end
+                local modelSex = BZCN and isfunction(BZCN.GetModelSex)
+                    and BZCN.GetModelSex(appearance.AModel) or nil
                 local playerModels = hg.Appearance.PlayerModels
-                local isFemale = false
-                if istable(playerModels) and isstring(appearance.AModel) then
+                local isFemale = modelSex == 2
+                if modelSex == nil and istable(playerModels) and isstring(appearance.AModel) then
                     local modelInfo = (playerModels[1] and playerModels[1][appearance.AModel])
                         or (playerModels[2] and playerModels[2][appearance.AModel])
-                    isFemale = istable(modelInfo) and modelInfo.sex == true or false
+                    if istable(modelInfo) then
+                        isFemale = modelInfo.sex == true
+                        modelSex = isFemale and 2 or 1
+                    end
+                end
+                -- The Z-City name generator takes the selected model's sex index;
+                -- don't overwrite a female model's appearance with a random male name.
+                if BZCN and isfunction(BZCN.GetRandomHumanName) then
+                    appearance.AName = BZCN.GetRandomHumanName(modelSex or (isFemale and 2 or 1))
                 end
                 local clothingSets = hg.Appearance.Clothes
                     and hg.Appearance.Clothes[isFemale and 2 or 1]
@@ -340,7 +347,7 @@ function ENT:Initialize()
         if appearanceApplied and appearance then self.CurAppearance = table.Copy(appearance) end
         self.BZCNClassProfile.Model = self:GetModel()
         local displayName = (appearanceApplied and appearance and appearance.AName)
-            or (BZCN and isfunction(BZCN.GetRandomHumanName) and BZCN.GetRandomHumanName())
+            or (BZCN and isfunction(BZCN.GetRandomHumanName) and BZCN.GetRandomHumanName(self:GetModel()))
             or "Civilian"
         self.BZCNDisplayName = displayName
         self.PlayerName = displayName
