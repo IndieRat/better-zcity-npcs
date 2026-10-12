@@ -208,7 +208,9 @@ function FakeActor:RefreshPhysiology()
         -- Choose a stable recovery posture once per knockdown. Sitting is the
         -- default for a conscious, mobile torso; crawling is reserved for bodies
         -- already face-down so the controller doesn't drag a supine body belly-up.
-        local sitChance = 0.62
+        local spinePhys = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+        local faceDown = IsValid(spinePhys) and spinePhys:GetAngles():Up().z < -0.25
+        local sitChance = faceDown and 0.62 or 1
         if not canMove or not canMoveHead then sitChance = 0 end
         if (tonumber(injury.leftleg) or 0) >= 70 or (tonumber(injury.rightleg) or 0) >= 70 then
             sitChance = math.min(sitChance, 0.35)
@@ -410,10 +412,31 @@ function FakeActor:UpdateSit(dt)
     end
 end
 
+function FakeActor:IsFaceDown()
+    local spine = GetPhysicsForBone(self.ragdoll, "ValveBiped.Bip01_Spine2")
+    if not IsValid(spine) then return false end
+    -- On ValveBiped physics bones the spine's local up axis follows the back:
+    -- a negative world-Z component means the chest/back is oriented toward floor.
+    return spine:GetAngles():Up().z < -0.25
+end
+
 function FakeActor:UpdateCrawl(dt)
     local rag, owner = self.ragdoll, self.owner
     if not IsValid(rag) or not IsValid(owner) then return end
     if not (self.physiology and self.physiology.canCrawl) then return end
+    if not self:IsFaceDown() then
+        -- Never drive a supine body forward while its belly faces the ceiling.
+        -- It may settle into a supported sit instead; natural physics can still
+        -- roll it over before a later crawl attempt.
+        self.crawlReach = nil
+        if self.crawlGrip and IsValid(self.crawlGrip.constraint) then
+            self.crawlGrip.constraint:Remove()
+        end
+        self.crawlGrip = nil
+        self.mode = self.physiology.canMove and "sit" or "loose"
+        self.posture = self.mode == "sit" and "sit" or self.posture
+        return
+    end
 
     local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis") or rag:GetPhysicsObject()
     if not IsValid(pelvis) then return end
