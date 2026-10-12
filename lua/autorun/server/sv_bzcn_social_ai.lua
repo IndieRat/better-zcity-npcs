@@ -349,7 +349,11 @@ local function IsFurryThreat(ent)
 end
 
 local function CanUseSocialEmote(ent)
-    return IsManagedNPC(ent) and not IsUnavailableForSocial(ent)
+    if not IsManagedNPC(ent) then return false end
+    local profile = ent.BZCNClassProfile or {}
+    -- Z-City's headcrab zombie class suppresses ordinary speech and gestures.
+    if profile.ZombieStyle == true or profile.HeadcrabStyle == true then return false end
+    return not IsUnavailableForSocial(ent)
         and not ent:GetNW2Bool("BZCNNPCDowned", false)
         and not (hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
             and hg.BZCNNPCSupport.IsGettingUp(ent))
