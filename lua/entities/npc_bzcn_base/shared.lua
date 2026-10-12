@@ -522,11 +522,20 @@ function ENT:BodyUpdate()
             self:FrameAdvance()
         elseif state == "walking" or state == "running" or state == "sprinting"
             or state == "climbing" then
-            -- BodyMoveXY updates pose params; apply run/sprint playback after it
-            -- so a sprint visibly moves faster than an ordinary run.
-            self:BodyMoveXY()
-            if state == "running" or state == "sprinting" then
+            local profile = self.BZCNClassProfile or {}
+            if profile.HeadcrabStyle == true or profile.ZombieStyle == true then
+                -- Creature models have their own HL2 movement sequences. Directly
+                -- advance the selected walk/run clip instead of letting BodyMoveXY
+                -- translate it back into a citizen/IXAnims locomotion activity.
                 self:SetPlaybackRate(playbackRate)
+                self:FrameAdvance()
+            else
+                -- BodyMoveXY updates pose params; apply run/sprint playback after it
+                -- so a sprint visibly moves faster than an ordinary run.
+                self:BodyMoveXY()
+                if state == "running" or state == "sprinting" then
+                    self:SetPlaybackRate(playbackRate)
+                end
             end
         else
             self:SetPlaybackRate(playbackRate)
