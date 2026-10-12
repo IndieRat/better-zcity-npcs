@@ -65,7 +65,7 @@ BZCN.RegisterClass("Combine", {
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
     CanScavengeWeapons = true, AnimationClass = "overwatch", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
     MedicalRange = 300, WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
-    Inventory = {Weapons = {weapon_mp7 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "combine_helmet"}}
+    Inventory = {Weapons = {weapon_mp7 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {head = "combine_helmet"}}
 })
 
 -- Z-City has a separate Metrocop player class, but it belongs to the same
@@ -95,7 +95,7 @@ BZCN.RegisterClass("Rebel", {
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
     AnimationClass = "citizen_male", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
     MedicalRange = 320, CanScavengeWeapons = true, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
-    Inventory = {Weapons = {weapon_ak74 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
+    Inventory = {Weapons = {weapon_ak74 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {}}
 })
 
 -- Model and claw model checked against Z-City's own furry class. Its player-only
