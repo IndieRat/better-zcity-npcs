@@ -11,7 +11,7 @@ function FakeActor.New(owner, ragdoll, config)
         owner = owner, ragdoll = ragdoll, active = true,
         mode = "loose", aimTarget = nil, moveVelocity = vector_origin,
         config = istable(config) and table.Copy(config) or {},
-        injury = {}, nextCrawlStroke = 0, crawlSide = 1
+        injury = {}, nextCrawlStroke = 0, crawlSide = 1, crawlGrip = nil
     }, FakeActor)
     return actor
 end
@@ -153,8 +153,6 @@ end
 function FakeActor:UpdateCrawl(dt)
     local rag = self.ragdoll
     if not IsValid(rag) then return end
-    -- A crawl should be low and deliberate. Large per-tick forces were
-    -- accumulating on the pelvis and making the body skate faster than a run.
     local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis") or rag:GetPhysicsObject()
     if not IsValid(pelvis) then return end
 
@@ -166,69 +164,80 @@ function FakeActor:UpdateCrawl(dt)
     end
     direction:Normalize()
 
-    local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 20, 10, 30)
-    local velocity = pelvis:GetVelocity()
-    local horizontal = Vector(velocity.x, velocity.y, 0)
-    local correction = direction * speed - horizontal
-    local maxChange = math.max(1, (tonumber(self.config.crawlAcceleration) or 38) * dt)
-    if correction:Length() > maxChange then correction:Normalize(); correction = correction * maxChange end
-    pelvis:SetVelocity(Vector(velocity.x + correction.x, velocity.y + correction.y, math.min(velocity.z, 0)))
+    local now = CurTime()
+    local grip = self.crawlGrip
+    if grip and (now >= grip.untilTime or not IsValid(grip.constraint)) then
+        if IsValid(grip.constraint) then grip.constraint:Remove() end
+        self.crawlGrip = nil
+        grip = nil
+    end
 
-    -- Keep the torso prone instead of lifting it with upward limb impulses.
-    -- This is a small downward bias, not a shadow target that fights collisions.
-    pelvis:ApplyForceCenter(Vector(0, 0, -180))
+    -- Z-City's fake controller does not propel a limp body by setting a root
+    -- velocity. It welds a hand to the traced surface, then pulls the torso
+    -- against that planted hand while W/S changes the force direction. Use the
+    -- same plant-and-pull cycle for this autonomous crawl controller.
+    if grip then
+        local strength = grip.strength or 1
+        pelvis:ApplyForceCenter(direction * (620 * strength))
+        local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+        if IsValid(spine) then spine:ApplyForceCenter(direction * (210 * strength)) end
+    else
+        local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 42, 28, 52)
+        local velocity = pelvis:GetVelocity()
+        local horizontal = Vector(velocity.x, velocity.y, 0)
+        local correction = direction * speed - horizontal
+        local maxChange = math.max(1, (tonumber(self.config.crawlAcceleration) or 55) * dt)
+        if correction:Length() > maxChange then correction:Normalize(); correction = correction * maxChange end
+        pelvis:SetVelocity(Vector(velocity.x + correction.x, velocity.y + correction.y, math.min(velocity.z, 0)))
+    end
+
+    -- Keep the torso prone. These are modest downward biases, never lift impulses.
+    pelvis:ApplyForceCenter(Vector(0, 0, -150))
     local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
     if IsValid(spine) then
         local spineVelocity = spine:GetVelocity()
-        if spineVelocity.z > 12 then
-            spine:SetVelocity(Vector(spineVelocity.x, spineVelocity.y, 12))
-        end
-        spine:ApplyForceCenter(Vector(0, 0, -110))
+        if spineVelocity.z > 8 then spine:SetVelocity(Vector(spineVelocity.x, spineVelocity.y, 8)) end
+        spine:ApplyForceCenter(Vector(0, 0, -90))
     end
 
-    local now = CurTime()
-    if now >= (self.nextCrawlStroke or 0) then
-        self.nextCrawlStroke = now + 0.52
-        local side = self.crawlSide or 1
-        self.crawlSide = -side
-        local right = side > 0
-        local handName = right and "ValveBiped.Bip01_R_Hand" or "ValveBiped.Bip01_L_Hand"
-        local forearmName = right and "ValveBiped.Bip01_R_Forearm" or "ValveBiped.Bip01_L_Forearm"
-        local hand = GetPhysicsForBone(rag, handName) or GetPhysicsForBone(rag, forearmName)
-        local damage = self.injury[right and "rightarm" or "leftarm"] or 0
-        if IsValid(hand) and damage < 85 then
-            local handPos = hand:GetPos()
-            local ground = util.TraceLine({
-                start = handPos + Vector(0, 0, 5),
-                endpos = handPos - Vector(0, 0, 28),
-                filter = rag,
-                mask = MASK_SOLID
-            })
-            if ground.Hit and not ground.HitSky then
-                local strength = math.Clamp(1 - damage / 100, 0.15, 1)
-                -- Lead with the reaching hand: place a gentle shadow target
-                -- forward and slightly out on the floor, then let the elbow
-                -- and shoulder constraints follow. No upward push.
-                local lateral = direction:Angle():Right() * (right and 5 or -5)
-                local targetPos = ground.HitPos + direction * (12 * strength) + lateral + Vector(0, 0, 3)
-                if hand.ComputeShadowControl then
-                    hand:Wake()
-                    hand:ComputeShadowControl({
-                        secondstoarrive = 0.24,
-                        pos = targetPos,
-                        angle = hand:GetAngles(),
-                        maxangular = 42,
-                        maxangulardamp = 24,
-                        maxspeed = 22 * strength,
-                        maxspeeddamp = 14,
-                        dampfactor = 0.65,
-                        teleportdistance = 0
-                    })
-                else
-                    hand:ApplyForceCenter(direction * (120 * strength))
-                end
-            end
-        end
+    if now < (self.nextCrawlStroke or 0) then return end
+    self.nextCrawlStroke = now + 0.38
+    local side = self.crawlSide or 1
+    self.crawlSide = -side
+    local right = side > 0
+    local handName = right and "ValveBiped.Bip01_R_Hand" or "ValveBiped.Bip01_L_Hand"
+    local forearmName = right and "ValveBiped.Bip01_R_Forearm" or "ValveBiped.Bip01_L_Forearm"
+    local hand = GetPhysicsForBone(rag, handName) or GetPhysicsForBone(rag, forearmName)
+    local damage = self.injury[right and "rightarm" or "leftarm"] or 0
+    if not IsValid(hand) or damage >= 85 then return end
+
+    local handBone = rag:LookupBone(IsValid(GetPhysicsForBone(rag, handName)) and handName or forearmName)
+    local handPhysBone = handBone and rag:TranslateBoneToPhysBone(handBone) or -1
+    if handPhysBone < 0 then return end
+
+    local lateral = direction:Angle():Right() * (right and 5 or -5)
+    local reach = hand:GetPos() + direction * 13 + lateral
+    local ground = util.TraceLine({
+        start = reach + Vector(0, 0, 8),
+        endpos = reach - Vector(0, 0, 34),
+        filter = rag,
+        mask = MASK_SOLID
+    })
+    if not ground.Hit or ground.HitSky or not IsValid(ground.Entity) then return end
+
+    local strength = math.Clamp(1 - damage / 100, 0.15, 1)
+    -- Plant the reaching hand on the actual hit surface for a short power
+    -- stroke. Like Z-City, world grips are strong; prop grips stay physical.
+    local constraintEnt = constraint.Weld(
+        rag, ground.Entity, handPhysBone,
+        ground.Entity:IsWorld() and 0 or (ground.PhysicsBone or 0),
+        ground.Entity:IsWorld() and 10000 or 0, false, false
+    )
+    if IsValid(constraintEnt) then
+        self.crawlGrip = {constraint = constraintEnt, untilTime = now + 0.24, strength = strength}
+    else
+        hand:Wake()
+        hand:ApplyForceCenter(direction * (220 * strength))
     end
 end
 
@@ -254,6 +263,10 @@ end
 
 function FakeActor:Destroy()
     if not self.active then return end
+    if self.crawlGrip and IsValid(self.crawlGrip.constraint) then
+        self.crawlGrip.constraint:Remove()
+    end
+    self.crawlGrip = nil
     self.active = false
     if BZCN.ActiveFakeActors and IsValid(self.owner) then BZCN.ActiveFakeActors[self.owner] = nil end
     if IsValid(self.owner) and self.owner.BZCNFakeActor == self then self.owner.BZCNFakeActor = nil end
