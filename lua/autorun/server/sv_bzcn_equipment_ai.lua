@@ -1123,6 +1123,25 @@ local function IsGrabbableArmBone(rag, physicsBone)
         or string.find(name, "_hand", 1, true) ~= nil
 end
 
+local function GetNpcHandAimPoint(target)
+    if not IsValid(target) then return nil end
+    local point = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
+        and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+    -- The true SWEP starts from the eye and follows view/aim direction. A
+    -- NextBot has no player view angle, so aim at the target's head on a living
+    -- model; keep the combat solver's torso point when a separate ragdoll is
+    -- the visible body.
+    local rag = GetCurrentFurryRagdoll(target)
+    if not IsValid(rag) and isfunction(target.LookupBone) and isfunction(target.GetBonePosition) then
+        local bone = target:LookupBone("ValveBiped.Bip01_Head1")
+        if bone then
+            local ok, headPos = pcall(target.GetBonePosition, target, bone)
+            if ok and isvector(headPos) and headPos ~= vector_origin then point = headPos end
+        end
+    end
+    return isvector(point) and point or nil
+end
+
 local function TraceFurryGrab(attacker, target, weapon)
     if not IsValid(attacker) or not IsValid(target) then return false end
     local eye = isfunction(attacker.EyePos) and attacker:EyePos() or attacker:WorldSpaceCenter()
@@ -1216,12 +1235,10 @@ local function TraceFurryGrab(attacker, target, weapon)
                 end
             end
         end
-        local aimPoint = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
-            and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+        local aimPoint = GetNpcHandAimPoint(target)
         if isvector(aimPoint) and eye:Distance(aimPoint) <= range then endpoints[#endpoints + 1] = aimPoint end
     else
-        local aimPoint = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
-            and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+        local aimPoint = GetNpcHandAimPoint(target)
         if not isvector(aimPoint) then return false end
         local direction = aimPoint - eye
         if direction:LengthSqr() < 1 then return false end
@@ -1248,20 +1265,18 @@ function BZCN.TraceRuntimeHands(attacker, target, requestedReach)
 
     local reach = math.min(tonumber(requestedReach) or 40, tonumber(weapon.ReachDistance) or 40, 40)
     local eye = isfunction(attacker.EyePos) and attacker:EyePos() or attacker:WorldSpaceCenter()
-    local aimPoint = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
-        and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
-    if not isvector(eye) or not isvector(aimPoint) then return nil end
-    local direction = aimPoint - eye
-    if direction:LengthSqr() < 1 then direction = attacker:GetForward() end
-    if direction:LengthSqr() < 1 then return nil end
-    local endPos = eye + direction:GetNormalized() * reach
-
     local rag = GetCurrentFurryRagdoll(target)
     if not IsValid(rag) and hg and isfunction(hg.GetCurrentCharacter) then
         local ok, current = pcall(hg.GetCurrentCharacter, target)
         if ok then rag = current end
     end
     local downed = IsDownedForFurryGrab(target, rag)
+    local aimPoint = GetNpcHandAimPoint(target)
+    if not isvector(eye) or not isvector(aimPoint) then return nil end
+    local direction = aimPoint - eye
+    if direction:LengthSqr() < 1 then direction = attacker:GetForward() end
+    if direction:LengthSqr() < 1 then return nil end
+    local endPos = eye + direction:GetNormalized() * reach
     local filter = {attacker, weapon}
     if IsValid(attacker.BZCNHeldWeaponProxy) then filter[#filter + 1] = attacker.BZCNHeldWeaponProxy end
     if downed and IsValid(rag) and target ~= rag then filter[#filter + 1] = target end
