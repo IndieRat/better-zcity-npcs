@@ -1102,11 +1102,21 @@ function ENT:AttackTarget(target)
         and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
     local distance = self:WorldSpaceCenter():Distance(aimPoint)
 
-    if profile.FurryStyle and BZCN and isfunction(BZCN.TryFurryAssimilation)
-        and distance <= (tonumber(profile.FurryGrabRange) or 86)
-        and BZCN.TryFurryAssimilation(self, target) then
-        self.LastAttack = now + 0.1
-        return
+    if profile.FurryStyle and BZCN and isfunction(BZCN.TryFurryAssimilation) then
+        local grabRange = tonumber(profile.FurryGrabRange) or 110
+        if distance <= grabRange then
+            if BZCN.TryFurryAssimilation(self, target) then
+                self.LastAttack = now + 0.1
+                return
+            end
+
+            -- Once in paw range, keep retrying the physical grab rather than
+            -- continuing ordinary melee damage while the grab trace/hold is
+            -- being established. This prevents furries from nearly killing a
+            -- target during intermittent grab setup failures.
+            self.LastAttack = now + 0.12
+            return
+        end
     end
 
     if now < (self.LastAttack or 0) then return end
@@ -1334,6 +1344,17 @@ function ENT:ChaseEnemy(target)
                 end
                 local attackerCenter = IsValid(pounceRag) and pounceRag:WorldSpaceCenter()
                     or self:WorldSpaceCenter()
+                local launchAge = now - (tonumber(pounce.startedAt) or now)
+                local launchStart = isvector(pounce.startPos) and pounce.startPos or self:GetPos()
+                local movedFromLaunch = self:GetPos():Distance(launchStart)
+                local actuallyLaunched = (self.loco and not self.loco:IsOnGround())
+                    or movedFromLaunch >= 28
+                -- The contact loop can run on the same tick the lunge is
+                -- scheduled. Never down the attacker until takeoff has occurred.
+                if launchAge < 0.12 or not actuallyLaunched then
+                    coroutine.wait(0.03)
+                    continue
+                end
                 if attackerCenter:DistToSqr(pounceTarget:WorldSpaceCenter()) <= 76 * 76 then
                     local support = hg and hg.BZCNNPCSupport
                     local impactPos = pounceTarget:WorldSpaceCenter()
