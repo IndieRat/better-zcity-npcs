@@ -1752,14 +1752,18 @@ local function ChooseMedicalClass(inventory, target, healer)
     -- not for every injured NPC that received ordinary pain relief.
     local overdoseConcern = readout.analgesia >= 3
         or readout.analgesiaAdd >= 3
-    if readout.hasOrganism and overdoseConcern
-        and (readout.needsUnconsciousAid or (readout.oxygen and readout.oxygen < 8)
-            or (readout.pulse > 0 and readout.pulse < 42))
+    local overdoseSymptoms = readout.needsUnconsciousAid
+        or (readout.oxygen and readout.oxygen < 8)
+        or (readout.pulse > 0 and readout.pulse < 42)
+    if readout.hasOrganism and overdoseConcern and overdoseSymptoms
         and has("weapon_naloxone", {1}) then
         return "weapon_naloxone"
     end
 
-    if readout.hasOrganism and readout.pain >= 45 then
+    -- Do not add more analgesia when the same high-analgesia vitals pattern
+    -- suggests overdose, even if no naloxone is currently stocked.
+    if readout.hasOrganism and readout.pain >= 45
+        and not (overdoseConcern and overdoseSymptoms) then
         if has("weapon_painkillers", {1}) then return "weapon_painkillers" end
         if has("weapon_medkit_sh", {2}) then return "weapon_medkit_sh" end
     end
