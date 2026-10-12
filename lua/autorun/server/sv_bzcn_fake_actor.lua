@@ -110,19 +110,25 @@ function FakeActor:ShadowBone(name, angle, seconds, maxAngular, maxAngularDamp, 
     local phys = GetPhysicsForBone(self.ragdoll, name)
     if not IsValid(phys) or not phys.ComputeShadowControl then return end
     phys:Wake()
+    -- Match Z-City's hg.ShadowControl contract: angular-only controls do not
+    -- receive a maxspeed cap. Positional targets get their own explicit cap.
+    -- Its ragdoll.power scales maxangular/maxspeed, not the damping values.
+    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.05, 1)
     local params = {
         secondstoarrive = seconds or 0.1,
-        maxspeed = maxSpeed or 65,
-        maxspeeddamp = maxSpeedDamp or 40,
-        dampfactor = 0.45,
+        dampfactor = 0.9,
         teleportdistance = 0
     }
     if isangle(angle) then
         params.angle = angle
-        params.maxangular = maxAngular or 80
+        params.maxangular = (maxAngular or 80) * power
         params.maxangulardamp = maxAngularDamp or 35
     end
-    if isvector(position) then params.pos = position end
+    if isvector(position) then
+        params.pos = position
+        params.maxspeed = (maxSpeed or 65) * power
+        params.maxspeeddamp = maxSpeedDamp or 40
+    end
     phys:ComputeShadowControl(params)
 end
 
@@ -148,6 +154,24 @@ function FakeActor:RefreshPhysiology()
     local spine3Limit = ToDamagePercent(thresholds.fake_spine3, 50)
 
     local injury = self.injury or {}
+
+    -- Follow Z-City's ragdoll.power curve so injury weakens the controller
+    -- instead of making a badly hurt NPC fight its own physics at full strength.
+    local pain = tonumber(org.pain) or tonumber(injury.pain) or 0
+    local blood = tonumber(org.blood) or tonumber(injury.blood) or 5000
+    local oxygen = istable(org.o2) and tonumber(org.o2[1]) or nil
+    local power = 1
+    if pain > 50 or blood < 2900 or (oxygen and oxygen < 5) then
+        power = 0.3
+    elseif pain > 20 or blood < 4200 or (oxygen and oxygen < 10) then
+        power = 0.5
+    end
+    local consciousness = tonumber(org.consciousness)
+    if consciousness ~= nil then
+        power = power * math.Clamp(consciousness, 0, 1)
+    end
+    self.controlPower = math.Clamp(power, 0.05, 1)
+
     local conscious = org.otrub ~= true and owner.otrub ~= true
         and not (tonumber(org.consciousness) and tonumber(org.consciousness) <= 0.05)
         and (tonumber(injury.brain) or 0) < 98
@@ -278,7 +302,7 @@ function FakeActor:GetLookAngles()
     return result
 end
 
-function FakeActor:UpdateUpperPose(passive)
+function FakeActor:UpdateUpperPose()
     local rag = self.ragdoll
     if not IsValid(rag) then return end
 
@@ -287,8 +311,8 @@ function FakeActor:UpdateUpperPose(passive)
     local head = GetPhysicsForBone(rag, "ValveBiped.Bip01_Head1")
     if not IsValid(spine) and not IsValid(head) then return end
 
-    -- Keep the torso's response modest; the head gets a slightly more precise
-    -- target. Clamps avoid forcing the neck through extreme pitch angles.
+    -- These match the reference controller's hold-E spine/head settings.
+    -- No positional target is supplied, so ShadowBone must not impose maxspeed.
     local torsoAngle = Angle(0, look.y, 0)
     torsoAngle:RotateAroundAxis(torsoAngle:Forward(), 90)
     torsoAngle:RotateAroundAxis(torsoAngle:Up(), 90)
@@ -296,21 +320,13 @@ function FakeActor:UpdateUpperPose(passive)
     headAngle:RotateAroundAxis(headAngle:Forward(), 90)
     headAngle:RotateAroundAxis(headAngle:Up(), 90)
 
-    -- The head controller must run in loose mode too. The previous early
-    -- return meant a conscious downed NPC never moved its head or eyes at all.
-    -- Control only named physics bones with capped torque: preserve impacts,
-    -- gravity and the ragdoll's whole-body momentum.
     local physiology = self.physiology or {}
     if physiology.canMove and IsValid(spine) then
-        self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle,
-            passive and 0.20 or 0.14, passive and 30 or 58, passive and 24 or 42,
-            nil, passive and 48 or 75, passive and 34 or 45)
+        self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.1, 80, 20)
     end
 
     if physiology.canMoveHead and IsValid(head) then
-        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle,
-            passive and 0.14 or 0.10, passive and 76 or 105, passive and 52 or 68,
-            nil, passive and 75 or 95, passive and 48 or 58)
+        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.1, 100, 60)
         if rag.SetEyeTarget then
             rag:SetEyeTarget(rag:WorldSpaceCenter() + look:Forward() * 10000)
         end
@@ -367,6 +383,7 @@ function FakeActor:UpdateCrawl(dt)
                 if IsValid(constraintEnt) then
                     self.crawlGrip = {
                         constraint = constraintEnt,
+                        hand = reachState.hand,
                         untilTime = now + 0.22,
                         strength = reachState.strength
                     }
@@ -374,22 +391,37 @@ function FakeActor:UpdateCrawl(dt)
             end
             self.crawlReach = nil
         else
+            -- Z-City reaches with a short arrival time and high capped hand
+            -- speed; the forearm follows the upper arm rather than being
+            -- independently speed-limited.
             self:ShadowBone(reachState.boneName, reachState.angle,
-                0.07, 68, 46, reachState.position, 120, 48)
+                0.001, 1200, 450, reachState.position, 500, 50)
             self:ShadowBone(reachState.forearmName, reachState.angle,
-                0.09, 48, 34, nil, 80, 40)
+                0.002, 600, 450)
             return
         end
     end
 
-    -- Plant-and-pull is the same broad idea as Z-City's fake controller:
-    -- apply force to the torso while an arm is briefly anchored. Without a
-    -- valid grip, use a capped velocity correction which retains momentum.
+    -- Z-City's controller pulls through a planted hand: apply equal/opposing
+    -- forces to the anchored hand and torso, scale by frame time and power,
+    -- and taper the pull as forward velocity rises.
     if grip then
-        local strength = grip.strength or 1
-        pelvis:ApplyForceCenter(direction * (620 * strength))
-        local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
-        if IsValid(spine) then spine:ApplyForceCenter(direction * (210 * strength)) end
+        local strength = math.Clamp(tonumber(grip.strength) or 1, 0.1, 1)
+        local torso = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2") or pelvis
+        local hand = grip.hand
+        local power = math.Clamp(tonumber(self.controlPower) or 1, 0.05, 1)
+        local force = direction * (2000 * (dt / 0.015) * power * strength)
+
+        if IsValid(hand) then
+            local handOffset = hand:GetPos() - torso:GetPos()
+            local alignment = handOffset:LengthSqr() > 1
+                and math.max(handOffset:GetNormalized():Dot(direction) + 0.1, 0)
+                or 0
+            local velocityScale = 1 / math.max(torso:GetVelocity():Dot(direction) / 25, 1)
+            force = force * alignment * velocityScale
+            hand:ApplyForceCenter(-force)
+        end
+        torso:ApplyForceCenter(force)
     else
         local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 42, 24, 48)
         local velocity = pelvis:GetVelocity()
@@ -539,7 +571,7 @@ function FakeActor:Update(dt)
     dt = math.Clamp(tonumber(dt) or FrameTime(), 0, 0.05)
     self:RefreshPhysiology()
     self:UpdateLookTarget()
-    self:UpdateUpperPose(self.mode == "loose")
+    self:UpdateUpperPose()
 
     if self.mode == "crawl" then
         self:UpdateCrawl(dt)
