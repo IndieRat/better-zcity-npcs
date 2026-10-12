@@ -6,6 +6,7 @@ TOOL.ClientConVar = {
     weapons = "weapon_hands_sh",
     items = "",
     ammo = "",
+    attachments = "",
     armor = ""
 }
 TOOL.Information = {
@@ -25,11 +26,13 @@ if CLIENT then
         local weaponsText = net.ReadString() or ""
         local itemsText = net.ReadString() or ""
         local ammoText = net.ReadString() or ""
+        local attachmentsText = net.ReadString() or ""
         local armorText = net.ReadString() or ""
 
         RunConsoleCommand("tool_bzcn_inventory_giver_weapons", weaponsText)
         RunConsoleCommand("tool_bzcn_inventory_giver_items", itemsText)
         RunConsoleCommand("tool_bzcn_inventory_giver_ammo", ammoText)
+        RunConsoleCommand("tool_bzcn_inventory_giver_attachments", attachmentsText)
         RunConsoleCommand("tool_bzcn_inventory_giver_armor", armorText)
         chat.AddText(Color(120, 220, 160), "[BZCN] Copied inventory data into the Inventory Giver tool settings.")
     end)
@@ -96,7 +99,7 @@ local function ReadInventory(ent)
 end
 
 local function InventoryToConfig(inventory)
-    local weaponsOut, itemsOut, ammoOut, armorOut = {}, {}, {}, {}
+    local weaponsOut, itemsOut, ammoOut, attachmentsOut, armorOut = {}, {}, {}, {}, {}
     for class, value in pairs(inventory.Weapons or {}) do
         if isstring(class) and value ~= nil and weapons and weapons.GetStored
             and istable(weapons.GetStored(class)) then
@@ -118,6 +121,11 @@ local function InventoryToConfig(inventory)
             if SafeKey(name) then ammoOut[#ammoOut + 1] = name .. ":" .. tostring(math.max(0, math.floor(tonumber(amount) or 0))) end
         end
     end
+    for _, attachment in pairs(inventory.Attachments or {}) do
+        if isstring(attachment) and SafeKey(attachment) then
+            attachmentsOut[#attachmentsOut + 1] = attachment
+        end
+    end
     for slot, armor in pairs(inventory.Armor or {}) do
         if SafeKey(slot) and isstring(armor) and SafeKey(armor) then
             armorOut[#armorOut + 1] = slot .. "=" .. armor
@@ -126,9 +134,10 @@ local function InventoryToConfig(inventory)
     table.sort(weaponsOut)
     table.sort(itemsOut)
     table.sort(ammoOut)
+    table.sort(attachmentsOut)
     table.sort(armorOut)
     return table.concat(weaponsOut, ","), table.concat(itemsOut, ","),
-        table.concat(ammoOut, ","), table.concat(armorOut, ",")
+        table.concat(ammoOut, ","), table.concat(attachmentsOut, ","), table.concat(armorOut, ",")
 end
 
 local function ParseConfiguredInventory(tool)
@@ -154,6 +163,9 @@ local function ParseConfiguredInventory(tool)
             inventory.Ammo[ammoID and ammoID >= 0 and ammoID or name] = count
         end
     end
+    for _, id in ipairs(SplitList(tool:GetClientInfo("attachments"), 32)) do
+        if SafeKey(id) then inventory.Attachments[#inventory.Attachments + 1] = id end
+    end
     for _, entry in ipairs(SplitList(tool:GetClientInfo("armor"), 16)) do
         local slot, item = string.match(entry, "^([%w_%-]+)%s*=%s*([%w_%-]+)$")
         if SafeKey(slot) and SafeKey(item) then inventory.Armor[slot] = item end
@@ -168,6 +180,59 @@ local function WriteInventory(ent, inventory)
     inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
     inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
     inventory.Armor = istable(inventory.Armor) and inventory.Armor or {}
+
+    if ent:IsPlayer() then
+        -- Z-City's live player inventory stores actual SWEP entities, while
+        -- managed NPC/corpse loot stores class-info tables. Preserve the
+        -- player's existing weapons, give configured missing ones, and sync the
+        -- inventory table without pretending a boolean marker is a live SWEP.
+        local playerWeapons = {}
+        ent.inventory = inventory
+        ent.Inventory = inventory
+        for class in pairs(inventory.Weapons) do
+            if not isstring(class) or class == "weapon_hands_sh"
+                or class == "weapon_zombclaws" then continue end
+            if not (weapons and weapons.GetStored and istable(weapons.GetStored(class))) then continue end
+            local weapon = ent:HasWeapon(class) and ent:GetWeapon(class) or nil
+            if not IsValid(weapon) then
+                local ok, given = pcall(ent.Give, ent, class)
+                if ok and IsValid(given) then weapon = given end
+            end
+            if IsValid(weapon) then playerWeapons[class] = weapon end
+        end
+        -- The tool is additive for Players: unrelated physical weapons are not
+        -- stripped and remain representable in Z-City's live inventory.
+        for _, weapon in ipairs(ent:GetWeapons()) do
+            if IsValid(weapon) then
+                local class = weapon:GetClass()
+                if class ~= "weapon_hands_sh" and class ~= "weapon_zombclaws"
+                    and playerWeapons[class] == nil then
+                    playerWeapons[class] = weapon
+                end
+            end
+        end
+        inventory.Weapons = playerWeapons
+        ent.inventory = inventory
+        ent.Inventory = inventory
+
+        for ammoKey, amount in pairs(inventory.Ammo) do
+            local ammoName = isnumber(ammoKey) and game.GetAmmoName(ammoKey) or tostring(ammoKey)
+            if isstring(ammoName) and ammoName ~= "" then
+                ent:SetAmmo(math.Clamp(math.floor(tonumber(amount) or 0), 0, 99999), ammoName)
+            end
+        end
+
+        -- Use the native equipment API when present, but keep inventory/netvar
+        -- data useful even on server builds without the armor module.
+        if hg and isfunction(hg.AddArmor) then
+            for _, armorClass in pairs(inventory.Armor) do
+                if isstring(armorClass) and armorClass ~= "" then
+                    pcall(hg.AddArmor, ent, armorClass)
+                end
+            end
+            if istable(ent.armors) then inventory.Armor = table.Copy(ent.armors) end
+        end
+    end
 
     if isfunction(ent.SetNetVar) then
         ent:SetNetVar("Inventory", inventory)
@@ -243,11 +308,12 @@ function TOOL:RightClick(trace)
     end
 
     local inventory = ReadInventory(target)
-    local weaponsText, itemsText, ammoText, armorText = InventoryToConfig(inventory)
+    local weaponsText, itemsText, ammoText, attachmentsText, armorText = InventoryToConfig(inventory)
     net.Start("bzcn_inventory_giver_copy")
     net.WriteString(weaponsText)
     net.WriteString(itemsText)
     net.WriteString(ammoText)
+    net.WriteString(attachmentsText)
     net.WriteString(armorText)
     net.Send(ply)
     ply:ChatPrint("[BZCN] Copied inventory setup from " .. target:Nick() .. " into the tool.")
@@ -273,10 +339,13 @@ function TOOL.BuildCPanel(panel)
     panel:TextEntry("Weapon classes (comma-separated)", "tool_bzcn_inventory_giver_weapons")
     panel:TextEntry("Item IDs (comma-separated)", "tool_bzcn_inventory_giver_items")
     panel:TextEntry("Ammo type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
+    panel:TextEntry("Attachments (comma-separated IDs)", "tool_bzcn_inventory_giver_attachments")
     panel:TextEntry("Armor slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
     panel:Help("Example ammo: Pistol:120,SMG1:90")
+    panel:Help("Example attachments: supressor2,scope1")
     panel:Help("Example armor: head=combine_helmet,torso=vest3")
-    panel:Help("This edits Z-City inventory data. It does not strip a player's current weapons or invent missing SWEPs/items.")
+    panel:Help("Players receive configured live SWEPs and ammo. Their unrelated weapons are not stripped.")
+    panel:Help("The tool updates Z-City inventory data; it does not invent missing SWEPs, items, or armor classes.")
 end
 
 if SERVER then
