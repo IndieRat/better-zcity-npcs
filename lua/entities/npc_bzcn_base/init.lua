@@ -652,6 +652,7 @@ function ENT:FindEnemy()
     local preferred = context and context.intent and context.intent.Target
     local best, bestDistance
     local priorityTarget = false
+    local rememberedSquadTarget, rememberedSquadPosition, rememberedSquadSeenAt
 
     local function IsVisibleHostile(target)
         for _, record in ipairs(hostiles) do
@@ -678,14 +679,9 @@ function ENT:FindEnemy()
             bestDistance = self:GetPos():DistToSqr(sharedTarget:GetPos())
             priorityTarget = true
         else
-            best = sharedTarget
-            bestDistance = self:GetPos():DistToSqr(sharedPosition)
-            priorityTarget = true
-            self.BZCNEnemyMemory = {
-                Entity = sharedTarget,
-                Position = sharedPosition,
-                Time = sharedSeenAt
-            }
+            rememberedSquadTarget = sharedTarget
+            rememberedSquadPosition = sharedPosition
+            rememberedSquadSeenAt = sharedSeenAt
         end
     end
 
@@ -734,6 +730,19 @@ function ENT:FindEnemy()
                 end
             end
         end
+    end
+
+    -- An unseen squad target is only the fallback when this NPC has no
+    -- immediate visible threat or higher-priority ally-defense target.
+    if not IsValid(best) and IsValid(rememberedSquadTarget)
+        and isvector(rememberedSquadPosition)
+        and CurTime() - (tonumber(rememberedSquadSeenAt) or 0) <= 4 then
+        best = rememberedSquadTarget
+        self.BZCNEnemyMemory = {
+            Entity = rememberedSquadTarget,
+            Position = rememberedSquadPosition,
+            Time = rememberedSquadSeenAt
+        }
     end
 
     self.BZCNEnemy = best
@@ -1553,8 +1562,8 @@ function ENT:ChaseEnemy(target)
                 goalPos = origin + radial * standOff + side * sideOffset
             else
                 local rangedWing = hasRangedWeapon
-                local forwardOffset = rangedWing and 165 or 48
-                local sideOffset = rangedWing and 140 or 46
+                local forwardOffset = rangedWing and 165 or 22
+                local sideOffset = rangedWing and 140 or 18
                 goalPos = origin + radial * forwardOffset + side * sideSign * sideOffset
             end
             goalPos = Vector(goalPos.x, goalPos.y, origin.z)
