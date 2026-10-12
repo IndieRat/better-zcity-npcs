@@ -109,14 +109,16 @@ function FakeActor:ShadowBone(name, angle, seconds, maxAngular, maxAngularDamp, 
     phys:Wake()
     local params = {
         secondstoarrive = seconds or 0.1,
-        maxangular = maxAngular or 80,
-        maxangulardamp = maxAngularDamp or 35,
         maxspeed = maxSpeed or 65,
         maxspeeddamp = maxSpeedDamp or 40,
         dampfactor = 0.45,
         teleportdistance = 0
     }
-    if isangle(angle) then params.angle = angle end
+    if isangle(angle) then
+        params.angle = angle
+        params.maxangular = maxAngular or 80
+        params.maxangulardamp = maxAngularDamp or 35
+    end
     if isvector(position) then params.pos = position end
     phys:ComputeShadowControl(params)
 end
@@ -191,6 +193,27 @@ function FakeActor:UpdateLookTarget()
     if IsValid(attacker) and attacker ~= self.owner and now - damageAt <= 5.5 then
         self.lookTarget = attacker:WorldSpaceCenter()
         return
+    end
+
+    -- Reuse the combat actor's current visible-body solution when one is still
+    -- active, so an NPC that falls during an encounter keeps looking toward
+    -- the same point its aim solver was tracking instead of staring through
+    -- its hidden NextBot origin.
+    local aimUntil = self.owner.GetNW2Float
+        and self.owner:GetNW2Float("BZCNCombatAimUntil", 0) or 0
+    local solution = self.owner.BZCNCombatAimSolution
+    if istable(solution) and isvector(solution.point) and aimUntil > now then
+        self.lookTarget = solution.point
+        return
+    end
+
+    local target = self.owner.BZCNCombatTarget or self.owner.BZCNEnemy
+    if IsValid(target) and BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint) then
+        local point = BZCNCombatActor.GetTargetAimPoint(target)
+        if isvector(point) then
+            self.lookTarget = point
+            return
+        end
     end
 
     if not isvector(self.lookTarget) or now >= (self.nextLookScanAt or 0) then
