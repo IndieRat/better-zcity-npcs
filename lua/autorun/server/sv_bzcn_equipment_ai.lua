@@ -1599,6 +1599,13 @@ local function NeedsMedicalAttention(target)
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
     local shock = tonumber(org.shock) or 0
     local pain = tonumber(org.pain) or 0
+    local pulse = tonumber(org.pulse) or 0
+    local oxygen = istable(org.o2) and tonumber(org.o2[1]) or nil
+    local analgesia = tonumber(org.analgesia) or 0
+    local unconscious = org.otrub == true or org.needotrub == true
+        or (tonumber(org.consciousness) ~= nil and tonumber(org.consciousness) <= 0.05)
+    local overdoseConcern = analgesia >= 3
+        and (unconscious or (oxygen and oxygen < 8) or (pulse > 0 and pulse < 42))
     local recentlyHurt = CurTime() - (tonumber(target.BZCNLastDamageTime) or 0) < 12
     local maxHealth = math.max(tonumber(target:GetMaxHealth()) or 100, 100)
     local healthFraction = math.Clamp(target:Health() / maxHealth, 0, 1)
@@ -1619,12 +1626,19 @@ local function NeedsMedicalAttention(target)
         return false, 0
     end
 
+    local unstableVitals = shock >= 65 or unconscious
+        or (oxygen and oxygen < 8) or (pulse > 0 and pulse < 42) or pulse >= 145
     local urgent = (internalBleed > 0) or blood < 4200 or wounds > 0
-        or (shock > 80 and recentlyHurt) or (lowHealth and recentlyHurt)
+        or (shock >= 65) or unconscious or (oxygen and oxygen < 8)
+        or (pulse > 0 and pulse < 42) or pulse >= 145 or overdoseConcern
+        or (lowHealth and (recentlyHurt or healthFraction <= 0.35))
     if not urgent and pain < 75 then return false, 0 end
     local score = wounds * 3 + (internalBleed > 0 and 8 or 0)
-        + (blood < 4200 and 5 or 0) + (lowHealth and recentlyHurt and 2 or 0)
-        + (shock > 80 and 2 or 0)
+        + (blood < 4200 and 5 or 0) + (lowHealth and (recentlyHurt or healthFraction <= 0.35) and 3 or 0)
+        + (shock >= 65 and 4 or 0) + (unconscious and 7 or 0)
+        + (oxygen and oxygen < 8 and 7 or 0)
+        + (pulse > 0 and pulse < 42 and 5 or 0)
+        + (pulse >= 145 and 4 or 0) + (overdoseConcern and 10 or 0)
     return true, score
 end
 
@@ -1647,8 +1661,12 @@ local function GetMedicalReadout(target)
         pain = tonumber(org.pain) or 0,
         shock = tonumber(org.shock) or 0,
         pulse = pulse,
+        oxygen = istable(org.o2) and tonumber(org.o2[1]) or nil,
+        analgesia = tonumber(org.analgesia) or 0,
+        analgesiaAdd = tonumber(org.analgesiaAdd) or 0,
         adrenaline = tonumber(org.adrenalineAdd) or 0,
         needsUnconsciousAid = org.otrub == true or org.needotrub == true
+            or (tonumber(org.consciousness) ~= nil and tonumber(org.consciousness) <= 0.05)
     }
 end
 
@@ -1696,12 +1714,25 @@ local function ChooseMedicalClass(inventory, target, healer)
         return "weapon_bloodbag"
     end
 
+    -- Z-City's pain module uses naloxone to counter high analgesia over time.
+    -- Only trigger it for high analgesia plus unconsciousness/low oxygen/low pulse,
+    -- not for every injured NPC that received ordinary pain relief.
+    local overdoseConcern = readout.analgesia >= 3
+        or readout.analgesiaAdd >= 3
+    if readout.hasOrganism and overdoseConcern
+        and (readout.needsUnconsciousAid or (readout.oxygen and readout.oxygen < 8)
+            or (readout.pulse > 0 and readout.pulse < 42))
+        and has("weapon_naloxone", {1}) then
+        return "weapon_naloxone"
+    end
+
     if readout.hasOrganism and readout.pain >= 45 then
         if has("weapon_painkillers", {1}) then return "weapon_painkillers" end
         if has("weapon_medkit_sh", {2}) then return "weapon_medkit_sh" end
     end
 
     if readout.hasOrganism and (readout.needsUnconsciousAid or readout.shock >= 78
+        or (readout.oxygen and readout.oxygen < 8)
         or (readout.pulse > 0 and readout.pulse < 42)) then
         if has("weapon_adrenaline", {1}) then return "weapon_adrenaline" end
     end
@@ -1862,8 +1893,17 @@ local function UseMedicalItem(healer, target, class)
         actions[#actions + 1] = 1
     elseif class == "weapon_tourniquet" and arterialCount > 0 and med.modeValues[1] > 0 then
         actions[#actions + 1] = 1
+    elseif class == "weapon_naloxone"
+        and ((tonumber(org.analgesia) or 0) >= 3 or (tonumber(org.analgesiaAdd) or 0) >= 3)
+        and (org.otrub or org.needotrub
+            or (istable(org.o2) and (tonumber(org.o2[1]) or 100) < 8)
+            or ((tonumber(org.pulse) or 0) > 0 and (tonumber(org.pulse) or 0) < 42))
+        and med.modeValues[1] > 0 then
+        actions[#actions + 1] = 1
     elseif class == "weapon_adrenaline"
-        and (shock >= 78 or org.otrub or org.needotrub or (tonumber(org.pulse) or 0) < 42)
+        and (shock >= 78 or org.otrub or org.needotrub
+            or (istable(org.o2) and (tonumber(org.o2[1]) or 100) < 8)
+            or (tonumber(org.pulse) or 0) < 42)
         and med.modeValues[1] > 0 then
         actions[#actions + 1] = 1
     elseif class == "weapon_betablock"
