@@ -87,6 +87,25 @@ local function UpdateSwimState(self)
     return true
 end
 
+local function GetBZCNPhysiologyPenalty(self)
+    local org = self.organism or self.BZCN_Organism or {}
+    local pain = math.Clamp(tonumber(org.pain) or 0, 0, 100)
+    local shock = math.Clamp(tonumber(org.shock) or 0, 0, 100)
+    local blood = math.Clamp(tonumber(org.blood) or 5000, 0, 5000)
+    local oxygen = istable(org.o2) and tonumber(org.o2[1]) or nil
+    local healthFraction = self.Health and self.GetMaxHealth
+        and math.Clamp(self:Health() / math.max(self:GetMaxHealth(), 1), 0, 1) or 1
+
+    local speed = 1
+    speed = speed * (1 - math.Clamp(pain / 100, 0, 1) * 0.28)
+    speed = speed * (1 - math.Clamp(shock / 100, 0, 1) * 0.38)
+    if blood < 4200 then speed = speed * math.Clamp(blood / 4200, 0.45, 1) end
+    if oxygen and oxygen < 10 then speed = speed * math.Clamp(oxygen / 10, 0.35, 1) end
+    speed = speed * (0.65 + healthFraction * 0.35)
+
+    return math.Clamp(speed, 0.22, 1), pain, shock, blood, oxygen
+end
+
 local function UpdatePursuitStamina(self, wantsSprint)
     local now = CurTime()
     local last = tonumber(self.BZCNStaminaUpdatedAt) or now
@@ -1075,6 +1094,32 @@ function ENT:AttackTarget(target)
     if not self:IsBZCNEnemy(target) or not HasSenseRecord(self, target, true)
         or CurTime() < (self.BZCNMedicalUntil or 0) then return end
 
+    -- Pain, shock, hypoxia and blood loss slow the decision-to-action loop.
+    -- This is separate from faction morale so Combine discipline is not replaced
+    -- by random fear; severe physiology still degrades their reaction timing.
+    local _, pain, shock, blood, oxygen = GetBZCNPhysiologyPenalty(self)
+    local reactionBurden = math.max(pain / 100, shock / 100,
+        math.Clamp((4200 - blood) / 3300, 0, 1),
+        oxygen and math.Clamp((10 - oxygen) / 10, 0, 1) or 0)
+    if reactionBurden > 0.18 then
+        if now < (self.BZCNPhysiologyHesitationUntil or 0) then
+            self.LastAttack = now + 0.08
+            return
+        end
+        if now >= (self.BZCNNextPhysiologyCheck or 0) then
+            self.BZCNNextPhysiologyCheck = now + math.Rand(1.2, 2.6)
+            local chance = math.Clamp((reactionBurden - 0.18) * 0.65, 0, 0.48)
+            if math.Rand(0, 1) < chance then
+                self.BZCNPhysiologyHesitationUntil = now
+                    + math.Rand(0.12, 0.28 + reactionBurden * 0.55)
+            end
+        end
+        if now < (self.BZCNPhysiologyHesitationUntil or 0) then
+            self.LastAttack = now + 0.08
+            return
+        end
+    end
+
     -- Metro police have training, but not the Combine's emotionless discipline:
     -- low morale (injuries or nearby squad losses) can cause a short hesitation.
     -- It delays an attack, never overrides the hard target-incapacitated check.
@@ -1645,13 +1690,14 @@ function ENT:ChaseEnemy(target)
                 and hg.BZCNNPCSupport.ShouldCrawl and hg.BZCNNPCSupport.ShouldCrawl(self)))
         local crawling = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.ShouldCrawl
             and hg.BZCNNPCSupport.ShouldCrawl(self)
-        local desiredSpeed = baseSpeed
+        local physiologySpeed = GetBZCNPhysiologyPenalty(self)
+        local desiredSpeed = baseSpeed * physiologySpeed
         if crawling then
-            desiredSpeed = baseSpeed * 0.42
+            desiredSpeed = baseSpeed * physiologySpeed * 0.42
         elseif sprinting then
-            desiredSpeed = baseSpeed * (tonumber(profile.SprintSpeedMultiplier) or 1.45)
+            desiredSpeed = baseSpeed * physiologySpeed * (tonumber(profile.SprintSpeedMultiplier) or 1.45)
         elseif distance > sprintStart and stamina <= 8 then
-            desiredSpeed = baseSpeed * 0.78
+            desiredSpeed = baseSpeed * physiologySpeed * 0.78
         end
 
         local actualAimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
