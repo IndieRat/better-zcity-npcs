@@ -163,3 +163,10 @@ The server-side medical AI checks Z-City organism wounds, blood loss, internal b
 - Z-City NPC Integration (injury/ragdoll design reference): https://forge.owouw.us/ToasterPanic/zcnpci
 - Z-City's organism-backed native NPC conversion: https://github.com/uzelezz123/Z-City/blob/main/lua/homigrad/sv_npcstuff.lua
 - Z-City's headcrab zombie player class (pinned): https://github.com/uzelezz123/Z-City/blob/6464efc2cd9fcfe0c822195a7102d6afe1d86956/lua/homigrad/playerclass/classes/sh_headcrabzombie.lua
+
+### BZCN Fancy Patch Finishing Pass
+
+The final polish pass makes human NPC names follow the sex metadata of their selected Z-City appearance model, using Z-City's native name generator when available and gender-specific fallback pools otherwise. Accessory rendering normalizes both the stock array of accessory IDs and adapter-provided keyed/slot-style tables. The client bridge also seeds and restores Z-City's existing `CahceModel`/`bSex` cache so its Player-only `GetSubModels()` lookup is not called on a NextBot.
+
+The medical inventory checker now type-checks weapon entries before calling `IsValid`, because Z-City legitimately stores some virtual inventory entries as boolean `true`. Sprint locomotion follows Z-City's velocity-based walk/run selection: it waits for actual speed to pass the run threshold, prefers a dedicated sprint sequence when a model has one, and eases playback-rate changes rather than scaling the animation directly by speed/base-speed.
+
