@@ -24,7 +24,7 @@ local function SetAlert(officer, suspect, reason, severity, duration)
     end
 
     severity = string.lower(tostring(severity or "suspicious"))
-    local state = severity == "alert" or severity == "threatened" and "alert" or "suspicious"
+    local state = (severity == "alert" or severity == "threatened") and "alert" or "suspicious"
     if state ~= "alert" then state = "suspicious" end
 
     local now = CurTime()
@@ -51,7 +51,7 @@ end
 function BZCN.ReportMetrocopIncident(suspect, reason, severity, duration)
     if not IsValid(suspect) then return 0 end
     local origin = suspect:GetPos()
-    local radius = math.Clamp(tonumber(duration and nil) or 900, 300, 1400)
+    local radius = 900 -- fixed observation radius; duration controls alert lifetime
     local count = 0
     for _, officer in ipairs(ents.FindInSphere(origin, radius)) do
         if not IsMetrocop(officer) then continue end
