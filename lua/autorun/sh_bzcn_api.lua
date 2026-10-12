@@ -147,7 +147,7 @@ BZCN.RegisterClass("Rebel", {
 -- conversion, UI and role callbacks are not invoked on NPC entities.
 BZCN.RegisterClass("furry", {
     Name = "Furry Specimen", PlayerClassName = "furry",
-    Model = "models/eradium/protogen_player.mdl", Health = 125, Speed = 235,
+    Model = "models/eradium/protogen_player.mdl", Health = 125, Speed = 235, BaseSpeedOverride = 235,
     -- Mirror the native furry class' movement identity without applying its
     -- player-only hooks to a NextBot. Sprint drains less stamina and jumps higher.
     FurrySpeedGainClassMul = 5, FurryJumpPowerMul = 1.5, FurryStaminaExhaustMul = 0.75,
@@ -180,7 +180,7 @@ BZCN.RegisterClass("civilian_companion", {
 
 BZCN.RegisterClass("furry_companion", {
     Name = "Furry Companion", PlayerClassName = "furry",
-    Model = "models/eradium/protogen_player.mdl", Health = 135, Speed = 235,
+    Model = "models/eradium/protogen_player.mdl", Health = 135, Speed = 235, BaseSpeedOverride = 235,
     FurrySpeedGainClassMul = 5, FurryJumpPowerMul = 1.5, FurryStaminaExhaustMul = 0.75,
     FurryPounceCooldown = 3.2, SprintStaminaDrain = 18, SprintStaminaRecovery = 22, SprintSpeedMultiplier = 1.55,
     Faction = "furry", EnemyPlayers = true, EnemyFactions = {"Combine", "default", "Rebel"},
@@ -197,6 +197,7 @@ BZCN.RegisterClass("furry_companion", {
 BZCN.RegisterClass("headcrab", {
     Name = "Headcrab", PlayerClassName = "headcrab",
     Model = "models/headcrabclassic.mdl", ModelScale = 0.8, Health = 22, Speed = 230,
+    BaseSpeedOverride = 230, HeadcrabPounceCooldown = 2.15,
     Faction = "headcrab", EnemyPlayers = true,
     EnemyFactions = {"default", "Combine", "Metrocop", "Rebel", "furry", "zombie", "headcrab_zombie"},
     FollowAllies = true, FollowRange = 750, FollowDistance = 80, HelpRange = 500, HelpMemory = 4,
@@ -208,12 +209,14 @@ BZCN.RegisterClass("headcrab", {
 
 BZCN.RegisterClass("headcrab_zombie", {
     Name = "Headcrab Zombie", PlayerClassName = "headcrab_zombie",
-    Model = "models/zombie/classic.mdl", Health = 155, Speed = 132,
+    Model = "models/zcity/player/zombie_classic.mdl", Health = 155, Speed = 132,
+    BaseSpeedOverride = 132,
     Faction = "zombie", EnemyPlayers = true,
     EnemyFactions = {"default", "Combine", "Metrocop", "Rebel", "furry", "headcrab"},
     FollowAllies = true, FollowRange = 850, FollowDistance = 80, HelpRange = 600, HelpMemory = 5,
-    ZombieStyle = true, Ranged = false, MeleeDamage = 22, MeleeRange = 55, AttackDelay = 1.18,
-    AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
+    ZombieStyle = true, Ranged = false, MeleeDamage = 22, MeleeRange = 58, AttackDelay = 1.18,
+    MeleeSound = "npc/zombie/claw_strike1.wav", MeleeMissSound = "npc/zombie/claw_miss1.wav",
+    AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     MedicalRange = 0,
     Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {}}
 })
