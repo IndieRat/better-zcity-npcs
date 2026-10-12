@@ -172,11 +172,12 @@ end
 
 hook.Add("PostDrawOpaqueRenderables", "BZCN_FancyNPCAccessories", function(depth, skybox)
     if skybox then return end
-    if not istable(hg) or not istable(hg.Accessories) then return end
 
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if IsManagedHumanNPC(ent) then
-            RenderNPCAccessories(ent)
+            if istable(hg) and istable(hg.Accessories) then
+                RenderNPCAccessories(ent)
+            end
             RenderAttachedHeadcrab(ent)
         end
     end
