@@ -15,8 +15,8 @@ BZCN = BZCN or {}
 BZCN.Classes = BZCN.Classes or {}
 BZCN.Version = "0.2.0"
 
--- Homigrad's ordinary human movement defaults are a 190 walk/base speed and
--- a 280 run/sprint speed (the latter follows the live movement convar when set).
+-- Z-City's ordinary human movement defaults are a 190 walk/base speed and
+-- a 320 run/sprint speed (the latter follows the live movement convar when set).
 BZCN.BaseMoveSpeed = math.Clamp(tonumber(BZCN.BaseMoveSpeed) or 190, 80, 800)
 BZCN.SprintMoveSpeed = math.Clamp(tonumber(BZCN.SprintMoveSpeed) or 320, 80, 1000)
 
