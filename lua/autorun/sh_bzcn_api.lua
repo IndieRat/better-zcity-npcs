@@ -99,7 +99,7 @@ BZCN.RegisterClass("furry", {
     SmartFurryChance = 0.22,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
-    MedicalRange = 250, FurryStyle = true, FurryGrabRange = 86, Skin = 4, BloodType = "c-",
+    MedicalRange = 250, FurryStyle = true, FurryGrabRange = 110, Skin = 4, BloodType = "c-",
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
 })
 
@@ -128,7 +128,7 @@ BZCN.RegisterClass("furry_companion", {
     Ranged = false, MeleeDamage = 16, MeleeRange = 74, AttackDelay = 0.72,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
-    MedicalRange = 420, FurryGrabRange = 80, Skin = 4, BloodType = "c-",
+    MedicalRange = 420, FurryGrabRange = 105, Skin = 4, BloodType = "c-",
     CompanionAmmoStock = 120,
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
 })
