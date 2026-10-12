@@ -688,17 +688,28 @@ end
 
 local function GetCurrentFurryRagdoll(target)
     if not IsValid(target) then return nil end
-    local rag = target.BZCNNPCRagdoll or target.FakeRagdoll
+
+    -- Z-City versions expose the active fake body under different fields/netvars.
+    -- Check each known route rather than treating a stale/late NWEntity read as
+    -- proof that a victim has no ragdoll.
+    local rag = target.BZCNNPCRagdoll or target.FakeRagdoll or target.ragdoll
+    if not IsValid(rag) and target.GetNW2Entity then
+        local ok, result = pcall(target.GetNW2Entity, target, "FakeRagdoll")
+        if ok and IsValid(result) then rag = result end
+    end
     if not IsValid(rag) and target.GetNWEntity then
-        rag = target:GetNWEntity("FakeRagdoll")
+        for _, key in ipairs({"FakeRagdoll", "ragdoll"}) do
+            local ok, result = pcall(target.GetNWEntity, target, key)
+            if ok and IsValid(result) then rag = result break end
+        end
     end
     if not IsValid(rag) and hg and isfunction(hg.GetCurrentCharacter) then
         local ok, result = pcall(hg.GetCurrentCharacter, target)
-        if ok then rag = result end
+        if ok and IsValid(result) then rag = result end
     end
     if not IsValid(rag) or rag == target then return nil end
-    local className = rag:GetClass()
-    if className ~= "prop_ragdoll" and not (rag.IsRagdoll and rag:IsRagdoll()) then return nil end
+    local className = isfunction(rag.GetClass) and rag:GetClass() or ""
+    if className ~= "prop_ragdoll" and not (isfunction(rag.IsRagdoll) and rag:IsRagdoll()) then return nil end
     return rag
 end
 
@@ -1101,53 +1112,157 @@ end
 local function TraceFurryGrab(attacker, target, weapon)
     if not IsValid(attacker) or not IsValid(target) then return false end
     local eye = isfunction(attacker.EyePos) and attacker:EyePos() or attacker:WorldSpaceCenter()
-    local aim = isfunction(attacker.GetAimVector) and attacker:GetAimVector() or attacker:GetForward()
-    if not isvector(eye) or not isvector(aim) or aim:LengthSqr() < 0.01 then return false end
+    if not isvector(eye) then return false end
 
     local range = tonumber(IsValid(weapon) and weapon.ReachDistance)
-        or tonumber(attacker.BZCNClassProfile and attacker.BZCNClassProfile.FurryGrabRange) or 86
+        or tonumber(attacker.BZCNClassProfile and attacker.BZCNClassProfile.FurryGrabRange) or 40
     range = math.Clamp(range, 36, 112)
-    local filter = {attacker}
-    if IsValid(weapon) then filter[#filter + 1] = weapon end
-    if IsValid(attacker.BZCNHeldWeaponProxy) then filter[#filter + 1] = attacker.BZCNHeldWeaponProxy
-    end
     local rag = GetCurrentFurryRagdoll(target)
     local downed = IsDownedForFurryGrab(target, rag)
-    local trace = util.TraceHull({
-        start = eye,
-        endpos = eye + aim:GetNormalized() * range,
-        mins = Vector(-5, -5, -5),
-        maxs = Vector(5, 5, 5),
-        mask = MASK_SHOT,
-        filter = filter
-    })
-    if not trace.Hit or not IsValid(trace.Entity) or eye:DistToSqr(trace.HitPos) > range * range then
-        return false
+    local profile = attacker.BZCNClassProfile or {}
+    local mins, maxs = profile.FurryStyle == true
+        and Vector(-8, -8, -8) or Vector(-5, -5, -5),
+        profile.FurryStyle == true and Vector(8, 8, 8) or Vector(5, 5, 5)
+
+    local filter = {attacker}
+    if IsValid(weapon) then filter[#filter + 1] = weapon end
+    if IsValid(attacker.BZCNHeldWeaponProxy) then
+        filter[#filter + 1] = attacker.BZCNHeldWeaponProxy
+    end
+    -- Once fake-ragdolled, the living owner entity overlaps its own body and
+    -- often intercepts the SWEP-style trace. Filter that owner, never the rag.
+    if downed and IsValid(rag) and target ~= rag then filter[#filter + 1] = target end
+
+    local function TraceTo(endPos)
+        if not isvector(endPos) then return nil end
+        local distance = eye:Distance(endPos)
+        if distance < 1 or distance > range + 1 then return nil end
+        return util.TraceHull({
+            start = eye, endpos = endPos, mins = mins, maxs = maxs,
+            mask = MASK_SHOT, filter = filter
+        })
     end
 
-    local hitTarget = trace.Entity == target or trace.Entity == rag
-    if not hitTarget then
-        local owner = trace.Entity.BZCNNPCOwner
-        if not IsValid(owner) and trace.Entity.organism then owner = trace.Entity.organism.owner end
-        if not IsValid(owner) and trace.Entity.GetNW2Entity then owner = trace.Entity:GetNW2Entity("BZCNNPCOwner") end
-        if not IsValid(owner) and trace.Entity.GetNWEntity then owner = trace.Entity:GetNWEntity("RagdollOwner") end
-        if not IsValid(owner) and hg and isfunction(hg.RagdollOwner) then
-            local okOwner, value = pcall(hg.RagdollOwner, trace.Entity)
-            if okOwner then owner = value end
-        end
-        hitTarget = owner == target
-    end
-    if not hitTarget then return false end
-
-    if downed then
-        -- A downed target cannot be grabbed by its hidden living entity or
-        -- torso; the trace itself must hit an arm/forearm/hand physics bone.
-        if trace.Entity ~= rag or not IsGrabbableArmBone(rag, trace.PhysicsBone) then
+    local function IsOurTrace(trace)
+        if not trace or not trace.Hit or not IsValid(trace.Entity)
+            or not isvector(trace.HitPos) or eye:DistToSqr(trace.HitPos) > range * range then
             return false
         end
+        if downed then
+            return IsValid(rag) and trace.Entity == rag
+                and IsGrabbableArmBone(rag, trace.PhysicsBone)
+        end
+        if trace.Entity == target or trace.Entity == rag then return true end
+        local hit = trace.Entity
+        local owner = hit.BZCNNPCOwner
+        if not IsValid(owner) and istable(hit.organism) then owner = hit.organism.owner end
+        if not IsValid(owner) and hit.GetNW2Entity then
+            local ok, value = pcall(hit.GetNW2Entity, hit, "BZCNNPCOwner")
+            if ok then owner = value end
+        end
+        if not IsValid(owner) and hit.GetNWEntity then
+            for _, key in ipairs({"BZCNNPCOwner", "RagdollOwner", "ply"}) do
+                local ok, value = pcall(hit.GetNWEntity, hit, key)
+                if ok and IsValid(value) then owner = value break end
+            end
+        end
+        if not IsValid(owner) and hg and isfunction(hg.RagdollOwner) then
+            local ok, value = pcall(hg.RagdollOwner, hit)
+            if ok then owner = value end
+        end
+        return owner == target
     end
-    return true, trace
+
+    -- Player-driven grabs retain the real crosshair direction. A managed NPC
+    -- has no player camera input, so aim at the same resolved target point the
+    -- combat solver uses instead of the NextBot's unrelated GetAimVector.
+    local endpoints = {}
+    if attacker:IsPlayer() then
+        local aim = isfunction(attacker.GetAimVector) and attacker:GetAimVector() or attacker:GetForward()
+        if not isvector(aim) or aim:LengthSqr() < 0.01 then return false end
+        endpoints[#endpoints + 1] = eye + aim:GetNormalized() * range
+    elseif downed and IsValid(rag) then
+        -- Find real articulated arm/hand physics targets. A torso-centred ray
+        -- can never satisfy the native downed-grab rule even when the victim
+        -- is visibly within reach.
+        for _, name in ipairs({
+            "ValveBiped.Bip01_L_Hand", "ValveBiped.Bip01_R_Hand",
+            "ValveBiped.Bip01_L_Forearm", "ValveBiped.Bip01_R_Forearm",
+            "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_R_UpperArm"
+        }) do
+            local bone = rag:LookupBone(name)
+            if bone then
+                local ok, physBone = pcall(rag.TranslateBoneToPhysBone, rag, bone)
+                if ok and isnumber(physBone) and physBone >= 0 then
+                    local phys = rag:GetPhysicsObjectNum(physBone)
+                    if IsValid(phys) then
+                        local point = phys:GetPos()
+                        if eye:Distance(point) <= range then endpoints[#endpoints + 1] = point end
+                    end
+                end
+            end
+        end
+        local aimPoint = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
+            and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+        if isvector(aimPoint) and eye:Distance(aimPoint) <= range then endpoints[#endpoints + 1] = aimPoint end
+    else
+        local aimPoint = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
+            and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+        if not isvector(aimPoint) then return false end
+        local direction = aimPoint - eye
+        if direction:LengthSqr() < 1 then return false end
+        endpoints[#endpoints + 1] = eye + direction:GetNormalized() * math.min(direction:Length(), range)
+    end
+
+    for _, endPos in ipairs(endpoints) do
+        local trace = TraceTo(endPos)
+        if IsOurTrace(trace) then return true, trace end
+    end
+    return false
 end
+
+-- Reproduce the useful part of Z-City's weapon_hands_sh trace for NextBots.
+-- Its actual PrimaryAttack is Player-oriented; AI supplies the trace and keeps
+-- the addon's validated damage/cooldown path, using the SWEP's real reach.
+function BZCN.TraceRuntimeHands(attacker, target, requestedReach)
+    if not IsValid(attacker) or not IsValid(target) or not BZCN.IsManaged(attacker) then return nil end
+    local weapon = attacker.BZCNRuntimeWeapon
+    if not IsValid(weapon) or weapon:GetClass() ~= "weapon_hands_sh" then
+        weapon = ConfigureWeaponEntity(attacker, "weapon_hands_sh", "BZCNRuntimeMeleeWeapon")
+    end
+    if not IsValid(weapon) then return nil end
+
+    local reach = math.min(tonumber(requestedReach) or 40, tonumber(weapon.ReachDistance) or 40, 40)
+    local eye = isfunction(attacker.EyePos) and attacker:EyePos() or attacker:WorldSpaceCenter()
+    local aimPoint = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
+        and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+    if not isvector(eye) or not isvector(aimPoint) then return nil end
+    local direction = aimPoint - eye
+    if direction:LengthSqr() < 1 then direction = attacker:GetForward() end
+    if direction:LengthSqr() < 1 then return nil end
+    local endPos = eye + direction:GetNormalized() * reach
+
+    local rag = GetCurrentFurryRagdoll(target)
+    if not IsValid(rag) and hg and isfunction(hg.GetCurrentCharacter) then
+        local ok, current = pcall(hg.GetCurrentCharacter, target)
+        if ok then rag = current end
+    end
+    local downed = IsDownedForFurryGrab(target, rag)
+    local filter = {attacker, weapon}
+    if IsValid(attacker.BZCNHeldWeaponProxy) then filter[#filter + 1] = attacker.BZCNHeldWeaponProxy end
+    if downed and IsValid(rag) and target ~= rag then filter[#filter + 1] = target end
+
+    local tr = util.TraceLine({start = eye, endpos = endPos, filter = filter, mask = MASK_SHOT})
+    if not tr.Hit or tr.HitWorld then
+        tr = util.TraceHull({
+            start = eye, endpos = endPos,
+            mins = Vector(-5, -5, -5), maxs = Vector(5, 5, 5),
+            filter = filter, mask = MASK_SHOT
+        })
+    end
+    return tr
+end
+
 
 function BZCN.TryFurryAssimilation(attacker, target)
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("furry_grabs") then
@@ -1548,20 +1663,22 @@ local function ChooseMedicalClass(inventory, target, healer)
         return HasMedicalSupply(inventory, class, modes)
     end
 
-    -- Stop ongoing blood loss first; transfusion alone does not seal wounds.
-    if readout.hasOrganism and (readout.arterial > 0 or readout.wounds > 0
-        or readout.internalBleed > 0 or readout.blood < 4500) then
+    -- Control the source of bleeding before replacing blood volume. Low blood
+    -- alone is not a reason to waste bandages when there are no wounds to seal.
+    local activeBleeding = readout.arterial > 0 or readout.wounds > 0
+        or readout.internalBleed > 0
+    if readout.hasOrganism and activeBleeding then
         if has("weapon_medkit_sh", {1, 3, 4}) then return "weapon_medkit_sh" end
         if readout.arterial > 0 and has("weapon_tourniquet", {1}) then return "weapon_tourniquet" end
-        if (readout.wounds > 0 or readout.arterial > 0 or readout.blood < 4600)
+        if (readout.wounds > 0 or readout.arterial > 0)
             and has("weapon_bigbandage_sh", {1}) then return "weapon_bigbandage_sh" end
-        if (readout.wounds > 0 or readout.arterial > 0 or readout.blood < 4600)
+        if (readout.wounds > 0 or readout.arterial > 0)
             and has("weapon_bandage_sh", {1}) then return "weapon_bandage_sh" end
     end
 
-    -- A blood bag is only used for significant blood loss, after available
-    -- wound care has been considered. UseMedicalItem checks compatibility.
-    if readout.hasOrganism and readout.blood < 3500 and has("weapon_bloodbag", {1}) then
+    -- Transfuse significant losses only after the triage step above. The real
+    -- SWEP validates donor/recipient blood types before changing blood volume.
+    if readout.hasOrganism and readout.blood < 4200 and has("weapon_bloodbag", {1}) then
         return "weapon_bloodbag"
     end
 
@@ -1725,7 +1842,7 @@ local function UseMedicalItem(healer, target, class)
     if hasMedkit and (pain >= 65 or shock >= 75) and (target == healer or org.otrub)
         and med.modeValues[2] > 0 then actions[#actions + 1] = 2 end
     if (hasMedkit or isBandage)
-        and (woundCount > 0 or arterialCount > 0 or blood < 4600)
+        and (woundCount > 0 or arterialCount > 0)
         and med.modeValues[1] > 0 then actions[#actions + 1] = 1 end
     if class == "weapon_painkillers" and pain >= 45 and med.modeValues[1] > 0 then
         actions[#actions + 1] = 1
@@ -1777,13 +1894,23 @@ local function UseMedicalItem(healer, target, class)
                 local beforeSupply = tonumber(med.modeValues[mode]) or 0
                 local beforeAnalgesia = tonumber(org.analgesiaAdd) or 0
                 local beforeInternalHeal = tonumber(org.internalBleedHeal) or 0
+                local beforeBlood = tonumber(org.blood) or 5000
+                local beforePain = tonumber(org.pain) or 0
+                local beforeShock = tonumber(org.shock) or 0
+                local beforeWounds = WoundCount(org.wounds)
+                local beforeArterial = WoundCount(org.arterialwounds)
                 local ok = pcall(fn, med, target, mode)
                 if ok then
                     local afterSupply = tonumber(med.modeValues and med.modeValues[mode]) or beforeSupply
                     local afterAnalgesia = tonumber(org.analgesiaAdd) or beforeAnalgesia
                     local afterInternalHeal = tonumber(org.internalBleedHeal) or beforeInternalHeal
+                    local changedPhysiology = (tonumber(org.blood) or 5000) > beforeBlood
+                        or (tonumber(org.pain) or 0) < beforePain
+                        or (tonumber(org.shock) or 0) < beforeShock
+                        or WoundCount(org.wounds) < beforeWounds
+                        or WoundCount(org.arterialwounds) < beforeArterial
                     if afterSupply < beforeSupply or afterAnalgesia > beforeAnalgesia
-                        or afterInternalHeal > beforeInternalHeal or mode == 1 or mode == 4 then
+                        or afterInternalHeal > beforeInternalHeal or changedPhysiology then
                         applied = true
                     end
                 end
