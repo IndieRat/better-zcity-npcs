@@ -88,7 +88,7 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
 
         -- The leap requires some approach speed or meaningful run-up movement.
         -- If boxed in, abandon the attempt rather than repeatedly jumping in place.
-        if groundSpeed < 75 and runupDistance < 18 then
+        if distance > 170 and groundSpeed < 75 and runupDistance < 18 then
             if elapsed > 0.85 then
                 ent.BZCNFurryLungeCooldown = CurTime() + 1.5
                 ent.BZCNFurryLungeTarget = nil
@@ -106,7 +106,8 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
             expires = launchTime + 0.95,
             startedAt = launchTime,
             startPos = ent:GetPos(),
-            boostUntil = launchTime + 0.16
+            boostUntil = launchTime + 0.16,
+            boostVelocity = boostVelocity
         }
         ent.BZCNFurryPounceState = pounceState
         ent.BZCNNextPounceAt = launchTime + math.Rand(2.4, 3.5)
@@ -154,9 +155,14 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
                     if IsValid(phys) then
                         phys:Wake()
                         local inherited = phys:GetVelocity()
-                        -- The initial burst has already launched the actor. Add a
-                        -- small hand-off impulse only, avoiding a second full jump.
-                        phys:SetVelocity(inherited + direction * 105 + Vector(0, 0, 25))
+                        local launchVelocity = isvector(pounceState.boostVelocity)
+                            and pounceState.boostVelocity or (direction * 520 + Vector(0, 0, 275))
+                        -- Carry the actual upright boost into the ragdoll. Preserve
+                        -- a portion of the old lateral velocity so the transition
+                        -- doesn't erase a strafing/run-up component.
+                        local inheritedSide = Vector(inherited.x, inherited.y, 0)
+                            - direction * Vector(inherited.x, inherited.y, 0):Dot(direction)
+                        phys:SetVelocity(launchVelocity + inheritedSide * 0.35)
                         if BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
                             local actor = BZCN.FakeActor.Attach(ent, rag, {
                                 gain = 1.5, maxCorrection = 100, maxSpeed = 720,
@@ -199,13 +205,15 @@ timer.Create("BZCN_FurryStagedPounceContact", 0.04, 0, function()
         local rag = IsValid(pounce.rag) and pounce.rag
             or (IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll
             or (IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or nil))
+        local targetBody = IsValid(target.BZCNNPCRagdoll) and target.BZCNNPCRagdoll
+            or (IsValid(target.FakeRagdoll) and target.FakeRagdoll or target)
         local attackerCenter = IsValid(rag) and rag:WorldSpaceCenter() or ent:WorldSpaceCenter()
-        local targetCenter = target:WorldSpaceCenter()
+        local targetCenter = targetBody:WorldSpaceCenter()
         if attackerCenter:DistToSqr(targetCenter) > 76 * 76 then continue end
 
         local line = util.TraceLine({
             start = attackerCenter, endpos = targetCenter,
-            filter = {ent, rag, target}, mask = MASK_SOLID
+            filter = {ent, rag, target, targetBody}, mask = MASK_SOLID
         })
         if line.Hit and line.Fraction < 0.98 then continue end
 
@@ -214,7 +222,7 @@ timer.Create("BZCN_FurryStagedPounceContact", 0.04, 0, function()
         if direction:LengthSqr() < 1 then direction = pounce.direction or ent:GetForward() end
         direction:Normalize()
         local applied = support and isfunction(support.PerformKick)
-            and support.PerformKick(ent, target, targetCenter, direction, 16, 9000, true, "furry_pounce")
+            and support.PerformKick(ent, targetBody, targetCenter, direction, 16, 9000, true, "furry_pounce")
         if applied then
             ent.BZCNFurryPounceState = nil
             ent.LastAttack = now + 0.6
