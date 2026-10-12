@@ -1985,8 +1985,35 @@ function ENT:Wander()
     end
 end
 
+local function IsBZCNSitSequence(ent)
+    if not IsValid(ent) or not ent.GetSequenceName or not ent.GetSequence then return false end
+    local ok, name = pcall(ent.GetSequenceName, ent, ent:GetSequence())
+    if not ok or not isstring(name) then return false end
+    name = string.lower(name)
+    return name == "sit" or name == "sitting"
+        or string.StartWith(name, "sit_")
+        or string.StartWith(name, "sitting_")
+        or string.find(name, "_sit_", 1, true) ~= nil
+        or string.find(name, "chair_sit", 1, true) ~= nil
+end
+
 function ENT:RunBehaviour()
     while true do
+        -- A sit sequence can be started by external Z-City interaction code.
+        -- The NextBot's still-running Follow path otherwise keeps applying
+        -- horizontal movement underneath the seated pose, making it slide.
+        if IsBZCNSitSequence(self) and self:OnGround() then
+            if self.loco then
+                self.loco:SetDesiredSpeed(0)
+                local velocity = self.loco:GetVelocity()
+                self.loco:SetVelocity(Vector(0, 0, velocity.z))
+            end
+            local velocity = self:GetVelocity()
+            self:SetVelocity(Vector(-velocity.x, -velocity.y, 0))
+            coroutine.wait(0.05)
+            continue
+        end
+
         local downed = self:GetNW2Bool("BZCNNPCDowned", false)
         local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
             and hg.BZCNNPCSupport.IsGettingUp(self)
