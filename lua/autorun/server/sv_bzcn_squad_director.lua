@@ -37,8 +37,7 @@ local function IsBusy(ent)
 end
 
 local function CanMove(ent)
-    return IsManaged(ent) and not IsBusy(ent) and ent.loco
-        and ent.loco.IsValid and ent.loco:IsValid()
+    return IsManaged(ent) and not IsBusy(ent) and ent.loco ~= nil
 end
 
 local function IsSquadFaction(faction)
@@ -165,7 +164,7 @@ local function ApproachGoal(ent, goal)
 end
 
 local function LeaderGoal(leader)
-    if not IsValid(leader.BZCNSquadGoal) and not isvector(leader.BZCNSquadGoal) then return nil end
+    if not isvector(leader.BZCNSquadGoal) then return nil end
     if (leader.BZCNSquadGoalUntil or 0) <= CurTime()
         or leader:GetPos():DistToSqr(leader.BZCNSquadGoal) <= ARRIVAL_DISTANCE * ARRIVAL_DISTANCE then
         leader.BZCNSquadGoal = nil
