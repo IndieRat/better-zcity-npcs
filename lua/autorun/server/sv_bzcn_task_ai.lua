@@ -901,13 +901,6 @@ function Tasks.RunIdleTask(ent)
     local kind = GetKind(ent)
     local home = EnsureHome(ent)
 
-    -- Squad membership is only meaningful for Combine soldiers and Rebels.
-    -- Metrocops deliberately remain solo officers despite sharing Combine's
-    -- gameplay faction for disposition/targeting.
-    if kind == "combine" or kind == "rebel" then
-        if RunSquadIdleTask(ent, kind) then return true end
-    end
-
     -- Alertness is a stationary observation state, not a target-acquisition or
     -- attack order. Existing NPC combat behavior remains in its own layer.
     if kind == "metrocop" and (ent.BZCNMetrocopAlertUntil or 0) > CurTime() then
@@ -925,6 +918,14 @@ function Tasks.RunIdleTask(ent)
     end
 
     local task = PickTask(ent)
+
+    -- Squad travel gets a turn only when the existing idle task pool selects
+    -- cohesion/regroup. Other choices such as medical rescue and scavenging
+    -- remain reachable instead of being masked by a permanent squad override.
+    if (kind == "combine" and task == "squad")
+        or (kind == "rebel" and (task == "squad" or task == "regroup")) then
+        if RunSquadIdleTask(ent, kind) then return true end
+    end
 
     if task == "pickup" then
         if Tasks.TryPickupWeapon(ent) then coroutine.wait(0.25) return true end
@@ -1271,3 +1272,33 @@ function Tasks.RunIdleTask(ent)
     MoveTo(ent, destination, 1.25, kind == "furry" and 0.85 or kind == "combine" and 0.72 or 0.58)
     return true
 end
+
+-- Build interpersonal trust when a nearby human actually helps defend someone.
+-- The candidate must already be responding to the same attacker; this records
+-- observed protection and does not assign targets or create combat behavior.
+hook.Add("EntityTakeDamage", "BZCN_HumanDefenseBond", function(victim, damageInfo)
+    if not IsValid(victim) or not damageInfo then return end
+    if not HumanSocialClass(victim) then return end
+
+    local attacker = damageInfo:GetAttacker()
+    if not IsValid(attacker) or attacker == victim or attacker:IsWorld() then return end
+    local now = CurTime()
+
+    for _, helper in ipairs(ents.FindInSphere(victim:GetPos(), 620)) do
+        if helper == victim or helper == attacker or not HumanSocialClass(helper) then continue end
+        if SocialHostile(helper, victim) then continue end
+        if not helper:IsPlayer() and not IsManaged(helper) then continue end
+
+        local responding = helper.BZCNEnemy == attacker or helper.BZCNCombatTarget == attacker
+        if not responding and isfunction(helper.HasRecentAllyThreat) then
+            local ok, result = pcall(helper.HasRecentAllyThreat, helper, attacker)
+            responding = ok and result == true
+        end
+        if not responding then continue end
+
+        helper.BZCNNextDefenseBondAt = helper.BZCNNextDefenseBondAt or setmetatable({}, {__mode = "k"})
+        if (helper.BZCNNextDefenseBondAt[victim] or 0) > now then continue end
+        helper.BZCNNextDefenseBondAt[victim] = now + 10
+        BZCN.AddHumanBond(helper, victim, 2, "defended")
+    end
+end)
