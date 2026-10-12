@@ -428,7 +428,9 @@ local nativeNPCFaction = {
 local playerClassFaction = {
     combine = "Combine", metrocop = "Combine", police = "Combine",
     default = "default", civilian = "default",
-    rebel = "Rebel", furry = "furry"
+    rebel = "Rebel", furry = "furry",
+    headcrab = "zombie", headcrab_zombie = "zombie",
+    headcrabzombie = "zombie", zombie = "zombie"
 }
 
 local function CanonicalFaction(value)
