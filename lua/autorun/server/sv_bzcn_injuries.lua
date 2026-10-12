@@ -2194,26 +2194,33 @@ hook.Add("EntityTakeDamage", "BZCNNPCSupport_SharedDamage", function(target, dmg
     local owner = ResolvePhysicalVictim(target)
     if owner == target then owner = nil end
 
-    -- With native Z-City organism support, allow the ragdoll to go through
-    -- Z-City's damage hook. PostEntityTakeDamage relays its *applied* damage
-    -- to the hidden living NPC, avoiding duplicate organ-hit processing.
+    -- The temporary ragdoll is a physics proxy, not a separately registered
+    -- living organism. Z-City's native organism damage path can therefore
+    -- ignore its hit entirely (especially headshots), leaving the hidden
+    -- NextBot at full health. Route damage to the registered living owner
+    -- before the engine applies it to the proxy. This lets Z-City process the
+    -- owner's own organism and death lifecycle exactly once.
     if IsValid(owner) and owner.BZCNNPCDowned then
-        local ownerState = owner.BZCNNPCOrg
-        if ownerState and ownerState.usesZCityOrganism then return end
+        local amount = math.max(tonumber(dmg:GetDamage()) or 0, 0)
+        if amount <= 0 then return true end
 
-        -- Non-Z-City fallback: relay through the local damage implementation.
-        local amount = math.max(dmg:GetDamage(), 0)
         local relayed = DamageInfo()
         relayed:SetDamage(amount)
         relayed:SetDamageType(dmg:GetDamageType())
         relayed:SetDamagePosition(dmg:GetDamagePosition())
         relayed:SetDamageForce(dmg:GetDamageForce())
+        relayed:SetDamageCustom(dmg:GetDamageCustom())
+        relayed:SetAmmoType(dmg:GetAmmoType())
         relayed:SetAttacker(IsValid(dmg:GetAttacker()) and dmg:GetAttacker() or game.GetWorld())
         relayed:SetInflictor(IsValid(dmg:GetInflictor()) and dmg:GetInflictor() or game.GetWorld())
+
+        -- The engine's hitgroup is unavailable on a prop_ragdoll, so preserve
+        -- the mapped limb for our fallback injury path as well.
         owner.BZCNNPCForcedPart = GetHitPart(target, dmg:GetDamagePosition())
         dmg:SetDamage(0)
         owner:TakeDamageInfo(relayed)
         owner.BZCNNPCForcedPart = nil
+        QueueManagedNPCDeathCheck(owner, relayed)
         return true
     end
 
