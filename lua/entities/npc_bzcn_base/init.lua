@@ -1313,7 +1313,8 @@ function ENT:AttackTarget(target)
     local meleeOnlyWeapon = IsBZCNNonCombatWeapon(weaponClass)
 
     local kickSupport = hg and hg.BZCNNPCSupport
-    if profile.FurryStyle ~= true and isfunction(kickSupport and kickSupport.PerformKick)
+    if profile.FurryStyle ~= true and profile.ZombieStyle ~= true and profile.HeadcrabStyle ~= true
+        and isfunction(kickSupport and kickSupport.PerformKick)
         and distance <= 52 and math.random(1, 4) == 1 then
         local kickStart = self:WorldSpaceCenter()
         local kickEnd = target:WorldSpaceCenter()
@@ -1404,7 +1405,10 @@ function ENT:AttackTarget(target)
     end
 
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
-    local maxReach = weaponClass == "weapon_hands_sh" and 40 or 55
+    local creatureMelee = profile.ZombieStyle == true or profile.HeadcrabStyle == true
+    local maxReach = profile.HeadcrabStyle == true and 40
+        or profile.ZombieStyle == true and 58
+        or weaponClass == "weapon_hands_sh" and 40 or 55
     local meleeRange = math.min(tonumber(profile.MeleeRange) or self.AttackRange or 78, maxReach)
     local source = self:WorldSpaceCenter()
     local destination = (BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
@@ -1417,7 +1421,8 @@ function ENT:AttackTarget(target)
     -- reach. Use that same trace shape for managed NPCs rather than a longer
     -- center-to-center shortcut; keep the generic hull for other melee classes.
     local trace
-    if weaponClass == "weapon_hands_sh" and BZCN and isfunction(BZCN.TraceRuntimeHands) then
+    if not creatureMelee and weaponClass == "weapon_hands_sh"
+        and BZCN and isfunction(BZCN.TraceRuntimeHands) then
         trace = BZCN.TraceRuntimeHands(self, target, meleeRange)
     end
     if not istable(trace) then
@@ -1448,7 +1453,8 @@ function ENT:AttackTarget(target)
     end
 
     kickSupport = hg and hg.BZCNNPCSupport
-    if profile.FurryStyle ~= true and isfunction(kickSupport and kickSupport.PerformKick)
+    if profile.FurryStyle ~= true and profile.ZombieStyle ~= true and profile.HeadcrabStyle ~= true
+        and isfunction(kickSupport and kickSupport.PerformKick)
         and math.random(1, 4) == 1 then
         self.LastAttack = now + math.max(tonumber(profile.AttackDelay) or 1, 0.85)
         self:PlayBZCNKickAnimation()
@@ -1461,7 +1467,7 @@ function ENT:AttackTarget(target)
 
     self.LastAttack = now + (profile.AttackDelay or 1)
     self:PlayBZCNAttackAnimation()
-    if BZCN and isfunction(BZCN.AttackRuntimeMelee)
+    if not creatureMelee and BZCN and isfunction(BZCN.AttackRuntimeMelee)
         and BZCN.AttackRuntimeMelee(self, target, trace) then
         hook.Run("BZCN_NPCAttack", self, target, nil)
         return
