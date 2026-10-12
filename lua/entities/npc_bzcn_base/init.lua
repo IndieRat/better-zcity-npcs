@@ -2021,7 +2021,7 @@ function ENT:RunBehaviour()
                     or self.BZCNClass == "default" or self.BZCNClass == "civilian")
                 and (self:GetBZCNProfile().Ranged == true
                     or (isstring(self.BZCN_SelectedWeapon) and self.BZCN_SelectedWeapon ~= ""
-                        and not IsBZCNNonCombatWeapon(self.BZCN_SelectedWeapon))) then
+                        and not IsBZCNNonCombatWeapon(self.BZCN_SelectedWeapon)))) then
             local threat = self.BZCNFleeThreat
             if self.loco and IsValid(threat) then
                 local away = self:GetPos() - threat:GetPos()
