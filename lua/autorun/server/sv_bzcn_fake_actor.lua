@@ -78,9 +78,9 @@ function FakeActor:ShadowBone(name, angle, seconds, maxAngular, maxAngularDamp)
         angle = angle,
         maxangular = maxAngular or 80,
         maxangulardamp = maxAngularDamp or 35,
-        maxspeed = 80,
-        maxspeeddamp = 35,
-        dampfactor = 0.9,
+        maxspeed = 35,
+        maxspeeddamp = 20,
+        dampfactor = 0.45,
         teleportdistance = 0
     })
 end
@@ -137,17 +137,16 @@ function FakeActor:UpdateUpperPose(passive)
 
     -- In loose mode these are deliberately weak tracking forces: impacts and
     -- gravity remain authoritative. Crawl/aim modes use firmer articulation.
-    if passive then
-        self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.18, 18, 14)
-        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.15, 28, 18)
-    else
-        self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.12, 55, 28)
-        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.09, 75, 38)
-    end
+    -- A loose ragdoll must stay genuinely physics-driven. Even weak shadow
+    -- targets can accumulate torque through collisions and launch the body.
+    -- Keep passive mode visual-only; only crawl/aim/pounce use pose correction.
+    if passive then return end
+
+    self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.22, 22, 16)
+    self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.20, 30, 20)
 
     if rag.SetEyeTarget then
-        local eyeDirection = look:Forward()
-        rag:SetEyeTarget(eyeDirection * 10000)
+        rag:SetEyeTarget(rag:WorldSpaceCenter() + look:Forward() * 10000)
     end
 end
 
@@ -168,11 +167,11 @@ function FakeActor:UpdateCrawl(dt)
 
     -- Drive horizontal pelvis movement without shadow-controlling the whole
     -- body upright. Alternate small hand pushes; injured arms contribute less.
-    local speed = tonumber(self.config.crawlSpeed) or 42
+    local speed = tonumber(self.config.crawlSpeed) or 24
     local velocity = pelvis:GetVelocity()
     local horizontal = Vector(velocity.x, velocity.y, 0)
     local correction = direction * speed - horizontal
-    local maxChange = math.max(18, (tonumber(self.config.crawlAcceleration) or 95) * dt)
+    local maxChange = math.max(5, (tonumber(self.config.crawlAcceleration) or 38) * dt)
     if correction:Length() > maxChange then correction:Normalize(); correction = correction * maxChange end
     pelvis:SetVelocity(Vector(velocity.x + correction.x, velocity.y + correction.y, velocity.z))
 
@@ -186,7 +185,7 @@ function FakeActor:UpdateCrawl(dt)
         local damage = self.injury[right and "rightarm" or "leftarm"] or 0
         if IsValid(hand) and damage < 85 then
             local strength = math.Clamp(1 - damage / 100, 0.15, 1)
-            hand:ApplyForceCenter(direction * (105 * strength) + Vector(0, 0, 22 * strength))
+            hand:ApplyForceCenter(direction * (32 * strength) + Vector(0, 0, 6 * strength))
         end
     end
 end
@@ -207,8 +206,8 @@ function FakeActor:Update(dt)
 
     local currentPos, currentAng = root:GetPos(), root:GetAngles()
     local velocity = root:GetVelocity()
-    local correction = (self.moveVelocity - velocity) * (self.config.gain or 3)
-    local maxCorrection = self.config.maxCorrection or 180
+    local correction = (self.moveVelocity - velocity) * (self.config.gain or 0.7)
+    local maxCorrection = self.config.maxCorrection or 45
     if correction:Length() > maxCorrection then correction = correction:GetNormalized() * maxCorrection end
     local targetPos = currentPos + (velocity + correction) * dt
     local targetAng = currentAng
@@ -219,11 +218,11 @@ function FakeActor:Update(dt)
     root:ComputeShadowControl({
         secondstoarrive = math.max(dt * 2, 0.02),
         pos = targetPos, angle = targetAng,
-        maxangular = self.config.maxAngular or 900,
-        maxangulardamp = self.config.maxAngularDamp or 1400,
-        maxspeed = self.config.maxSpeed or 500,
-        maxspeeddamp = self.config.maxSpeedDamp or 700,
-        dampfactor = self.config.dampFactor or 0.8,
+        maxangular = self.config.maxAngular or 180,
+        maxangulardamp = self.config.maxAngularDamp or 100,
+        maxspeed = self.config.maxSpeed or 90,
+        maxspeeddamp = self.config.maxSpeedDamp or 45,
+        dampfactor = self.config.dampFactor or 0.45,
         teleportdistance = 0, deltatime = dt
     })
 end
