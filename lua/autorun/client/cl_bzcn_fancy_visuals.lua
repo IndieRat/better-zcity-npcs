@@ -73,8 +73,11 @@ local function RenderNPCAccessories(ent)
     local body = IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or ent
     local oldTransmit = ent.shouldTransmit
     local oldNotSeen = ent.NotSeen
-    local oldBodyTransmit = IsValid(body) and body.shouldTransmit or nil
-    local oldBodyNotSeen = IsValid(body) and body.NotSeen or nil
+    local oldBodyTransmit, oldBodyNotSeen
+    if IsValid(body) then
+        oldBodyTransmit = body.shouldTransmit
+        oldBodyNotSeen = body.NotSeen
+    end
     local oldGetEquipmentBySlot = ent.GetEquipmentBySlot
 
     ent.shouldTransmit = true
@@ -116,8 +119,7 @@ hook.Add("PostDrawOpaqueRenderables", "BZCN_FancyNPCAccessories", function(depth
     if skybox then return end
     if not istable(hg) or not istable(hg.Accessories) then return end
 
-    -- ents.GetAll avoids relying on wildcard behavior in FindByClass.
-    for _, ent in ipairs(ents.GetAll()) do
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if IsManagedHumanNPC(ent) then
             RenderNPCAccessories(ent)
         end
