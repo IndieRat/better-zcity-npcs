@@ -133,10 +133,22 @@ local function InventoryToConfig(inventory)
         if isstring(class) and value ~= nil and (VIRTUAL_WEAPON_ITEMS[class]
             or (weapons and weapons.GetStored and istable(weapons.GetStored(class)))) then
             weaponsOut[#weaponsOut + 1] = class
+        elseif isstring(class) and value ~= nil and scripted_ents and scripted_ents.GetStored
+            and istable(scripted_ents.GetStored(class)) then
+            -- Z-City has no separate Items inventory tab. Scripted entities
+            -- are stored in the native Inventory.Weapons map and taken through
+            -- the same loot handler, which calls Use() for non-SWEP entities.
+            itemsOut[#itemsOut + 1] = class
         end
     end
+    -- Read legacy/custom snapshots too, but never write Items as a separate
+    -- inventory bucket because Z-City's inventory UI does not render it.
     for id, value in pairs(inventory.Items or {}) do
-        if isstring(id) and value and SafeKey(id) then itemsOut[#itemsOut + 1] = id end
+        if isstring(id) and value and SafeKey(id)
+            and scripted_ents and scripted_ents.GetStored
+            and istable(scripted_ents.GetStored(id)) then
+            itemsOut[#itemsOut + 1] = id
+        end
     end
     for ammoType, amount in pairs(inventory.Ammo or {}) do
         if (isstring(ammoType) or isnumber(ammoType)) and isnumber(tonumber(amount)) then
@@ -181,7 +193,15 @@ local function ParseConfiguredInventory(tool)
         end
     end
     for _, id in ipairs(SplitList(tool:GetClientInfo("items"), 64)) do
-        if SafeKey(id) then inventory.Items[id] = true end
+        if SafeKey(id) and scripted_ents and scripted_ents.GetStored
+            and istable(scripted_ents.GetStored(id)) then
+            -- Native Z-City inventory stores lootable scripted entities under
+            -- Inventory.Weapons; its loot handler creates the entity and calls
+            -- Use() when it isn't a SWEP. Inventory.Items is never displayed.
+            inventory.Weapons[id] = true
+        elseif SafeKey(id) then
+            rejectedWeapons[#rejectedWeapons + 1] = id .. " (not a registered scripted entity)"
+        end
     end
     for _, entry in ipairs(SplitList(tool:GetClientInfo("ammo"), 32)) do
         local name, count = string.match(entry, "^([%w_%-]+)%s*:%s*(%-?%d+)$")
@@ -401,10 +421,10 @@ function TOOL:Reload(trace)
 end
 
 function TOOL.BuildCPanel(panel)
-    panel:Help("Configure a Z-City inventory, then left-click a player or managed BZCN NPC to apply it.")
+    panel:Help("Configure a native Z-City inventory, then left-click a player or managed BZCN NPC to apply it.")
     panel:Help("Right-click a player/NPC to copy its current inventory, including live player ammo. Reload clears extra player inventory data or the NPC inventory.")
     panel:TextEntry("Weapon classes (comma-separated)", "tool_bzcn_inventory_giver_weapons")
-    panel:TextEntry("Item IDs (comma-separated)", "tool_bzcn_inventory_giver_items")
+    panel:TextEntry("Z-City scripted entity classes (comma-separated)", "tool_bzcn_inventory_giver_items")
     panel:TextEntry("Ammo type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
     panel:TextEntry("Attachments (comma-separated IDs)", "tool_bzcn_inventory_giver_attachments")
     panel:TextEntry("Armor slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
@@ -412,7 +432,7 @@ function TOOL.BuildCPanel(panel)
     panel:Help("Example attachments: supressor2,scope1")
     panel:Help("Example armor: head=combine_helmet,torso=vest3")
     panel:Help("Players receive configured live SWEPs and ammo. Their unrelated weapons are not stripped.")
-    panel:Help("The tool updates Z-City inventory data; it does not invent missing SWEPs, items, or armor classes.")
+    panel:Help("Z-City has no separate Inventory.Items tab. Registered scripted entities are stored in Inventory.Weapons so the native loot menu can display and transfer them; unknown entity classes are rejected.")
 end
 
 if SERVER then
