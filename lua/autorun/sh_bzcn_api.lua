@@ -824,6 +824,7 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             end
         end
 
+        local hasZombieAppearanceFallback = false
         if isfunction(ent.SetSubMaterial) and isfunction(ent.GetSubMaterialIdByName) then
             local fallbacks = {
                 Rebel = {
@@ -844,6 +845,7 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             }
             local originalClass = ent.BZCNHeadcrabOriginalClass
                 or ent.BZCNHeadcrabOriginalFaction or "default"
+            hasZombieAppearanceFallback = fallbacks[originalClass] ~= nil
             local materials = fallbacks[originalClass] or {
                 main = "models/zombie_classic/zombie_classic_sheet",
                 pants = "models/zombie_classic/zombie_classic_sheet",
@@ -864,8 +866,7 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             -- face detail does not remain visible on the decapitated zombie model.
             pcall(ent.SetSubMaterial, ent, 4, "")
         end
-        if not fallbacks[ent.BZCNHeadcrabOriginalClass or "default"]
-            and isfunction(ent.SetPlayerColor) then
+        if not hasZombieAppearanceFallback and isfunction(ent.SetPlayerColor) then
             ent:SetPlayerColor(Vector(75 / 255, 0, 0))
         end
     end
