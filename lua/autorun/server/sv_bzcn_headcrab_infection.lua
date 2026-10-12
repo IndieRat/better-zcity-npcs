@@ -94,19 +94,6 @@ local function MarkInfected(target, headcrab)
     return true
 end
 
-local function CurrentTarget(ent)
-    local target = IsValid(ent.BZCNHeadcrabPounce and ent.BZCNHeadcrabPounce.target)
-        and ent.BZCNHeadcrabPounce.target or nil
-    if not IsValid(target) then target = IsValid(ent.BZCNEnemy) and ent.BZCNEnemy or nil end
-    if not IsValid(target) and isfunction(ent.HaveEnemy) then
-        local ok, result = pcall(ent.HaveEnemy, ent)
-        if ok and IsValid(result) then target = result end
-    end
-    if not IsValid(target) or target == ent or target:Health() <= 0
-        or (target:IsPlayer() and not target:Alive()) then return nil end
-    return target
-end
-
 local function HandlePounce(ent, now)
     local pounce = ent.BZCNHeadcrabPounce
     if not istable(pounce) then return end
@@ -228,7 +215,21 @@ local function ConvertManagedInfected(target, organism, now)
     if organism then
         organism.headcrabon = nil
         organism.headcrabevent = false
-        organism.temperature = math.max(tonumber(organism.temperature) or 37, 39)
+        -- Match the terminal physiology of Z-City's headcrabzombie class;
+        -- the preceding brain=0.3 belongs to the infection build-up, not the
+        -- stabilized zombie state.
+        organism.temperature = 41
+        organism.brain = 0.05
+        organism.disorientation = 2
+        organism.painadd = (tonumber(organism.painadd) or 0) - 10
+        organism.otrub = false
+        organism.needotrub = false
+        if istable(organism.stamina) then
+            organism.stamina.max = 200
+            organism.stamina.range = 200
+        end
+        if istable(organism.o2) then organism.o2.curregen = 2 end
+        if isnumber(organism.pulse) then organism.pulse = 70 end
     end
     target.BZCNHeadcrabInfectionAt = nil
     target.BZCNHeadcrabSource = nil
