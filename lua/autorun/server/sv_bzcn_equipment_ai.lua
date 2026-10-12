@@ -116,9 +116,9 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
         -- Inventory entries can be a class-only marker or a saved item record.
         local inventory = GetInventory(owner)
         local saved = istable(inventory.Weapons) and inventory.Weapons[class] or nil
-        if IsValid(saved) and istable(saved.modeValues) then
-            weapon.modeValues = table.Copy(saved.modeValues)
-        elseif istable(saved) and istable(saved.modeValues) then
+        -- Native inventory commonly stores a class-only marker (true).
+        -- IsValid(true) throws in GMod, so only inspect saved mode data on tables.
+        if istable(saved) and istable(saved.modeValues) then
             weapon.modeValues = table.Copy(saved.modeValues)
         end
         if istable(saved) then
