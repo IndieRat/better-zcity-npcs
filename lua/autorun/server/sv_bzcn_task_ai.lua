@@ -1277,11 +1277,8 @@ end
 -- Build interpersonal trust when a nearby human actually helps defend someone.
 -- The candidate must already be responding to the same attacker; this records
 -- observed protection and does not assign targets or create combat behavior.
-hook.Add("EntityTakeDamage", "BZCN_HumanDefenseBond", function(victim, damageInfo)
-    if not IsValid(victim) or not damageInfo then return end
-    if not HumanSocialClass(victim) then return end
-
-    local attacker = damageInfo:GetAttacker()
+local function RecordHumanDefenseBond(victim, attacker)
+    if not IsValid(victim) or not HumanSocialClass(victim) then return end
     if not IsValid(attacker) or attacker == victim or attacker:IsWorld() then return end
     local now = CurTime()
 
@@ -1302,4 +1299,17 @@ hook.Add("EntityTakeDamage", "BZCN_HumanDefenseBond", function(victim, damageInf
         helper.BZCNNextDefenseBondAt[victim] = now + 10
         BZCN.AddHumanBond(helper, victim, 2, "defended")
     end
+end
+
+-- The engine damage hook runs before OnInjured sets the victim's threat memory;
+-- this first pass catches existing defenders, while the post-application BZCN
+-- event catches actors whose ally-threat memory was just updated.
+hook.Add("EntityTakeDamage", "BZCN_HumanDefenseBond_PreDamage", function(victim, damageInfo)
+    if not damageInfo then return end
+    local attacker = damageInfo:GetAttacker()
+    RecordHumanDefenseBond(victim, attacker)
+end)
+
+hook.Add("BZCN_EntityDamaged", "BZCN_HumanDefenseBond_PostDamage", function(victim, attacker)
+    RecordHumanDefenseBond(victim, attacker)
 end)
