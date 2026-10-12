@@ -38,6 +38,13 @@ if CLIENT then
     end)
 end
 
+-- Z-City inventory entries that live under Weapons but are not SWEP classes.
+local VIRTUAL_WEAPON_ITEMS = {
+    hg_sling = true,
+    hg_brassknuckles = true,
+    hg_flashlight = true
+}
+
 local function SplitList(text, limit)
     local out, seen = {}, {}
     if not isstring(text) then return out end
@@ -111,8 +118,8 @@ end
 local function InventoryToConfig(inventory)
     local weaponsOut, itemsOut, ammoOut, attachmentsOut, armorOut = {}, {}, {}, {}, {}
     for class, value in pairs(inventory.Weapons or {}) do
-        if isstring(class) and value ~= nil and weapons and weapons.GetStored
-            and istable(weapons.GetStored(class)) then
+        if isstring(class) and value ~= nil and (VIRTUAL_WEAPON_ITEMS[class]
+            or (weapons and weapons.GetStored and istable(weapons.GetStored(class)))) then
             weaponsOut[#weaponsOut + 1] = class
         end
     end
@@ -153,7 +160,9 @@ local function ParseConfiguredInventory(tool)
     local rejectedWeapons = {}
 
     for _, class in ipairs(SplitList(tool:GetClientInfo("weapons"), 64)) do
-        if weapons and weapons.GetStored and istable(weapons.GetStored(class)) then
+        if VIRTUAL_WEAPON_ITEMS[class] then
+            inventory.Weapons[class] = true
+        elseif weapons and weapons.GetStored and istable(weapons.GetStored(class)) then
             inventory.Weapons[class] = true
         else
             rejectedWeapons[#rejectedWeapons + 1] = class
@@ -194,6 +203,14 @@ local function WriteInventory(ent, inventory)
         -- managed NPC/corpse loot stores class-info tables. Preserve the
         -- player's existing weapons, give configured missing ones, and sync the
         -- inventory table without pretending a boolean marker is a live SWEP.
+        local oldInventory = {}
+        if isfunction(ent.GetNetVar) then
+            local ok, result = pcall(ent.GetNetVar, ent, "Inventory", {})
+            if ok and istable(result) then oldInventory = result end
+        end
+        oldInventory = oldInventory or ent.inventory or ent.Inventory or {}
+        local oldWeapons = istable(oldInventory.Weapons) and oldInventory.Weapons or {}
+
         local playerWeapons = {}
         local playerAmmo = {}
         if isfunction(ent.GetAmmo) then
@@ -215,7 +232,7 @@ local function WriteInventory(ent, inventory)
         ent.Inventory = inventory
         for class in pairs(inventory.Weapons) do
             if not isstring(class) or class == "weapon_hands_sh"
-                or class == "weapon_zombclaws" then continue end
+                or class == "weapon_zombclaws" or VIRTUAL_WEAPON_ITEMS[class] then continue end
             if not (weapons and weapons.GetStored and istable(weapons.GetStored(class))) then continue end
             local weapon = ent:HasWeapon(class) and ent:GetWeapon(class) or nil
             if not IsValid(weapon) then
@@ -233,6 +250,11 @@ local function WriteInventory(ent, inventory)
                     and playerWeapons[class] == nil then
                     playerWeapons[class] = weapon
                 end
+            end
+        end
+        for class in pairs(VIRTUAL_WEAPON_ITEMS) do
+            if oldWeapons[class] ~= nil or inventory.Weapons[class] ~= nil then
+                playerWeapons[class] = true
             end
         end
         inventory.Weapons = playerWeapons
