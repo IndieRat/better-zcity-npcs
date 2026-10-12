@@ -49,6 +49,9 @@ end
 function FakeActor:SetMode(mode)
     if mode == "crawl" or mode == "pounce" or mode == "aim" or mode == "loose" then
         self.manualMode = mode
+        self.manualModeUntil = mode == "pounce"
+            and (CurTime() + math.Clamp(tonumber(self.config.pounceControlTime) or 0.85, 0.2, 1.4))
+            or nil
         self.mode = mode
     end
 end
@@ -178,6 +181,13 @@ function FakeActor:RefreshPhysiology()
         or (downed and canCrawl and (CurTime() - (self.downSince or CurTime())) >= crawlDelay)
     self.autoCrawl = wantsCrawl and canCrawl or false
 
+    -- Pounce is a short flight posture, not a permanent mode. Once its window
+    -- passes, hand control back to the normal physiology-driven loose/crawl
+    -- state so landing or a missed tackle doesn't leave limbs locked in flight.
+    if self.manualMode == "pounce" and (self.manualModeUntil or 0) <= CurTime() then
+        self.manualMode = nil
+        self.manualModeUntil = nil
+    end
     if self.manualMode then
         self.mode = self.manualMode
     else
@@ -250,7 +260,12 @@ function FakeActor:GetLookAngles()
         local toTarget = lookTarget - from
         if toTarget:LengthSqr() > 1 then
             local targetAngles = toTarget:Angle()
-            result.p = math.Clamp(targetAngles.p, -38, 38)
+            -- A conscious downed actor has no player holding E. Give its neck
+            -- the same gentle upward bias as the human fake controller, while
+            -- still letting higher targets pull its gaze further upward.
+            local pitch = math.Clamp(targetAngles.p, -38, 38)
+            if self.autoLookTarget then pitch = math.min(pitch, -13) end
+            result.p = pitch
             result.y = targetAngles.y
         end
     end
@@ -444,6 +459,66 @@ function FakeActor:UpdateCrawl(dt)
         strength = math.Clamp(1 - damage / 105, 0.16, 1)
     }
 end
+function FakeActor:UpdatePounce(dt)
+    local rag = self.ragdoll
+    if not IsValid(rag) then return end
+
+    -- Preserve the exact ballistic velocity Z-City gave this ragdoll. Only
+    -- articulate individual limbs around the torso; never pull the pelvis to
+    -- a synthetic root trajectory, which erased impacts and inherited momentum.
+    local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis") or rag:GetPhysicsObject()
+    local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+    if not IsValid(pelvis) or not IsValid(spine) then return end
+
+    local velocity = pelvis:GetVelocity()
+    local forward = Vector(velocity.x, velocity.y, math.max(velocity.z * 0.15, 0))
+    if forward:LengthSqr() < 100 then
+        forward = isvector(self.moveVelocity) and self.moveVelocity or rag:GetForward()
+    end
+    forward:Normalize()
+    local right = Vector(-forward.y, forward.x, 0)
+    if right:LengthSqr() < 1 then right = rag:GetRight() end
+    right:Normalize()
+
+    local center = spine:GetPos()
+    local now = CurTime()
+    -- Slow the correction near the end of flight; the mode timeout returns all
+    -- remaining joints to free physics. This is deliberately a brief pose assist.
+    local remaining = math.Clamp(((self.manualModeUntil or now) - now) / 0.85, 0.25, 1)
+    local angle = forward:Angle()
+    local arms = {
+        {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand"},
+        {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand"}
+    }
+    for _, arm in ipairs(arms) do
+        local lateral = right * (arm.side * 10)
+        local shoulder = center + forward * 2 + lateral + Vector(0, 0, 5)
+        local wrist = center + forward * 23 + lateral * 1.25 + Vector(0, 0, 8)
+        local upperAngle = angle
+        upperAngle:RotateAroundAxis(upperAngle:Forward(), arm.side * 11)
+        self:ShadowBone(arm.upper, upperAngle, 0.12, 52 * remaining, 38,
+            shoulder, 86, 50)
+        self:ShadowBone(arm.forearm, angle, 0.10, 60 * remaining, 42,
+            nil, 92, 50)
+        self:ShadowBone(arm.hand, angle, 0.09, 62 * remaining, 42,
+            wrist, 95, 52)
+    end
+
+    -- Draw the legs back a little to keep the silhouette from folding under
+    -- the body, but use conservative targets so collisions can still rotate them.
+    local legs = {
+        {side = -1, thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf"},
+        {side = 1, thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf"}
+    }
+    for _, leg in ipairs(legs) do
+        local lateral = right * (leg.side * 8)
+        self:ShadowBone(leg.thigh, angle, 0.16, 40 * remaining, 34,
+            center - forward * 12 + lateral + Vector(0, 0, -7), 62, 40)
+        self:ShadowBone(leg.calf, angle, 0.16, 34 * remaining, 30,
+            nil, 62, 40)
+    end
+end
+
 function FakeActor:Update(dt)
     if not self.active or not IsValid(self.owner) or not IsValid(self.ragdoll) then
         self:Destroy()
@@ -463,12 +538,14 @@ function FakeActor:Update(dt)
     if self.mode == "crawl" then
         self:UpdateCrawl(dt)
         return
+    elseif self.mode == "pounce" then
+        self:UpdatePounce(dt)
+        return
     end
 
-    -- Aim/pounce may steer AI state, but the controller must never shadow
-    -- control the whole-body root. Only articulated head/upper-spine bones are
-    -- posed above; impacts, gravity and inherited ragdoll momentum stay physical.
-    if self.mode == "loose" or self.mode == "aim" or self.mode == "pounce" then return end
+    -- Aim controls the gaze only; impacts, gravity and inherited momentum remain
+    -- physical. The pounce pose assist above affects limbs, never the whole body.
+    if self.mode == "loose" or self.mode == "aim" then return end
 end
 
 function FakeActor:Destroy()
