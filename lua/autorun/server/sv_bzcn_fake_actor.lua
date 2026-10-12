@@ -153,8 +153,8 @@ end
 function FakeActor:UpdateCrawl(dt)
     local rag = self.ragdoll
     if not IsValid(rag) then return end
-    -- Crawl is locomotion only. Do not apply head/spine shadow targets here;
-    -- stacked shadow control can pump torque into the ragdoll and launch it.
+    -- A crawl should be low and deliberate. Large per-tick forces were
+    -- accumulating on the pelvis and making the body skate faster than a run.
     local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis") or rag:GetPhysicsObject()
     if not IsValid(pelvis) then return end
 
@@ -166,23 +166,29 @@ function FakeActor:UpdateCrawl(dt)
     end
     direction:Normalize()
 
-    -- Drive horizontal pelvis movement without shadow-controlling the whole
-    -- body upright. Alternate small hand pushes; injured arms contribute less.
-    local speed = tonumber(self.config.crawlSpeed) or 42
+    local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 20, 10, 30)
     local velocity = pelvis:GetVelocity()
     local horizontal = Vector(velocity.x, velocity.y, 0)
     local correction = direction * speed - horizontal
-    local maxChange = math.max(8, (tonumber(self.config.crawlAcceleration) or 95) * dt)
+    local maxChange = math.max(1, (tonumber(self.config.crawlAcceleration) or 38) * dt)
     if correction:Length() > maxChange then correction:Normalize(); correction = correction * maxChange end
-    pelvis:SetVelocity(Vector(velocity.x + correction.x, velocity.y + correction.y, velocity.z))
-    -- Add a small horizontal body drive as well as the velocity correction.
-    -- This keeps crawling effective on high-friction floors and when a bone's
-    -- velocity is damped by constraints, without lifting the pelvis.
-    pelvis:ApplyForceCenter(direction * 1800)
+    pelvis:SetVelocity(Vector(velocity.x + correction.x, velocity.y + correction.y, math.min(velocity.z, 0)))
+
+    -- Keep the torso prone instead of lifting it with upward limb impulses.
+    -- This is a small downward bias, not a shadow target that fights collisions.
+    pelvis:ApplyForceCenter(Vector(0, 0, -180))
+    local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+    if IsValid(spine) then
+        local spineVelocity = spine:GetVelocity()
+        if spineVelocity.z > 12 then
+            spine:SetVelocity(Vector(spineVelocity.x, spineVelocity.y, 12))
+        end
+        spine:ApplyForceCenter(Vector(0, 0, -110))
+    end
 
     local now = CurTime()
     if now >= (self.nextCrawlStroke or 0) then
-        self.nextCrawlStroke = now + 0.38
+        self.nextCrawlStroke = now + 0.52
         local side = self.crawlSide or 1
         self.crawlSide = -side
         local right = side > 0
@@ -191,19 +197,36 @@ function FakeActor:UpdateCrawl(dt)
         local hand = GetPhysicsForBone(rag, handName) or GetPhysicsForBone(rag, forearmName)
         local damage = self.injury[right and "rightarm" or "leftarm"] or 0
         if IsValid(hand) and damage < 85 then
-            -- Trace a little farther: hands often sit above the floor while
-            -- the forearms are the actual contact points on a prone ragdoll.
             local handPos = hand:GetPos()
             local ground = util.TraceLine({
-                start = handPos + Vector(0, 0, 4),
-                endpos = handPos - Vector(0, 0, 22),
+                start = handPos + Vector(0, 0, 5),
+                endpos = handPos - Vector(0, 0, 28),
                 filter = rag,
                 mask = MASK_SOLID
             })
             if ground.Hit and not ground.HitSky then
                 local strength = math.Clamp(1 - damage / 100, 0.15, 1)
-                hand:ApplyForceCenter(direction * (1800 * strength) + Vector(0, 0, 250 * strength))
-                hand:Wake()
+                -- Lead with the reaching hand: place a gentle shadow target
+                -- forward and slightly out on the floor, then let the elbow
+                -- and shoulder constraints follow. No upward push.
+                local lateral = direction:Angle():Right() * (right and 5 or -5)
+                local targetPos = ground.HitPos + direction * (12 * strength) + lateral + Vector(0, 0, 3)
+                if hand.ComputeShadowControl then
+                    hand:Wake()
+                    hand:ComputeShadowControl({
+                        secondstoarrive = 0.24,
+                        pos = targetPos,
+                        angle = hand:GetAngles(),
+                        maxangular = 42,
+                        maxangulardamp = 24,
+                        maxspeed = 22 * strength,
+                        maxspeeddamp = 14,
+                        dampfactor = 0.65,
+                        teleportdistance = 0
+                    })
+                else
+                    hand:ApplyForceCenter(direction * (120 * strength))
+                end
             end
         end
     end
