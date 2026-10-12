@@ -66,9 +66,88 @@ local function GetPhysicsForBone(rag, name)
     return IsValid(phys) and phys or nil
 end
 
+-- Shadow-control individual physics bones, not the ragdoll's root.
+-- Z-City's player controller does this per bone because a whole-body target
+-- suppresses impacts and produces poor head/torso articulation.
+function FakeActor:ShadowBone(name, angle, seconds, maxAngular, maxAngularDamp)
+    local phys = GetPhysicsForBone(self.ragdoll, name)
+    if not IsValid(phys) or not phys.ComputeShadowControl then return end
+    phys:Wake()
+    phys:ComputeShadowControl({
+        secondstoarrive = seconds or 0.1,
+        angle = angle,
+        maxangular = maxAngular or 80,
+        maxangulardamp = maxAngularDamp or 35,
+        maxspeed = 80,
+        maxspeeddamp = 35,
+        dampfactor = 0.9,
+        teleportdistance = 0
+    })
+end
+
+function FakeActor:GetLookAngles()
+    local owner = self.owner
+    if not IsValid(owner) then return angle_zero end
+
+    local angles
+    if isfunction(owner.EyeAngles) then
+        local ok, value = pcall(owner.EyeAngles, owner)
+        if ok and isangle(value) then angles = value end
+    end
+    if not angles and isfunction(owner.GetAimVector) then
+        local ok, value = pcall(owner.GetAimVector, owner)
+        if ok and isvector(value) and value:LengthSqr() > 0 then angles = value:Angle() end
+    end
+    if not angles then angles = owner:GetAngles() end
+
+    local result = Angle(
+        math.Clamp(angles.p, -35, 35),
+        angles.y,
+        0
+    )
+    if isvector(self.aimTarget) and IsValid(self.ragdoll) then
+        local from = self.ragdoll:WorldSpaceCenter()
+        local toTarget = self.aimTarget - from
+        if toTarget:LengthSqr() > 1 then
+            local targetAngles = toTarget:Angle()
+            result.p = math.Clamp(targetAngles.p, -35, 35)
+            result.y = targetAngles.y
+        end
+    end
+    return result
+end
+
+function FakeActor:UpdateUpperPose()
+    local rag = self.ragdoll
+    if not IsValid(rag) then return end
+
+    local look = self:GetLookAngles()
+    local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+    local head = GetPhysicsForBone(rag, "ValveBiped.Bip01_Head1")
+    if not IsValid(spine) and not IsValid(head) then return end
+
+    -- Keep the torso's response modest; the head gets a slightly more precise
+    -- target. Clamps avoid forcing the neck through extreme pitch angles.
+    local torsoAngle = Angle(0, look.y, 0)
+    torsoAngle:RotateAroundAxis(torsoAngle:Forward(), 90)
+    torsoAngle:RotateAroundAxis(torsoAngle:Up(), 90)
+    local headAngle = Angle(look.p, look.y, 0)
+    headAngle:RotateAroundAxis(headAngle:Forward(), 90)
+    headAngle:RotateAroundAxis(headAngle:Up(), 90)
+
+    self:ShadowBone("ValveBiped.Bip01_Spine2", torsoAngle, 0.12, 55, 28)
+    self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.09, 75, 38)
+
+    if rag.SetEyeTarget then
+        local eyeDirection = look:Forward()
+        rag:SetEyeTarget(eyeDirection * 10000)
+    end
+end
+
 function FakeActor:UpdateCrawl(dt)
     local rag = self.ragdoll
     if not IsValid(rag) then return end
+    self:UpdateUpperPose()
     local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis") or rag:GetPhysicsObject()
     if not IsValid(pelvis) then return end
 
@@ -114,6 +193,7 @@ function FakeActor:Update(dt)
     local aim = self.aimTarget
     if self.mode == "crawl" then self:UpdateCrawl(dt); return end
     if self.mode ~= "aim" and self.mode ~= "pounce" then return end
+    self:UpdateUpperPose()
     local root = self.ragdoll:GetPhysicsObject()
     if not IsValid(root) or not root.ComputeShadowControl then return end
 
