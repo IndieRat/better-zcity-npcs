@@ -23,8 +23,10 @@ local TASK_POOLS = {
         {"patrol", 1}, {"pickup", 1}, {"rescue", 1}, {"sit", 2}
     },
     rebel = {
-        {"guard", 3}, {"squad", 4}, {"regroup", 4}, {"cover", 3},
-        {"pickup", 3}, {"rescue", 5}, {"talk", 3}, {"hold", 2}, {"sit", 1}
+        -- Resistance fighters default to cohesion and cover. Rescue/scavenging
+        -- remain possible, but idle social tasks should not split a nearby squad.
+        {"guard", 2}, {"squad", 6}, {"regroup", 5}, {"cover", 5},
+        {"pickup", 3}, {"rescue", 4}, {"talk", 1}, {"hold", 2}, {"sit", 1}
     },
     headcrab = {
         {"hunt", 6}, {"patrol", 2}, {"climb", 3}, {"hold", 1}
