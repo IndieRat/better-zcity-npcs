@@ -116,6 +116,9 @@ end
 
 function ENT:UpdateBZCNMovementState(speed)
     speed = math.max(tonumber(speed) or 0, 0)
+    local previous = self.BZCNMovementState
+    local runThreshold = (previous == "running" or previous == "sprinting") and 125 or 150
+    local walkThreshold = previous == "walking" and 5 or 8
     local state = "standing"
     local support = hg and hg.BZCNNPCSupport
     local gettingUp = support and support.IsGettingUp and support.IsGettingUp(self)
@@ -137,15 +140,14 @@ function ENT:UpdateBZCNMovementState(speed)
         state = "combat_prone"
     elseif not self:OnGround() then
         state = "airborne"
-    elseif self.BZCN_Sprinting and speed > 20 then
+    elseif self.BZCN_Sprinting and speed > 12 then
         state = "sprinting"
-    elseif speed > 150 then
+    elseif speed > runThreshold then
         state = "running"
-    elseif speed > 8 then
+    elseif speed > walkThreshold then
         state = "walking"
     end
 
-    local previous = self.BZCNMovementState
     if previous ~= state then
         self.BZCNMovementState = state
         if previous == "treating" and state ~= "treating" then self.BZCNMedicalSequence = nil end
@@ -161,7 +163,7 @@ function ENT:GetBZCNMovementSequence(speed, state)
         combat_prone = {"prone_aim", "prone_aim_smg1", "prone", "crouch_aim", "crouch_idle", "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"},
         crawling = {"crawl_all", "crawl_all_01", "crawl_forward", "crawl_loop", "crawl_prone", "crawl", "zombie_crawl", "crawl_idle"},
         climbing = {"climb_up", "climb_ladder", "ladder_climb", "climb"},
-        sprinting = {"sprint_all", "sprint", "sprint_armed", "sprint_unarmed", "run_all", "run_all_01", "run_unarmed", "run"},
+        sprinting = {"run_all", "run_all_01", "run_unarmed", "run"},
         running = {"run_all", "run_all_01", "run_unarmed", "run", "walk_all"},
         walking = {"walk_all", "walk_all_moderate", "walk_all_01", "walk_unarmed", "walk"},
         airborne = {"jump_all", "jump", "jump_start", "jump_holding", "fall", "jump_fall", "run_all", "walk_all"},
@@ -220,12 +222,6 @@ function ENT:GetBZCNMovementSequence(speed, state)
         })
         if sequence >= 0 then return sequence end
         state = "crawling"
-    elseif state == "sprinting" then
-        local sequence = GetFirstSequence(self, {
-            "sprint_all", "sprint", "sprint_armed", "sprint_unarmed",
-            "run_all", "run_all_01", "run_unarmed"
-        })
-        if sequence >= 0 then return sequence end
     end
 
     local activity
@@ -239,12 +235,8 @@ function ENT:GetBZCNMovementSequence(speed, state)
         -- fallback, rather than dropping into BodyMoveXY mid-jump.
         activity = ACT_MP_RUN
     elseif state == "running" or state == "sprinting" then
-        if state == "sprinting" then
-            local sprintSequence = GetFirstSequence(self, {
-                "sprint_all", "sprint", "run_all", "run_all_01", "run_unarmed"
-            })
-            if sprintSequence >= 0 then return sprintSequence end
-        end
+        -- Sprint uses the same run cycle played faster, matching player movement
+        -- and avoiding a full-body sequence swap while accelerating.
         activity = ACT_MP_RUN
     elseif state == "walking" then
         activity = ACT_MP_WALK
@@ -472,10 +464,9 @@ function ENT:BodyUpdate()
         local playbackRate = 1
         if state == "crawling" then
             playbackRate = 0.58
-        elseif state == "running" then
-            playbackRate = 1.12
-        elseif state == "sprinting" then
-            playbackRate = 1.35
+        elseif state == "running" or state == "sprinting" then
+            local baseSpeed = BZCN and tonumber(BZCN.BaseMoveSpeed) or 190
+            playbackRate = math.Clamp(speed / math.max(baseSpeed, 1), 0.85, 1.85)
         end
         if state == "crawling" then
             -- Keep the model's prone clip intact. BodyMoveXY drives ordinary
@@ -494,7 +485,17 @@ function ENT:BodyUpdate()
             self:SetPlaybackRate(playbackRate)
             self:FrameAdvance()
         end
-        if self.loco and speed > 5 then self.loco:FaceTowards(self:GetPos() + velocity) end
+        if self.loco and speed > 5 then
+            local target = IsValid(self.BZCNEnemy) and self.BZCNEnemy:Health() > 0
+                and self.BZCNEnemy or nil
+            if target then
+                local aimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetPosition
+                    and BZCNCombatActor.GetTargetPosition(target) or target:WorldSpaceCenter()
+                self.loco:FaceTowards(isvector(aimPoint) and aimPoint or target:GetPos())
+            else
+                self.loco:FaceTowards(self:GetPos() + velocity)
+            end
+        end
         return
     end
 
