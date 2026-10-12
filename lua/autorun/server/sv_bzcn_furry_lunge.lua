@@ -24,6 +24,7 @@ end
 
 local function CanLunge(ent, target)
     if not ManagedFurry(ent) or not IsValid(target) or not ent.loco then return false end
+    if BZCN.RuleEnabled and not BZCN.RuleEnabled("furry_tackles") then return false end
     if ent:Health() <= 0 or ent:GetNW2Bool("BZCNNPCDowned", false)
         or ent:GetNW2Bool("BZCNNPCGettingUp", false) then return false end
     if istable(ent.BZCNFurryGrab) or istable(ent.BZCNNPCPounce) then return false end
@@ -95,20 +96,85 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
             continue
         end
 
-        ent.BZCNNPCPounce = {
+        local launchTime = CurTime()
+        local boostVelocity = direction * math.Clamp(groundSpeed + 360, 520, 720)
+            + Vector(0, 0, 275)
+        local pounceState = {
             target = target,
-            expires = CurTime() + 0.85,
-            startedAt = CurTime(),
-            startPos = ent:GetPos()
+            direction = direction,
+            expires = launchTime + 0.95,
+            startedAt = launchTime,
+            startPos = ent:GetPos(),
+            boostUntil = launchTime + 0.16
         }
-        ent.BZCNFurryLungeCooldown = CurTime() + math.Rand(2.4, 3.5)
+        ent.BZCNNPCPounce = pounceState
+        ent.BZCNNextPounceAt = launchTime + math.Rand(2.4, 3.5)
+        ent.BZCNFurryLungeCooldown = ent.BZCNNextPounceAt
         ent.BZCNFurryLungeTarget = nil
         ent.BZCNFurryRunupStartedAt = nil
-        ent.loco:SetDesiredSpeed(360)
+        ent.BZCNFurryLungeRagdollAt = pounceState.boostUntil
+        ent.loco:SetDesiredSpeed(420)
         ent.loco:FaceTowards(target:GetPos())
         if ent.loco:IsOnGround() then ent.loco:Jump() end
-        ent.loco:SetVelocity(direction * math.Clamp(groundSpeed + 260, 390, 570) + Vector(0, 0, 235))
-        hook.Run("BZCN_FurryLungeStarted", ent, target)
+        -- Give the upright launch a clear burst first. The fake-ragdoll transition
+        -- is deliberately delayed so the leap reads as a build-up, not an instant
+        -- flop at takeoff.
+        ent.loco:SetVelocity(boostVelocity)
+        hook.Run("BZCN_FurryLungeStarted", ent, target, boostVelocity)
+
+        local buildUpEnabled = not BZCN.RuleEnabled or BZCN.RuleEnabled("furry_pounce_build_up")
+        if buildUpEnabled then
+            timer.Simple(0.16, function()
+                if not IsValid(ent) or ent.BZCNNPCPounce ~= pounceState
+                    or not ManagedFurry(ent) or ent:GetNW2Bool("BZCNNPCDowned", false) then return end
+                local support = hg and hg.BZCNNPCSupport
+                if not support or not isfunction(support.EnterDownedState) then return end
+                local ok, entered = pcall(support.EnterDownedState, ent, "furry_pounce")
+                if not ok or entered == false then return end
+
+                timer.Simple(0.025, function()
+                    if not IsValid(ent) or ent.BZCNNPCPounce ~= pounceState then return end
+                    local rag = IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll
+                        or (IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or nil)
+                    if not IsValid(rag) and isfunction(support.GetNPCHealthTable) then
+                        local healthOK, healthState = pcall(support.GetNPCHealthTable, ent)
+                        if healthOK and istable(healthState) and IsValid(healthState.ragdoll) then
+                            rag = healthState.ragdoll
+                        end
+                    end
+                    if not IsValid(rag) then return end
+                    pounceState.rag = rag
+
+                    local bone = rag:LookupBone("ValveBiped.Bip01_Pelvis")
+                        or rag:LookupBone("ValveBiped.Bip01_Spine1")
+                    local physIndex = isnumber(bone) and rag:TranslateBoneToPhysBone(bone) or 0
+                    local phys = rag:GetPhysicsObjectNum(physIndex)
+                    if not IsValid(phys) then phys = rag:GetPhysicsObject() end
+                    if IsValid(phys) then
+                        phys:Wake()
+                        local inherited = phys:GetVelocity()
+                        -- The initial burst has already launched the actor. Add a
+                        -- small hand-off impulse only, avoiding a second full jump.
+                        phys:SetVelocity(inherited + direction * 105 + Vector(0, 0, 25))
+                        if BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
+                            local actor = BZCN.FakeActor.Attach(ent, rag, {
+                                gain = 1.5, maxCorrection = 100, maxSpeed = 720,
+                                maxSpeedDamp = 850, maxAngular = 1100,
+                                maxAngularDamp = 1500, dampFactor = 0.75, aimWeight = 0.12
+                            })
+                            if actor then
+                                actor:SetMode("pounce")
+                                actor:SetMoveVelocity(phys:GetVelocity())
+                                local aimPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+                                    and BZCNCombatActor.GetTargetAimPoint(target)
+                                actor:SetAimTarget(isvector(aimPoint) and aimPoint
+                                    or (IsValid(target) and target:WorldSpaceCenter() or nil))
+                            end
+                        end
+                    end
+                end)
+            end)
+        end
     end
 end)
 
