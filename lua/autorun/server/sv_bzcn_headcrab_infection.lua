@@ -76,6 +76,7 @@ local function MarkInfected(target, headcrab)
     else
         organism.headcrabon = now
         organism.headcrabevent = false
+        organism.brain = 0.3
         target.BZCNHeadcrabInfectionAt = now
         target.BZCNHeadcrabOriginalName = target.BZCNDisplayName or target.PlayerName
         if isfunction(target.SetNetVar) then
@@ -169,12 +170,39 @@ local function ConvertManagedInfected(target, organism, now)
     end
 
     local elapsed = now - started
+    organism.brain = 0.3
+
     if elapsed >= 20 and not target.BZCNHeadcrabPainStage then
         target.BZCNHeadcrabPainStage = true
         organism.pain = math.min((tonumber(organism.pain) or 0) + 12, 100)
+        organism.painadd = (tonumber(organism.painadd) or 0) + 15
         organism.shock = math.min((tonumber(organism.shock) or 0) + 8, 100)
         if target.EmitSound then target:EmitSound("npc/zombie/zombie_pain" .. math.random(1, 6) .. ".wav", 70, 90, 0.75) end
         hook.Run("BZCN_HeadcrabInfectionStage", target, 1, elapsed)
+    end
+
+    if elapsed >= 30 and elapsed < INFECTION_DURATION
+        and now >= (target.BZCNHeadcrabNextJoltAt or 0) then
+        target.BZCNHeadcrabNextJoltAt = now + math.Rand(0.35, 0.8)
+        local rag = IsValid(target.BZCNNPCRagdoll) and target.BZCNNPCRagdoll
+            or (IsValid(target.FakeRagdoll) and target.FakeRagdoll or nil)
+        if IsValid(rag) and rag:IsRagdoll() then
+            local count = rag:GetPhysicsObjectCount()
+            if count > 0 then
+                local phys = rag:GetPhysicsObjectNum(math.random(0, count - 1))
+                if IsValid(phys) then
+                    local strength = 750 * math.Clamp((INFECTION_DURATION - elapsed) / 60, 0.15, 0.5)
+                    phys:ApplyForceCenter(VectorRand(-strength, strength))
+                end
+            end
+        elseif target.loco and not target:GetNW2Bool("BZCNNPCDowned", false) then
+            -- Standing NextBots have no full-body fake-ragdoll physics to jolt;
+            -- add a small bounded velocity twitch as the headcrab takes over.
+            local current = target.loco:GetVelocity()
+            local twitch = VectorRand(-12, 12)
+            twitch.z = 0
+            target.loco:SetVelocity(current + twitch)
+        end
     end
 
     if elapsed >= 30 and not target.BZCNHeadcrabNameStage then
@@ -206,6 +234,7 @@ local function ConvertManagedInfected(target, organism, now)
     target.BZCNHeadcrabSource = nil
     target.BZCNHeadcrabPainStage = nil
     target.BZCNHeadcrabNameStage = nil
+    target.BZCNHeadcrabNextJoltAt = nil
     if target.SetNW2Bool then target:SetNW2Bool("BZCNHeadcrabInfected", false) end
     if target.SetNW2String then target:SetNW2String("BZCNDisplayName", "Zombie") end
     if target.SetNWString then target:SetNWString("PlayerName", "Zombie") end
