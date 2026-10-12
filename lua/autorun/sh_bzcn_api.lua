@@ -42,6 +42,9 @@ end
 
 BZCN.RegisterClass("default", {
     Name = "Civilian", PlayerClassName = "default",
+    -- Give each managed civilian an individual identifier, rather than the
+    -- same generic "Civilian" label used by the profile.
+    DisplayNames = {"Alex", "Ben", "Caleb", "Daniel", "Ethan", "Jamie", "Jordan", "Leo", "Morgan", "Noah", "Riley", "Sam"},
     Model = "models/player/group03/male_07.mdl", Health = 100, Speed = 175,
     -- Ordinary civilians are not automatically Resistance combatants. They
     -- remain neutral to Combine unless an incident creates a real grievance.
@@ -84,6 +87,9 @@ BZCN.RegisterClass("Metrocop", {
 
 BZCN.RegisterClass("Rebel", {
     Name = "Resistance Fighter", PlayerClassName = "Rebel",
+    -- Resistance NPCs get human name variants too; faction remains metadata,
+    -- not a second line in the world-space identifier.
+    DisplayNames = {"Alex", "Alyx", "Barney", "Casey", "Eli", "Isaac", "Jamie", "Jordan", "Leon", "Mikhail", "Russell", "Sam"},
     Model = "models/player/group03/male_04.mdl", Health = 115, Speed = 185,
     Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
@@ -767,6 +773,7 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             end
         end
         ent.BZCNDisplayName = displayName
+        ent.PlayerName = displayName
         ent:SetNW2String("BZCNDisplayName", displayName)
         if ent.SetNWString then ent:SetNWString("PlayerName", displayName) end
     end
@@ -800,7 +807,9 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.inventory = inventory
     ent.armors = inventory.Armor
     ent.armors_health = ent.armors_health or {}
-    ent.PlayerName = profile.Name or profile.ClassName
+    -- Keep legacy Z-City name consumers aligned with the replicated identifier.
+    -- Previously this overwrote the chosen civilian/Rebel variant with a generic class name.
+    ent.PlayerName = ent.BZCNDisplayName or profile.Name or profile.ClassName
     ent:SetNetVar("Armor", inventory.Armor)
     ent:SetNetVar("BZCNFaction", ent.BZCN_Faction)
     ent:SetNetVar("BZCNClassName", profile.ClassName)
