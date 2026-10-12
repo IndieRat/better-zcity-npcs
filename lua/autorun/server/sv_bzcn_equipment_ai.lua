@@ -1691,7 +1691,11 @@ local function HasMedicalSupply(inventory, class, modes)
         or inventory.Weapons[class] == nil or not GetStored(class) then return false end
 
     local saved = inventory.Weapons[class]
-    local values = IsValid(saved) and saved.modeValues or (istable(saved) and saved.modeValues) or nil
+    -- Z-City represents virtual inventory entries as boolean true. IsValid()
+    -- expects an entity-like object on this runtime; guard the entity check
+    -- by type so a normal inventory flag cannot throw inside the medical timer.
+    local values = (isentity(saved) and IsValid(saved) and saved.modeValues)
+        or (istable(saved) and saved.modeValues) or nil
     if not istable(values) then return true end
     if istable(modes) then
         for _, mode in ipairs(modes) do
