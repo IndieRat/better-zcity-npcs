@@ -395,6 +395,60 @@ end
 
 local function FindGuardPost(ent)
     local home = EnsureHome(ent)
+
+    -- Rebel sentries retain their old civilian/door-oriented placement. The
+    -- wide sightline scoring below is specifically for stationary Metrocops.
+    if GetKind(ent) ~= "metrocop" then
+        local bestDoor, bestDoorScore
+        local doorClasses = {"prop_door_rotating", "func_door", "func_door_rotating", "func_movelinear"}
+        for _, class in ipairs(doorClasses) do
+            for _, door in ipairs(ents.FindByClass(class)) do
+                if not IsValid(door) then continue end
+                local distance = door:GetPos():DistToSqr(home)
+                if distance > 1400 * 1400 then continue end
+                local score = distance + math.Rand(0, 95000)
+                if not bestDoorScore or score < bestDoorScore then
+                    bestDoor, bestDoorScore = door, score
+                end
+            end
+        end
+
+        local civilianCenter, civilians = Vector(0, 0, 0), 0
+        for _, other in ipairs(ents.FindInSphere(home, 1200)) do
+            if not IsManaged(other) or other == ent then continue end
+            local profile = other.BZCNClassProfile or {}
+            local faction = string.lower(tostring(profile.Faction or other.BZCN_Faction or ""))
+            local class = string.lower(tostring(other.BZCNClass or other.PlayerClassName or ""))
+            if faction == "civilian" or class == "default" or profile.CivilianStyle == true then
+                civilianCenter = civilianCenter + other:GetPos()
+                civilians = civilians + 1
+            end
+        end
+        if civilians > 0 then civilianCenter = civilianCenter / civilians end
+
+        local selected
+        if IsValid(bestDoor) and (civilians == 0
+            or bestDoor:GetPos():DistToSqr(home) < civilianCenter:DistToSqr(home) * 1.4) then
+            local direction = ent:GetPos() - bestDoor:GetPos()
+            direction.z = 0
+            if direction:LengthSqr() < 1 then direction = Vector(1, 0, 0) end
+            direction:Normalize()
+            selected = bestDoor:GetPos() + direction * math.Rand(72, 128)
+        elseif civilians > 0 then
+            local angle = math.Rand(0, math.pi * 2)
+            selected = civilianCenter + Vector(math.cos(angle), math.sin(angle), 0) * math.Rand(140, 260)
+        elseif IsValid(bestDoor) then
+            selected = bestDoor:GetPos() + Vector(math.Rand(-100, 100), math.Rand(-100, 100), 0)
+        else
+            local angle = math.Rand(0, math.pi * 2)
+            selected = home + Vector(math.cos(angle), math.sin(angle), 0) * math.Rand(180, 320)
+        end
+
+        local area = navmesh.GetNearestNavArea(selected, false, 320, false, true)
+        if IsValid(area) then selected = area:GetClosestPointOnArea(selected) end
+        return selected
+    end
+
     local bestPoint, bestScore
     local eyeOffset = Vector(0, 0, 62)
     local angles = {}
