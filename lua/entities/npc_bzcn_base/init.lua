@@ -467,6 +467,7 @@ function ENT:IsBZCNEnemy(target)
         return weaponClass ~= "" and weaponClass ~= "weapon_hands_sh"
             and weaponClass ~= "weapon_medkit_sh" and weaponClass ~= "weapon_bandage_sh"
             and weaponClass ~= "weapon_bigbandage_sh"
+            and weaponClass ~= "weapon_painkiller_sh" and weaponClass ~= "weapon_painkillers_sh"
     end
 
     -- Metro police have Combine training but human hesitation: an unarmed
@@ -929,6 +930,9 @@ function ENT:PlayBZCNAttackAnimation()
         and weaponClass ~= "weapon_hands_sh"
         and weaponClass ~= "weapon_medkit_sh"
         and weaponClass ~= "weapon_bandage_sh"
+        and weaponClass ~= "weapon_bigbandage_sh"
+        and weaponClass ~= "weapon_painkiller_sh"
+        and weaponClass ~= "weapon_painkillers_sh"
 
     -- IXAnims' generic "attack" entry is often a full-body melee animation.
     -- For guns, request the model's actual ranged-fire gesture instead, so the
@@ -1175,6 +1179,8 @@ function ENT:AttackTarget(target)
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
     local meleeOnlyWeapon = weaponClass == "weapon_hands_sh"
         or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
+        or weaponClass == "weapon_bigbandage_sh"
+        or weaponClass == "weapon_painkiller_sh" or weaponClass == "weapon_painkillers_sh"
 
     local kickSupport = hg and hg.BZCNNPCSupport
     if profile.FurryStyle ~= true and isfunction(kickSupport and kickSupport.PerformKick)
@@ -1366,6 +1372,8 @@ function ENT:ChaseEnemy(target)
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
     local meleeOnlyWeapon = weaponClass == "weapon_hands_sh"
         or weaponClass == "weapon_medkit_sh" or weaponClass == "weapon_bandage_sh"
+        or weaponClass == "weapon_bigbandage_sh"
+        or weaponClass == "weapon_painkiller_sh" or weaponClass == "weapon_painkillers_sh"
     local hasRangedWeapon = profile.Ranged == true and not meleeOnlyWeapon
         and profile.FurryStyle ~= true
     local impulseTracking = profile.FurryStyle == true
@@ -1930,7 +1938,9 @@ function ENT:RunBehaviour()
                         and self.BZCN_SelectedWeapon ~= "weapon_hands_sh"
                         and self.BZCN_SelectedWeapon ~= "weapon_medkit_sh"
                         and self.BZCN_SelectedWeapon ~= "weapon_bandage_sh"
-                        and self.BZCN_SelectedWeapon ~= "weapon_bigbandage_sh"))) then
+                        and self.BZCN_SelectedWeapon ~= "weapon_bigbandage_sh"
+                        and self.BZCN_SelectedWeapon ~= "weapon_painkiller_sh"
+                        and self.BZCN_SelectedWeapon ~= "weapon_painkillers_sh"))) then
             local threat = self.BZCNFleeThreat
             if self.loco and IsValid(threat) then
                 local away = self:GetPos() - threat:GetPos()
