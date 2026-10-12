@@ -329,7 +329,12 @@ function TOOL:Reload(trace)
     local target = ResolveActor(trace.Entity)
     if not IsValid(target) then return false end
     WriteInventory(target, {Weapons = {}, Items = {}, Ammo = {}, Attachments = {}, Armor = {}})
-    ply:ChatPrint("[BZCN] Cleared Z-City inventory data for " .. target:Nick() .. ".")
+    if target:IsPlayer() then
+        ply:ChatPrint("[BZCN] Cleared extra inventory entries for " .. target:Nick()
+            .. ". Their physical weapons, live ammo, and worn armor were preserved.")
+    else
+        ply:ChatPrint("[BZCN] Cleared the managed NPC inventory for " .. target:Nick() .. ".")
+    end
     return true
 end
 
