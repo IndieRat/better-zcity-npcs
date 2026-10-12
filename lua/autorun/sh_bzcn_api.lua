@@ -1259,6 +1259,10 @@ if SERVER then
     function BZCN.ShowHeldWeapon(ent)
         if not IsValid(ent) then return end
         BZCN.HideHeldWeapon(ent)
+        local profile = ent.BZCNClassProfile or {}
+        -- A headcrab has no hands to hold the base hands SWEP world model.
+        -- Keep the real hidden melee adapter, but never draw a floating weapon proxy.
+        if profile.HeadcrabStyle == true then return end
         local weaponClass = ent.BZCN_SelectedWeapon
             or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
         local model = BZCN.GetWeaponModel(ent, weaponClass)
