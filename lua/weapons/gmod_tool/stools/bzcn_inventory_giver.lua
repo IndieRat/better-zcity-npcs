@@ -79,6 +79,12 @@ local function ResolveActor(ent)
 end
 
 local function ReadInventory(ent)
+    -- Z-City's inventory guidance recommends a native refresh before taking a
+    -- player snapshot; it rebuilds weapon references and Ammo from live state.
+    if ent:IsPlayer() and hg and isfunction(hg.RenewInv) then
+        pcall(hg.RenewInv, ent)
+    end
+
     local inventory
     if isfunction(ent.GetNetVar) then
         local ok, result = pcall(ent.GetNetVar, ent, "Inventory", {})
@@ -88,6 +94,10 @@ local function ReadInventory(ent)
     local out = {Weapons = {}, Items = {}, Ammo = {}, Attachments = {}, Armor = {}}
     for _, key in ipairs({"Weapons", "Items", "Ammo", "Attachments", "Armor"}) do
         if istable(inventory[key]) then out[key] = table.Copy(inventory[key]) end
+    end
+    if ent:IsPlayer() and isfunction(ent.GetAmmo) then
+        local ok, liveAmmo = pcall(ent.GetAmmo, ent)
+        if ok and istable(liveAmmo) then out.Ammo = table.Copy(liveAmmo) end
     end
     local armor
     if isfunction(ent.GetNetVar) then
@@ -112,11 +122,9 @@ local function InventoryToConfig(inventory)
     for ammoType, amount in pairs(inventory.Ammo or {}) do
         if (isstring(ammoType) or isnumber(ammoType)) and isnumber(tonumber(amount)) then
             local name = tostring(ammoType)
-            if isnumber(ammoType) and game and game.GetAmmoTypes then
-                for _, definition in pairs(game.GetAmmoTypes()) do
-                    if istable(definition) and tonumber(definition.id) == ammoType
-                        and isstring(definition.name) then name = definition.name break end
-                end
+            if isnumber(ammoType) and game and isfunction(game.GetAmmoName) then
+                local ammoName = game.GetAmmoName(ammoType)
+                if isstring(ammoName) and ammoName ~= "" then name = ammoName end
             end
             if SafeKey(name) then ammoOut[#ammoOut + 1] = name .. ":" .. tostring(math.max(0, math.floor(tonumber(amount) or 0))) end
         end
@@ -340,7 +348,7 @@ end
 
 function TOOL.BuildCPanel(panel)
     panel:Help("Configure a Z-City inventory, then left-click a player or managed BZCN NPC to apply it.")
-    panel:Help("Right-click a player/NPC to copy its inventory into these fields. Reload clears inventory data.")
+    panel:Help("Right-click a player/NPC to copy its current inventory, including live player ammo. Reload clears extra player inventory data or the NPC inventory.")
     panel:TextEntry("Weapon classes (comma-separated)", "tool_bzcn_inventory_giver_weapons")
     panel:TextEntry("Item IDs (comma-separated)", "tool_bzcn_inventory_giver_items")
     panel:TextEntry("Ammo type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
