@@ -24,16 +24,35 @@ local function GetAccessories(ent)
     return accessories
 end
 
-local function CollectActiveAccessoryNames(accessories)
-    local active = {}
+local function NormalizeAccessoryList(accessories)
+    local names, active = {}, {}
+    local function Add(name)
+        if not isstring(name) or name == "" or name == "none" or active[name] then return end
+        active[name] = true
+        names[#names + 1] = name
+    end
+
     if isstring(accessories) then
-        if accessories ~= "" and accessories ~= "none" then active[accessories] = true end
+        Add(accessories)
     elseif istable(accessories) then
-        for _, name in ipairs(accessories) do
-            if isstring(name) and name ~= "" and name ~= "none" then active[name] = true end
+        -- The stock generator uses an array, but inventory/appearance adapters
+        -- may send keyed slot maps such as {head = "fedora"} or {[name] = true.
+        for i = 1, #accessories do Add(accessories[i]) end
+        for key, value in pairs(accessories) do
+            if isstring(value) then
+                Add(value)
+            elseif istable(value) then
+                Add(value.accessory or value.name or value.id)
+                if isstring(key) and istable(hg) and istable(hg.Accessories)
+                    and istable(hg.Accessories[key]) then
+                    Add(key)
+                end
+            elseif value == true and isstring(key) then
+                Add(key)
+            end
         end
     end
-    return active
+    return names, active
 end
 
 local function ClearAccessoryModels(ent)
@@ -45,7 +64,7 @@ end
 
 local function RenderNPCAccessories(ent)
     local accessories = GetAccessories(ent)
-    local active = CollectActiveAccessoryNames(accessories)
+    local normalizedAccessories, active = NormalizeAccessoryList(accessories)
     local modelPath = ent:GetModel() or ""
 
     -- Remove models parented to an old body after a class/model change.
@@ -90,9 +109,12 @@ local function RenderNPCAccessories(ent)
         ent.GetEquipmentBySlot = function() return NULL end
     end
 
-    local ok, err = pcall(RenderAccessories, ent, accessories)
+    -- Z-City's native renderer supports arrays but not every keyed map shape
+    -- passed by BZCN adapters. Normalize once and feed the same list into both
+    -- standard and needcoolRender passes.
+    local ok, err = pcall(RenderAccessories, ent, normalizedAccessories)
     if ok and isfunction(CoolRenderAccessories) then
-        local coolOK, coolErr = pcall(CoolRenderAccessories, ent, accessories)
+        local coolOK, coolErr = pcall(CoolRenderAccessories, ent, normalizedAccessories)
         if not coolOK and not reportedRenderErrors[ent] then
             reportedRenderErrors[ent] = true
             ErrorNoHalt("[BZCN] Accessory detail renderer failed: " .. tostring(coolErr) .. "\n")
@@ -106,7 +128,7 @@ local function RenderNPCAccessories(ent)
         body.NotSeen = oldBodyNotSeen
     end
     if not isfunction(oldGetEquipmentBySlot) then
-        ent.GetEquipmentBySlot = nil
+        ent.GetEquipmentBySlot = oldGetEquipmentBySlot
     end
 
     if not ok and not reportedRenderErrors[ent] then
