@@ -115,6 +115,14 @@ The server social bridge observes Z-City voice phrases after they are emitted, i
 
 Managed NPCs can use their available medical supplies on nearby allies, including players and managed NPCs. Native Source NPCs that have no usable Z-City organism table can receive basic health-based first aid instead of being ignored by the medical selector. Assistance remains faction-aware and is skipped while the medic is downed, getting up, treating someone already, or holding a furry-grab target.
 
+### BZCN Fancy Patch and Add
+
+The presentation pass gives human-profile NPCs a shared, expanded name pool and mixes Z-City clothing themes across the main outfit, pants, and boots instead of assigning one matching set. The client-side `cl_bzcn_fancy_visuals.lua` bridge invokes the existing Z-City accessory renderer for managed NextBots, including when an appearance changes or the actor is represented by its temporary fake ragdoll.
+
+Human NPCs share the same base movement speed as Z-City's ordinary player walk speed (190 by default). Sprinting follows the live `hg_movement_runspeed` setting when available, with a 320 fallback. Sprint uses the normal run cycle at a playback rate tied to actual movement speed; movement-state thresholds have hysteresis to reduce flicker. During a visible chase, the movement animation keeps its facing aligned with the current target, and chase paths are recomputed less aggressively to reduce stutter steps.
+
+These are compatibility-oriented Lua changes; accessory availability and exact clothing/animation results depend on the relevant Z-City content being mounted and supported by each model.
+
 ## Injury signals and fake-ragdoll compatibility
 
 The injury bridge also uses the public [Z-City NPC Integration (zcnpci)](https://forge.owouw.us/ToasterPanic/zcnpci) addon as a design reference for damage-stage handling and ragdoll compatibility; this addon does not copy its active-ragdoll controller. For managed NextBots, it records available `ScaleNPCDamage` hitgroups and consumes `HomigradDamage` when present, then evaluates Z-City organism state after the damage tick. The incapacity checks include `otrub`, low consciousness, high pain, active stun/light-stun timers, serious leg damage/amputation, fire, and zcnpci-style leg-specific impact thresholds. These are server-side knockdown decisions layered over Z-City's native organism; they do not replace its wound calculation.
