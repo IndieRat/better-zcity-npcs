@@ -64,8 +64,10 @@ local function IsStrictCombine(ent)
         or ent.BZCNClass or ""))
     local profile = ent.BZCNClassProfile or {}
     local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
-    return className == "combine" or className == "metrocop"
-        or faction == "combine"
+    -- Metrocops share a faction label with Combine for dispositions, but are
+    -- still human officers and should use the human social cadence.
+    if className == "metrocop" or className == "police" then return false end
+    return className == "combine" or faction == "combine"
 end
 
 local function IsFurry(ent)
@@ -74,6 +76,32 @@ local function IsFurry(ent)
     return (profile and profile.FurryStyle == true)
         or ent.PlayerClassName == "furry"
         or ent.BZCNClass == "furry"
+end
+
+local function HumanSocialClass(ent)
+    if not IsValid(ent) then return nil end
+    local class = string.lower(tostring(ent.PlayerClassName
+        or (ent.GetNW2String and ent:GetNW2String("PlayerClassName", "")) or ent.BZCNClass or ""))
+    if ent:IsPlayer() then
+        if class == "metrocop" or class == "police" then return "metrocop" end
+        if class == "rebel" then return "rebel" end
+        if class == "default" or class == "civilian" or class == "citizen" then return "civilian" end
+        return "player"
+    end
+    if not IsManagedNPC(ent) or IsFurry(ent) or IsStrictCombine(ent) then return nil end
+    local profile = ent.BZCNClassProfile or {}
+    local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+    if class == "metrocop" or class == "police" then return "metrocop" end
+    if class == "rebel" or faction == "rebel" or ent.BZCNGoodCopDefected then return "rebel" end
+    if class == "default" or class == "civilian" or profile.CivilianStyle == true
+        or faction == "civilian" or faction == "citizen" then return "civilian" end
+    return nil
+end
+
+local function AddHumanBond(a, b, amount, reason)
+    if BZCN and isfunction(BZCN.AddHumanBond) then
+        pcall(BZCN.AddHumanBond, a, b, amount, reason)
+    end
 end
 
 local function IsUnavailableForSocial(ent)
@@ -255,6 +283,7 @@ local function ReactToPhrase(playerEnt, soundPath, context)
         if distance > 780 * 780 then continue end
 
         local strictCombine = IsStrictCombine(npc)
+        local humanPair = HumanSocialClass(npc) ~= nil and HumanSocialClass(playerEnt) ~= nil
         local perNPCDelay = strictCombine and (hostile and 18 or 32) or (hostile and 4 or 2.5)
         local urgentSignal = string.find(signal, "help", 1, true)
             or string.find(signal, "medic", 1, true)
@@ -267,6 +296,17 @@ local function ReactToPhrase(playerEnt, soundPath, context)
         if strictCombine and not urgentSignal and math.random(1, 8) ~= 1 then continue end
         if now < (npc.BZCNNextSocialReactionAt or 0) and not urgentSignal then continue end
         npc.BZCNNextSocialReactionAt = now + (urgentSignal and 0.8 or perNPCDelay)
+
+        if humanPair and not hostile then
+            if npc.loco then npc.loco:FaceTowards(playerEnt:WorldSpaceCenter()) end
+            AddHumanBond(npc, playerEnt,
+                (kind == "greeting" or responseContext == "Satisfied") and 1.25 or 0.35,
+                "positive-chat")
+            if kind == "greeting" or responseContext == "Satisfied" then
+                npc.BZCNHumanInterestTarget = playerEnt
+                npc.BZCNHumanInterestUntil = now + math.Rand(4, 8)
+            end
+        end
 
         if not strictCombine then
             local chosenGesture = hostile and "disagree" or gesture
@@ -370,25 +410,59 @@ timer.Create("BZCN_NPC_Social_Network", 0.8, 0, function()
 
         for _, other in ipairs(nearby) do
             if responded then break end
-            if other == npc or not IsManagedNPC(other) or not CanUseSocialEmote(other) then continue end
+            if other == npc or not IsValid(other) then continue end
+
+            local otherIsPlayer = other:IsPlayer() and other:Alive()
+            local otherIsNPC = IsManagedNPC(other)
+            if not otherIsPlayer and not otherIsNPC then continue end
+            if otherIsNPC and not CanUseSocialEmote(other) then continue end
+
             if IsCivilianNPC(npc) and IsFurryThreat(other) and FleeFromFurry(npc, other) then
                 responded = true
                 break
             end
-            -- Friendly NPCs occasionally acknowledge each other instead of
-            -- only reacting to players. The shared cooldown prevents chatter spam.
-            if not responded and CurTime() >= (npc.BZCNNextNPCSocialAt or 0)
-                and not EntityIsHostileTo(npc, other)
-                and not EntityIsHostileTo(other, npc)
-                and (IsStrictCombine(npc)
-                    and math.random(1, 18) == 1 or not IsStrictCombine(npc)
-                    and math.random(1, 5) == 1) then
+
+            local ownHumanClass = HumanSocialClass(npc)
+            local otherHumanClass = HumanSocialClass(other)
+            local humanPair = ownHumanClass ~= nil and otherHumanClass ~= nil
+            local hostile = EntityIsHostileTo(npc, other) or EntityIsHostileTo(other, npc)
+            local sameClass = humanPair and ownHumanClass == otherHumanClass
+            local shouldAcknowledge
+            if IsStrictCombine(npc) then
+                shouldAcknowledge = math.random(1, 18) == 1
+            elseif humanPair and sameClass then
+                shouldAcknowledge = math.random(1, 3) == 1
+            elseif humanPair then
+                shouldAcknowledge = math.random(1, 5) == 1
+            else
+                shouldAcknowledge = math.random(1, 5) == 1
+            end
+
+            -- Friendly Hs periodically seek eye contact and acknowledge a
+            -- familiar face. Same-class peers and stronger bonds are favoured.
+            if not hostile and CurTime() >= (npc.BZCNNextNPCSocialAt or 0) and shouldAcknowledge then
                 npc.BZCNNextNPCSocialAt = CurTime() + (IsStrictCombine(npc)
-                    and math.Rand(45, 80) or math.Rand(8, 16))
-                if not IsStrictCombine(npc) then
-                    PlayNPCGesture(npc, math.random(1, 3) == 1 and "wave" or "agree")
+                    and math.Rand(45, 80) or math.Rand(sameClass and 7 or 10, sameClass and 14 or 20))
+                if npc.loco then npc.loco:FaceTowards(other:WorldSpaceCenter()) end
+                if otherIsNPC and other.loco then other.loco:FaceTowards(npc:WorldSpaceCenter()) end
+
+                if humanPair then
+                    npc.BZCNHumanInterestTarget = other
+                    npc.BZCNHumanInterestUntil = CurTime() + math.Rand(4, 8)
+                    AddHumanBond(npc, other, sameClass and 1.1 or 0.55, "social-greeting")
                 end
-                PlayNPCPhrase(npc, "ambient", IsFurry(npc) and nil or "Satisfied")
+
+                local moving = npc:GetVelocity():LengthSqr() > 400
+                local maySpeak = not moving and CurTime() >= (npc.BZCNNextSocialPhraseAt or 0)
+                if not IsStrictCombine(npc) then
+                    -- If either person is moving or voice cooldown is active,
+                    -- a brief wave is less intrusive than trying to talk.
+                    PlayNPCGesture(npc, maySpeak and math.random(1, 3) == 1 and "agree" or "wave")
+                end
+                if maySpeak then
+                    local said = PlayNPCPhrase(npc, "ambient", IsFurry(npc) and nil or "Satisfied")
+                    if not said and not IsStrictCombine(npc) then PlayNPCGesture(npc, "wave") end
+                end
                 responded = true
             end
         end
@@ -486,6 +560,15 @@ local function ReactToGesture(playerEnt, gesture)
         npc.BZCNNextSocialReactionAt = now + 1.0
 
         local hostile = EntityIsHostileTo(npc, playerEnt)
+        local humanPair = HumanSocialClass(npc) ~= nil and HumanSocialClass(playerEnt) ~= nil
+        if humanPair and not hostile then
+            if npc.loco then npc.loco:FaceTowards(playerEnt:WorldSpaceCenter()) end
+            if gesture == "wave" or gesture == "salute" or gesture == "agree" or gesture == "thumbsup" then
+                AddHumanBond(npc, playerEnt, gesture == "wave" and 1.1 or 0.75, "friendly-gesture")
+                npc.BZCNHumanInterestTarget = playerEnt
+                npc.BZCNHumanInterestUntil = now + math.Rand(4, 8)
+            end
+        end
         if gesture == "flipoff" then
             -- A rude gesture is remembered briefly. The NPC has a short beat
             -- to return the insult, then treats the player as a real combat
@@ -605,6 +688,7 @@ local function RestoreTrustAfterHealing(healer, target, itemClass)
     if not IsValid(healer) or not IsManagedNPC(target) then return end
     target.BZCNBefriendedPlayers = target.BZCNBefriendedPlayers or setmetatable({}, {__mode = "k"})
     target.BZCNBefriendedPlayers[healer] = CurTime() + 120
+    AddHumanBond(target, healer, 14, "healing")
     if target.BZCNHostileOffender == healer then
         target.BZCNHostileOffender = nil
         target.BZCNHostileOffenderUntil = nil
