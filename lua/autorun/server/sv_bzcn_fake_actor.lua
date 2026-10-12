@@ -185,8 +185,19 @@ function FakeActor:UpdateCrawl(dt)
         local hand = GetPhysicsForBone(rag, right and "ValveBiped.Bip01_R_Hand" or "ValveBiped.Bip01_L_Hand")
         local damage = self.injury[right and "rightarm" or "leftarm"] or 0
         if IsValid(hand) and damage < 85 then
-            local strength = math.Clamp(1 - damage / 100, 0.15, 1)
-            hand:ApplyForceCenter(direction * (12 * strength))
+            -- Only stroke when the hand is actually near a surface. Applying
+            -- force in mid-air never creates traction and makes the body skate.
+            local handPos = hand:GetPos()
+            local ground = util.TraceLine({
+                start = handPos + Vector(0, 0, 2),
+                endpos = handPos - Vector(0, 0, 10),
+                filter = rag,
+                mask = MASK_SOLID
+            })
+            if ground.Hit and not ground.HitSky then
+                local strength = math.Clamp(1 - damage / 100, 0.15, 1)
+                hand:ApplyForceCenter(direction * (350 * strength))
+            end
         end
     end
 end
