@@ -811,15 +811,62 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     ent.BZCN_Faction = profile.Faction or profile.ClassName
     ent.BZCN_TeamName = profile.TeamName or profile.Faction or profile.ClassName
 
-    -- Z-City's headcrabzombie class exposes the classic zombie bodygroup, which
-    -- keeps its silhouette consistent after a managed-NPC conversion too.
-    if profile.ZombieStyle == true and isfunction(ent.GetBodyGroups)
-        and isfunction(ent.SetBodygroup) then
-        for _, group in ipairs(ent:GetBodyGroups() or {}) do
-            if group.id == 1 and (tonumber(group.num) or 0) > 1 then
-                ent:SetBodygroup(1, 1)
-                break
+    -- Match Z-City's headcrabzombie player class: the classic zombie bodygroup,
+    -- model-specific fallback cloth materials, and a dark-red tint for ordinary
+    -- citizens. Remember the pre-infection class before ApplyClass overwrites it.
+    if profile.ZombieStyle == true then
+        if isfunction(ent.GetBodyGroups) and isfunction(ent.SetBodygroup) then
+            for _, group in ipairs(ent:GetBodyGroups() or {}) do
+                if group.id == 1 and (tonumber(group.num) or 0) > 1 then
+                    ent:SetBodygroup(1, 1)
+                    break
+                end
             end
+        end
+
+        if isfunction(ent.SetSubMaterial) and isfunction(ent.GetSubMaterialIdByName) then
+            local fallbacks = {
+                Rebel = {
+                    main = "models/zombie_classic/zombie_classic_sheet",
+                    pants = "models/zombie_classic/zombie_classic_sheet",
+                    boots = "models/zombie_classic/zombie_classic_sheet"
+                },
+                Metrocop = {
+                    main = "models/balaclava_hood/berd_diff_018_a_uni",
+                    pants = "models/humans/male/group02/lambda",
+                    boots = "models/humans/male/group01/formal"
+                },
+                Combine = {
+                    main = "models/zombie_classic/combinesoldiersheet_zombie",
+                    pants = "models/gruchk_uwrist/css_seb_swat/swat/gear2",
+                    boots = "models/humans/male/group01/formal"
+                }
+            }
+            local originalClass = ent.BZCNHeadcrabOriginalClass
+                or ent.BZCNHeadcrabOriginalFaction or "default"
+            local materials = fallbacks[originalClass] or {
+                main = "models/zombie_classic/zombie_classic_sheet",
+                pants = "models/zombie_classic/zombie_classic_sheet",
+                boots = "models/zombie_classic/zombie_classic_sheet"
+            }
+            local slots = {
+                main = "distac/gloves/players_sheet",
+                pants = "distac/gloves/pants",
+                boots = "distac/gloves/cross"
+            }
+            for key, materialName in pairs(slots) do
+                local ok, index = pcall(ent.GetSubMaterialIdByName, ent, materialName)
+                if ok and isnumber(index) and index >= 0 then
+                    ent:SetSubMaterial(index, materials[key])
+                end
+            end
+            -- The fourth slot is blanked by the native class so the old head/
+            -- face detail does not remain visible on the decapitated zombie model.
+            pcall(ent.SetSubMaterial, ent, 4, "")
+        end
+        if not fallbacks[ent.BZCNHeadcrabOriginalClass or "default"]
+            and isfunction(ent.SetPlayerColor) then
+            ent:SetPlayerColor(Vector(75 / 255, 0, 0))
         end
     end
 
