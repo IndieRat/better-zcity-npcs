@@ -184,6 +184,18 @@ local function SeatNPC(npc, vehicle, seat, role)
     end
 
     local actor = npc.BZCNFakeActor
+    -- A down/recover transition can replace the organism ragdoll while its old
+    -- fake actor still controls the previous proxy. Rebind to the authoritative
+    -- ragdoll and remove only the stale proxy explicitly owned by this NPC.
+    if istable(actor) and actor.ragdoll ~= rag then
+        local staleRag = actor.ragdoll
+        if IsValid(staleRag) and staleRag ~= rag
+            and staleRag.BZCNNPCOwner == npc then
+            staleRag:Remove()
+        end
+        if isfunction(actor.Destroy) then actor:Destroy() end
+        actor = nil
+    end
     if not istable(actor) and BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
         local ok, attached = pcall(BZCN.FakeActor.Attach, npc, rag)
         if ok then actor = attached end
