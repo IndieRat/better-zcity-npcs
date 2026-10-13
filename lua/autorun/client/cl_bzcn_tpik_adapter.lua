@@ -302,8 +302,10 @@ hook.Add("PreDrawOpaqueRenderables", "BZCN_TPIKAndWeaponPose", function(_, skybo
         if not IsManaged(ent) or ent:GetPos():DistToSqr(viewPos) > 2500 * 2500 then continue end
 
         if ent.BZCNTPiKFrame ~= frame then
-            -- Rebuild the animated pose first; then solve arms; then use the
-            -- solved right wrist when placing the actual networked gun proxy.
+            -- Build the model pose, apply the SWEP's native animation through
+            -- its NPC-safe BoneSet adapter, then solve both hands against it.
+            ent:SetupBones()
+            RunNPCWeaponAnimations(ent)
             ent:SetupBones()
             ApplyTPIK(ent)
             ent.BZCNTPiKFrame = frame
@@ -474,15 +476,5 @@ local function RunNPCWeaponAnimations(ent)
     ApplyQueuedNPCWeaponBones(ent)
 end
 
-hook.Add("PreDrawOpaqueRenderables", "BZCN_HomigradWeaponAnimations", function(_, skybox)
-    if skybox then return end
-    local frame = FrameNumber()
-    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
-        if not IsManaged(ent) or ent:GetPos():DistToSqr(EyePos()) > 2500 * 2500 then continue end
-        if ent.BZCNWeaponAnimFrame == frame then continue end
-        ent.BZCNWeaponAnimFrame = frame
-        ent:SetupBones()
-        RunNPCWeaponAnimations(ent)
-    end
-end)
+)
 
