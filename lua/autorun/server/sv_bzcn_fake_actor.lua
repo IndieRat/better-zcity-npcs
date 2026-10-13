@@ -811,25 +811,19 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 
     local seatAng = seat:GetAngles()
-    -- Glide's chassis model forward axis is opposite its actual travel axis.
-    -- Match the same inverted drivetrain axis used by the driving controller.
-    local vehicle = seat:GetParent()
-    local desiredForward = IsValid(vehicle) and -vehicle:GetForward() or seatAng:Forward()
+    -- Glide computes signed forward speed from chassis-local +X. Use that same
+    -- axis for the occupant's heading, and prefer the owner's recorded vehicle
+    -- over GetParent() because seat hierarchy can vary between vehicle models.
+    local ownerVehicle = IsValid(self.owner) and self.owner.BZCNGlideVehicle or nil
+    local vehicle = IsValid(ownerVehicle) and ownerVehicle or seat:GetParent()
+    local desiredForward = IsValid(vehicle) and vehicle:GetForward() or seatAng:Forward()
     desiredForward.z = 0
     if desiredForward:LengthSqr() < 0.01 then
         desiredForward = seatAng:Forward()
         desiredForward.z = 0
     end
     desiredForward:Normalize()
-    local seatForward = seatAng:Forward()
-    seatForward.z = 0
-    if seatForward:LengthSqr() < 0.01 then seatForward = desiredForward end
-    seatForward:Normalize()
-    local yaw = math.NormalizeAngle(seatAng.y
-        + (seatForward:Dot(desiredForward) < 0 and 180 or 0))
-    -- Use the chassis travel direction directly when available so leaning or
-    -- rotating a motorcycle seat cannot turn the occupant backward.
-    yaw = math.NormalizeAngle(desiredForward:Angle().y)
+    local yaw = math.NormalizeAngle(desiredForward:Angle().y)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
