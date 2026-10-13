@@ -28,6 +28,16 @@ local RULES = {
         help = "Civilians with a weapon or ranged loadout do not use the normal flee behavior.",
         default = "1"
     },
+    civilian_crime_response = {
+        label = "Civilian murder witnesses",
+        help = "Civilians panic when a player kills a civilian; armed witnesses retaliate if no Metro Police witness the crime.",
+        default = "1"
+    },
+    npc_ally_defense = {
+        label = "NPCs defend hit allies",
+        help = "Nearby Combine, Rebel, Civil Protection, and civilian allies retaliate against a hostile attacker, including players in the same faction.",
+        default = "1"
+    },
     furry_pounce_build_up = {
         label = "Furry pounce build-up ragdoll",
         help = "Give furry pounces a short upright launch boost before entering fake-ragdoll control.",
