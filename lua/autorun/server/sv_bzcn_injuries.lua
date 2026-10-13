@@ -1401,7 +1401,7 @@ local function EnterDownedState(owner, reason)
     -- Attach a controller to the visible physical proxy. Injury values decide
     -- whether the body stays loose or uses low-to-ground crawl locomotion.
     if BZCN and BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
-        local actor = BZCN.FakeActor.Attach(owner, rag, {crawlSpeed = 42, crawlAcceleration = 95})
+        local actor = BZCN.FakeActor.Attach(owner, rag, {crawlSpeed = 54, crawlAcceleration = 125})
         if actor and isfunction(actor.SetInjuryState) then actor:SetInjuryState(state) end
     end
 
