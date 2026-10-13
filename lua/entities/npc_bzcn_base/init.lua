@@ -387,7 +387,7 @@ function ENT:Initialize()
                 local savedMethods = {}
                 local function InstallShim(name, fn)
                     if not isfunction(self[name]) then
-                        savedMethods[name] = self[name]
+                        savedMethods[#savedMethods + 1] = {name, self[name]}
                         self[name] = fn
                     end
                 end
@@ -410,7 +410,7 @@ function ENT:Initialize()
                     end
                 end)
                 local applied, applyResult = pcall(hg.Appearance.ForceApplyAppearance, self, appearance)
-                for name, oldMethod in pairs(savedMethods) do self[name] = oldMethod end
+                for _, saved in ipairs(savedMethods) do self[saved[1]] = saved[2] end
                 appearanceApplied = applied and util.IsValidModel(self:GetModel())
                 if not applied then
                     ErrorNoHalt("[BZCN] Z-City appearance application failed: "
