@@ -18,7 +18,31 @@ surface.CreateFont("BZCN_NPCHudBody", {
 })
 
 local function IsManaged(ent)
-    return IsValid(ent) and ent.GetNW2Bool and ent:GetNW2Bool("BZCNManaged", false)
+    if not IsValid(ent) then return false end
+    if ent.GetNW2Bool and ent:GetNW2Bool("BZCNManaged", false) then return true end
+    -- Keep compatibility with entities/branches still publishing the legacy NW bool.
+    return ent.GetNWBool and ent:GetNWBool("BZCNManaged", false) or false
+end
+
+local function GetNPCDisplayName(npc)
+    if not IsValid(npc) then return "Civilian" end
+    local name = npc:GetNW2String("BZCNDisplayName", "")
+    if not isstring(name) or string.Trim(name) == "" then
+        name = npc:GetNWString("PlayerName", "")
+    end
+    if (not isstring(name) or string.Trim(name) == "") and isstring(npc.BZCNDisplayName) then
+        name = npc.BZCNDisplayName
+    end
+    if (not isstring(name) or string.Trim(name) == "") and isstring(npc.PlayerName) then
+        name = npc.PlayerName
+    end
+    if not isstring(name) or string.Trim(name) == "" then
+        name = npc:GetNW2String("BZCNClassName", npc:GetNW2String("BZCNClass", "Civilian"))
+    end
+    if not isstring(name) or string.Trim(name) == "" then
+        name = "Civilian #" .. tostring(npc:EntIndex())
+    end
+    return name
 end
 
 local function ResolveNPC(raw)
@@ -122,7 +146,7 @@ local function DispatchNPCContext(npc, body, trace)
     local org = MirrorOrganism(npc)
     if not org then return end
 
-    local name = npc:GetNW2String("BZCNDisplayName", npc:GetNWString("PlayerName", "NPC"))
+    local name = GetNPCDisplayName(npc)
     local internalClass = npc:GetNW2String("BZCNClass", "NPC")
     local downed = npc:GetNW2Bool("BZCNNPCDowned", false)
     local crawling = npc:GetNW2Bool("BZCNNPCCrawling", false)
@@ -178,7 +202,7 @@ hook.Add("HUDPaint", "BZCN_ClientHUDBridge", function()
         math.Clamp(colorVector.y * 255, 0, 255),
         math.Clamp(colorVector.z * 255, 0, 255), alpha
     )
-    local label = npc:GetNW2String("BZCNDisplayName", npc:GetNWString("PlayerName", "NPC"))
+    local label = GetNPCDisplayName(npc)
     draw.SimpleTextOutlined(label, "HomigradFontLarge", screen.x, screen.y + 30,
         nameColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 1, Color(0, 0, 0, alpha))
 
