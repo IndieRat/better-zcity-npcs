@@ -640,16 +640,8 @@ function FakeActor:UpdateCrawl(dt)
 
     pelvis:ApplyForceCenter(Vector(0, 0, -110))
     local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
-    if IsValid(spine) then
-        local spineVelocity = spine:GetVelocity()
-        if spineVelocity.z > 8 then
-            spine:SetVelocity(Vector(spineVelocity.x, spineVelocity.y, 8))
-        end
-        spine:ApplyForceCenter(Vector(0, 0, -55))
-    end
-
     if now < (self.nextCrawlStroke or 0) then return end
-    self.nextCrawlStroke = now + 0.34
+    self.nextCrawlStroke = now + math.Rand(0.38, 0.52)
 
     -- Alternate arms and let the injured arm contribute less rather than
     -- disabling locomotion immediately when either arm is damaged.
