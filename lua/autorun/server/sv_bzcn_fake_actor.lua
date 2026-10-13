@@ -472,13 +472,14 @@ function FakeActor:UpdateSit(dt)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
-    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.15, 0.75)
-    self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.18, 55 * power, 38)
+    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.12, 0.52)
+    -- Angle-only control prevents the torso controller from dragging the body.
+    self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.22, 42 * power, 34)
     if IsValid(head) and self.physiology.canMoveHead then
         local headAngle = Angle(-10, yaw, 0)
         headAngle:RotateAroundAxis(headAngle:Forward(), 90)
         headAngle:RotateAroundAxis(headAngle:Up(), 90)
-        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.14, 72 * power, 48)
+        self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.18, 58 * power, 40)
     end
 
     local basis = Angle(0, yaw, 0)
@@ -487,9 +488,10 @@ function FakeActor:UpdateSit(dt)
         {side = -1, thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf"},
         {side = 1, thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf"}
     }) do
-        local thighPos = pelvis:GetPos() + forward * 17 + right * (leg.side * 8) + Vector(0, 0, -5)
-        self:ShadowBone(leg.thigh, upright, 0.2, 45 * power, 35, thighPos, 80, 45)
-        self:ShadowBone(leg.calf, upright, 0.22, 36 * power, 30)
+        -- Rotational leg posing only: positional targets can walk the pelvis
+        -- sideways on uneven ground or while the ragdoll is being hit.
+        self:ShadowBone(leg.thigh, upright, 0.24, 34 * power, 32)
+        self:ShadowBone(leg.calf, upright, 0.25, 28 * power, 28)
     end
 
     -- Arms brace beside the hips when usable; the pose does not depend on them.
@@ -502,9 +504,9 @@ function FakeActor:UpdateSit(dt)
             local armAngle = Angle(0, yaw, arm.side * 15)
             armAngle:RotateAroundAxis(armAngle:Forward(), 90)
             armAngle:RotateAroundAxis(armAngle:Up(), 90)
-            self:ShadowBone(arm.upper, armAngle, 0.16, 48 * power, 36, brace, 85, 48)
-            self:ShadowBone(arm.forearm, armAngle, 0.18, 42 * power, 34)
-            self:ShadowBone(arm.hand, armAngle, 0.16, 48 * power, 36, brace, 85, 48)
+            self:ShadowBone(arm.upper, armAngle, 0.2, 36 * power, 32)
+            self:ShadowBone(arm.forearm, armAngle, 0.22, 32 * power, 30)
+            self:ShadowBone(arm.hand, armAngle, 0.2, 34 * power, 32)
         end
     end
 end
