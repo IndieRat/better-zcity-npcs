@@ -531,8 +531,13 @@ function BZCN.SetNetVar(ent, key, value)
     -- Z-City's original netvar backend carries wounds, accessories, and other
     -- larger gameplay tables. Mirror only BZCN's compact compatibility fields
     -- through NW2, avoiding oversized JSON strings and duplicate net traffic.
+    -- Appearance data must not depend exclusively on Z-City's delta-netvar
+    -- transport: its Player-oriented writer can fail or leave later NextBots
+    -- with an empty sentinel. Mirror these small identity/accessory values via
+    -- the BZCN NW2 envelope so every independently spawned NPC replicates them.
     if key == "Inventory" or key == "Armor"
-        or key == "BZCNFaction" or key == "BZCNClassName" then
+        or key == "BZCNFaction" or key == "BZCNClassName"
+        or key == "PlayerName" or key == "Accessories" then
         SyncNetVar(ent, key, value)
     end
     if key == "Inventory" and SERVER then
@@ -1109,6 +1114,13 @@ function BZCN.ApplyClass(ent, className, resetInventory)
         ent.PlayerName = displayName
         ent:SetNW2String("BZCNDisplayName", displayName)
         if ent.SetNWString then ent:SetNWString("PlayerName", displayName) end
+        -- Publish through both Z-City's native netvar and BZCN's NW2 fallback;
+        -- HUD/name consumers frequently read GetNetVar("PlayerName"), not NWString.
+        if isfunction(ent.SetNetVar) then
+            pcall(ent.SetNetVar, ent, "PlayerName", displayName)
+        else
+            BZCN.SetNetVar(ent, "PlayerName", displayName)
+        end
     end
 
     local inventory = ent:GetNetVar("Inventory")
