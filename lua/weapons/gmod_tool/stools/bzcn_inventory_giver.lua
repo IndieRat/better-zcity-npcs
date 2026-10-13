@@ -7,7 +7,8 @@ TOOL.ClientConVar = {
     items = "",
     ammo = "",
     attachments = "",
-    armor = ""
+    armor = "",
+    autoammo = "1"
 }
 TOOL.Information = {
     {name = "left", stage = 0, text = "#tool.bzcn_inventory_giver.left"},
@@ -182,6 +183,7 @@ end
 local function ParseConfiguredInventory(tool)
     local inventory = {Weapons = {}, Items = {}, Ammo = {}, Attachments = {}, Armor = {}}
     local rejectedWeapons = {}
+    local explicitAmmo = {}
 
     for _, class in ipairs(SplitList(tool:GetClientInfo("weapons"), 64)) do
         if VIRTUAL_WEAPON_ITEMS[class] then
@@ -209,7 +211,10 @@ local function ParseConfiguredInventory(tool)
         if SafeKey(name) and count then
             count = math.Clamp(math.floor(count), 0, 99999)
             local ammoID = game and game.GetAmmoID and game.GetAmmoID(name) or -1
-            if isnumber(ammoID) and ammoID >= 0 then inventory.Ammo[ammoID] = count end
+            if isnumber(ammoID) and ammoID >= 0 then
+                inventory.Ammo[ammoID] = count
+                explicitAmmo[ammoID] = true
+            end
         end
     end
     for _, id in ipairs(SplitList(tool:GetClientInfo("attachments"), 32)) do
@@ -220,7 +225,52 @@ local function ParseConfiguredInventory(tool)
         if SafeKey(slot) and SafeKey(item) then inventory.Armor[slot] = item end
     end
 
+    -- Stock Z-City weapons use a reserve-ammo table alongside Weapons. Auto-fill
+    -- missing ammo types from each configured firearm so NPCs do not spawn with
+    -- a gun that can only fire its initial clip. Explicit ammo entries win.
+    if tool:GetClientInfo("autoammo") ~= "0" then
+        for class in pairs(inventory.Weapons) do
+            local stored = isstring(class) and weapons and weapons.GetStored
+                and weapons.GetStored(class) or nil
+            local primary = istable(stored) and istable(stored.Primary) and stored.Primary or nil
+            local ammoName = primary and primary.Ammo
+            local clip = primary and math.max(
+                tonumber(primary.ClipSize) or 0,
+                tonumber(primary.DefaultClip) or 0
+            ) or 0
+            if isstring(ammoName) and ammoName ~= "" and string.lower(ammoName) ~= "none"
+                and clip > 0 then
+                local ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
+                if isnumber(ammoID) and ammoID >= 0 and not explicitAmmo[ammoID] then
+                    inventory.Ammo[ammoID] = math.max(
+                        tonumber(inventory.Ammo[ammoID]) or 0,
+                        math.min(math.max(math.floor(clip * 3), math.floor(clip)), 99999)
+                    )
+                end
+            end
+        end
+    end
+
     return inventory, rejectedWeapons
+end
+
+local function IsInventoryWeaponMedical(class)
+    return BZCN and isfunction(BZCN.IsMedicalWeaponClass)
+        and BZCN.IsMedicalWeaponClass(class) == true
+        or class == "weapon_hands_sh" or class == "weapon_zombclaws"
+end
+
+local function GetInventoryWeaponInfo(class)
+    local stored = isstring(class) and weapons and weapons.GetStored
+        and weapons.GetStored(class) or nil
+    if not istable(stored) then return nil, false end
+    local primary = istable(stored.Primary) and stored.Primary or {}
+    local ammoName = primary.Ammo
+    local clip = math.max(tonumber(primary.ClipSize) or 0, tonumber(primary.DefaultClip) or 0)
+    local ranged = not IsInventoryWeaponMedical(class)
+        and isstring(ammoName) and ammoName ~= "" and string.lower(ammoName) ~= "none"
+        and clip > 0
+    return stored, ranged == true
 end
 
 local function WriteInventory(ent, inventory, clearVirtualItems)
@@ -260,7 +310,12 @@ local function WriteInventory(ent, inventory, clearVirtualItems)
             local ammoID = isnumber(ammoKey) and ammoKey
                 or (game and game.GetAmmoID and game.GetAmmoID(tostring(ammoKey)) or -1)
             if isnumber(ammoID) and ammoID >= 0 then
-                playerAmmo[ammoID] = math.Clamp(math.floor(tonumber(amount) or 0), 0, 99999)
+                -- Applying a loadout should ensure the requested reserve exists
+                -- without taking ammunition away from a player who already has more.
+                playerAmmo[ammoID] = math.max(
+                    tonumber(playerAmmo[ammoID]) or 0,
+                    math.Clamp(math.floor(tonumber(amount) or 0), 0, 99999)
+                )
             end
         end
         inventory.Ammo = playerAmmo
@@ -332,20 +387,67 @@ local function WriteInventory(ent, inventory, clearVirtualItems)
         ent.Inventory = inventory
         ent.inventory = inventory
         ent.armors = inventory.Armor
-        local preferred = ent.BZCNClassProfile and ent.BZCNClassProfile.WeaponClass
-        local selected = isstring(preferred) and inventory.Weapons[preferred] ~= nil and preferred or nil
-        if not selected then
-            for class in pairs(inventory.Weapons) do
-                if isstring(class) and weapons and weapons.GetStored and istable(weapons.GetStored(class)) then
-                    selected = class
+        ent.BZCN_Ammo = istable(inventory.Ammo) and table.Copy(inventory.Ammo) or {}
+
+        local profile = ent.BZCNClassProfile or {}
+        local preferred = profile.WeaponClass
+        local selected, selectedRanged
+
+        -- Keep every configured weapon in Z-City's inventory, but choose an
+        -- actually usable combat weapon for the NPC's single active hand slot.
+        -- A profile default of weapon_hands_sh must not override a gun just
+        -- given through this tool.
+        if isstring(preferred) and preferred ~= "" and not IsInventoryWeaponMedical(preferred)
+            and inventory.Weapons[preferred] ~= nil then
+            local stored, ranged = GetInventoryWeaponInfo(preferred)
+            if istable(stored) then selected, selectedRanged = preferred, ranged end
+        end
+
+        if not selected or (selected == "weapon_hands_sh") then
+            local classes = {}
+            for class, value in pairs(inventory.Weapons) do
+                if value ~= nil and isstring(class) then classes[#classes + 1] = class end
+            end
+            table.sort(classes)
+            local fallback
+            for _, class in ipairs(classes) do
+                if IsInventoryWeaponMedical(class) then continue end
+                local stored, ranged = GetInventoryWeaponInfo(class)
+                if not istable(stored) then continue end
+                if ranged then
+                    selected, selectedRanged = class, true
                     break
+                elseif not fallback then
+                    fallback = class
                 end
             end
+            if not selected or selected == "weapon_hands_sh" then
+                selected = fallback or (inventory.Weapons.weapon_hands_sh ~= nil and "weapon_hands_sh" or nil)
+                selectedRanged = false
+            end
         end
-        if selected and BZCN.SelectWeapon then
-            BZCN.SelectWeapon(ent, selected)
+
+        if selected then
+            if selected ~= preferred then
+                profile.WeaponClass = selected
+                profile.WeaponModel = nil
+            end
+            if selectedRanged then
+                profile.Ranged = true
+                ent.BZCNRangedWeaponEquipped = true
+                local stored = GetInventoryWeaponInfo(selected)
+                if istable(stored) and isstring(stored.HoldType) and stored.HoldType ~= "" then
+                    profile.AnimationHoldType = stored.HoldType
+                end
+            else
+                ent.BZCNRangedWeaponEquipped = false
+            end
+            ent.BZCNRangedWeaponClass = selectedRanged and selected or nil
+            if BZCN.SelectWeapon then BZCN.SelectWeapon(ent, selected) end
         elseif BZCN.HideHeldWeapon then
             ent.BZCN_SelectedWeapon = nil
+            ent.BZCNRangedWeaponEquipped = false
+            ent.BZCNRangedWeaponClass = nil
             if ent.SetNW2String then ent:SetNW2String("BZCNWeaponClass", "") end
             BZCN.HideHeldWeapon(ent)
         end
@@ -428,6 +530,7 @@ function TOOL.BuildCPanel(panel)
     panel:TextEntry("Ammo type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
     panel:TextEntry("Attachments (comma-separated IDs)", "tool_bzcn_inventory_giver_attachments")
     panel:TextEntry("Armor slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
+    panel:CheckBox("Automatically add reserve ammo for configured weapons", "tool_bzcn_inventory_giver_autoammo")
     panel:Help("Example ammo: Pistol:120,SMG1:90")
     panel:Help("Example attachments: supressor2,scope1")
     panel:Help("Example armor: head=combine_helmet,torso=vest3")
