@@ -811,13 +811,11 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 
     local seatAng = seat:GetAngles()
-    -- Seat-local angles are not consistent across Glide vehicle classes:
-    -- car seats may face backward relative to the drivetrain, while motorcycle
-    -- seats commonly already face the direction of travel. Resolve the body
-    -- heading from the parent vehicle's travel axis and only apply the 180°
-    -- correction when the seat's forward axis actually points the wrong way.
+    -- Keep the fake body's heading on the same forward axis used by the Glide
+    -- AI controller. Negating the vehicle axis made seated ragdolls face the
+    -- rear even when the car was moving forward.
     local vehicle = seat:GetParent()
-    local desiredForward = IsValid(vehicle) and -vehicle:GetForward() or seatAng:Forward()
+    local desiredForward = IsValid(vehicle) and vehicle:GetForward() or seatAng:Forward()
     desiredForward.z = 0
     if desiredForward:LengthSqr() < 0.01 then
         desiredForward = seatAng:Forward()
