@@ -30,7 +30,7 @@ if CLIENT then
     end
 
     language.Add("tool.bzcn_inventory_giver.name", "Inventory Giver")
-    language.Add("tool.bzcn_inventory_giver.desc", "Apply a configurable Z-City inventory to a player or managed BZCN NPC.")
+    language.Add("tool.bzcn_inventory_giver.desc", "Apply a configurable Z-City inventory to a player or managed BZCN NPC. Weapon fields accept real SWEP classes or aliases such as Pistol:9mm.")
     language.Add("tool.bzcn_inventory_giver.left", "Apply the configured inventory to the targeted player or BZCN NPC")
     language.Add("tool.bzcn_inventory_giver.right", "Copy the target's current inventory into this tool's configuration")
     language.Add("tool.bzcn_inventory_giver.reload", "Clear the target's Z-City inventory data")
@@ -185,13 +185,20 @@ local function ParseConfiguredInventory(tool)
     local rejectedWeapons = {}
     local explicitAmmo = {}
 
-    for _, class in ipairs(SplitList(tool:GetClientInfo("weapons"), 64)) do
+    for _, configured in ipairs(SplitList(tool:GetClientInfo("weapons"), 64)) do
+        -- Resolve family aliases before validation, ammo calculation, inventory
+        -- publication, or active-weapon selection. The stored key is always a
+        -- real registered SWEP class, never the display alias.
+        local class = BZCN and isfunction(BZCN.ResolveInventoryWeaponAlias)
+            and BZCN.ResolveInventoryWeaponAlias(configured) or nil
+        class = class or configured
         if VIRTUAL_WEAPON_ITEMS[class] then
             inventory.Weapons[class] = true
         elseif weapons and weapons.GetStored and istable(weapons.GetStored(class)) then
             inventory.Weapons[class] = true
         else
-            rejectedWeapons[#rejectedWeapons + 1] = class
+            rejectedWeapons[#rejectedWeapons + 1] = configured
+                .. (class == configured and " (unknown SWEP or unresolved alias)" or "")
         end
     end
     for _, id in ipairs(SplitList(tool:GetClientInfo("items"), 64)) do
@@ -527,13 +534,15 @@ end
 function TOOL.BuildCPanel(panel)
     panel:Help("Configure a native Z-City inventory, then left-click a player or managed BZCN NPC to apply it.")
     panel:Help("Right-click a player/NPC to copy its current inventory, including live player ammo. Reload clears extra player inventory data or the NPC inventory.")
-    panel:TextEntry("Weapon classes (comma-separated)", "tool_bzcn_inventory_giver_weapons")
+    panel:TextEntry("Weapon classes or ammo-family aliases (comma-separated)", "tool_bzcn_inventory_giver_weapons")
     panel:TextEntry("Z-City scripted entity classes (comma-separated)", "tool_bzcn_inventory_giver_items")
     panel:TextEntry("Ammo type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
     panel:TextEntry("Attachments (comma-separated IDs)", "tool_bzcn_inventory_giver_attachments")
     panel:TextEntry("Armor slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
     panel:CheckBox("Automatically add reserve ammo for configured weapons", "tool_bzcn_inventory_giver_autoammo")
-    panel:Help("Example ammo: Pistol:120,SMG1:90")
+    panel:Help("Weapon aliases: Pistol:9mm (also accepts legacy '9mm Pistol'); Ammo:SMG1 selects a registered SWEP using that exact ammo family.")
+    panel:Help("Weapon aliases resolve to real registered SWEP classes before being stored; right-click copies the resolved classes.")
+    panel:Help("Example reserve ammo: Pistol:120,SMG1:90")
     panel:Help("Example attachments: supressor2,scope1")
     panel:Help("Example armor: head=combine_helmet,torso=vest3")
     panel:Help("Players receive configured live SWEPs and ammo. Their unrelated weapons are not stripped.")
