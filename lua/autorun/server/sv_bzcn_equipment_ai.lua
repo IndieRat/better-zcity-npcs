@@ -1716,7 +1716,8 @@ local function ChooseMedicalClass(inventory, target, healer)
         -- authoritative. Some Z-City consumables (notably blood bags) can spawn
         -- empty; falling back to an inventory boolean would make the AI choose
         -- that same empty item forever and starve other valid treatments.
-        local runtime = IsValid(healer) and healer.BZCNRuntimeMedicalWeapon or nil
+        local runtime = isentity(healer) and IsValid(healer)
+            and healer.BZCNRuntimeMedicalWeapon or nil
         -- Stale/loadout adapters may leave a truthy marker in the runtime slot.
         -- GMod's IsValid(true) errors instead of returning false, so check the
         -- value's entity type before touching engine validity methods.
