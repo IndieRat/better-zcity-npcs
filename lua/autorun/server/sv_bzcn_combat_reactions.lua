@@ -265,7 +265,8 @@ local function CivilianMurderResponse(victim, attacker)
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("civilian_crime_response") then return end
 
     local now = CurTime()
-    if (tonumber(victim.BZCNCrimeResponseHandledAt) or 0) > now - 3 then return end
+    local handledAt = tonumber(victim.BZCNCrimeResponseHandledAt)
+    if handledAt and handledAt > now - 3 then return end
     victim.BZCNCrimeResponseHandledAt = now
     attacker.BZCNCivilianKillCount = (tonumber(attacker.BZCNCivilianKillCount) or 0) + 1
     attacker.BZCNCivilianKillerUntil = now + 60
