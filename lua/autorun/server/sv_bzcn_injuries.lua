@@ -1014,6 +1014,13 @@ local function Recover(owner, rag, removedExternally)
     local state = owner.BZCNNPCOrg
     if not state or not state.downed then return end
 
+    -- Glide seating is a persistent fake state, not a timed knockdown. Block
+    -- every incidental FakeUp/recovery route until the seat adapter explicitly
+    -- releases the NPC (or a crash clears the flag before ejecting it).
+    if owner.BZCNGlideSeatedFake == true or owner:GetNW2Bool("BZCNGlideState", false) then
+        return false
+    end
+
     if not IsValid(rag) then rag = owner.BZCNNPCRagdoll end
 
     -- zcnpci calls out that a downed NPC must not automatically get back up
@@ -1173,8 +1180,14 @@ local function EnterDownedState(owner, reason)
     if not IsValid(rag) then return end
 
     rag:SetModel(model)
-    rag:SetPos(owner:GetPos())
-    rag:SetAngles(owner:GetAngles())
+    local glideSeat = owner.BZCNGlideSeatedFake and owner.BZCNGlideSeat or nil
+    if IsValid(glideSeat) then
+        rag:SetPos(glideSeat:LocalToWorld(Vector(0, 0, 18)))
+        rag:SetAngles(glideSeat:GetAngles())
+    else
+        rag:SetPos(owner:GetPos())
+        rag:SetAngles(owner:GetAngles())
+    end
     rag:SetSkin(owner:GetSkin() or 0)
     rag:Spawn()
 
@@ -1231,6 +1244,15 @@ local function EnterDownedState(owner, reason)
     state.downed = true
     owner.BZCNNPCDowned = true
     owner.BZCNNPCRagdoll = rag
+    if IsValid(glideSeat) then
+        rag.IsGlideRagdoll = true
+        rag.GlideRagdollPlayer = owner
+        rag.GlideVehicle = owner.BZCNGlideVehicle
+        rag.GlideSeat = glideSeat
+        owner.GlideRagdoll = rag
+        owner.GlideRagdollStartPos = glideSeat:GetPos()
+        owner.GlideRagdollTimeout = math.huge
+    end
     rag.BZCNNPCOwner = owner
     rag.Player = owner
     -- Z-City's hg.RagdollOwner(rag) checks rag.ply plus owner.FakeRagdoll.
