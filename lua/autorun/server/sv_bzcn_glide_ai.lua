@@ -553,8 +553,8 @@ local function UpdateVehicleAI(vehicle, now)
     if isvector(previousVelocity) then
         local impactDelta = currentVelocity - previousVelocity
         local previousSpeed = previousVelocity:Length()
-        if previousSpeed >= 400 and impactDelta:Length() >= 440
-            and impactDelta:Length() / sampleDt >= 2200 then
+        if previousSpeed >= 300 and impactDelta:Length() >= 280
+            and impactDelta:Length() / sampleDt >= 1200 then
             CrashEjectVehicle(vehicle, currentVelocity, impactDelta)
             return
         end
@@ -609,6 +609,18 @@ local function UpdateVehicleAI(vehicle, now)
         brake = math.max(brake, speed > 80 and 0.65 or 0.15)
     end
     if math.abs(steer) > 0.55 then throttle = math.min(throttle, combat and 0.55 or 0.25) end
+
+    -- Glide exposes signed forwardSpeed. If the chassis is still travelling
+    -- backward from a previous steering correction, brake it to a stop before
+    -- applying forward throttle; absolute speed alone caused reverse momentum
+    -- to be mistaken for ordinary forward travel.
+    local signedForwardSpeed = tonumber(vehicle.forwardSpeed)
+    if signedForwardSpeed == nil then signedForwardSpeed = currentVelocity:Dot(forward) end
+    if signedForwardSpeed < -45 then
+        throttle = 0
+        brake = math.max(brake, 0.85)
+    end
+
     if not clearAhead or hazard then
         throttle = 0
         brake = combat and 0.7 or 0.9
