@@ -532,8 +532,10 @@ function FakeActor:UpdateCrawl(dt)
             self.crawlGrip.constraint:Remove()
         end
         self.crawlGrip = nil
-        self.mode = self.physiology.canMove and "sit" or "loose"
-        self.posture = self.mode == "sit" and "sit" or self.posture
+        -- A supine body should not be forcibly rolled into a seated pose.
+        self.mode = "loose"
+        self.posture = "rest"
+        self.sitUntil = nil
         return
     end
 
@@ -626,13 +628,13 @@ function FakeActor:UpdateCrawl(dt)
             self.nextCrawlNudge = now + math.Rand(0.16, 0.22)
             local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 34, 20, 38)
             local velocity = pelvis:GetVelocity()
-        local horizontal = Vector(velocity.x, velocity.y, 0)
-        local correction = direction * speed - horizontal
+            local horizontal = Vector(velocity.x, velocity.y, 0)
+            local correction = direction * speed - horizontal
             local maxChange = math.Clamp((tonumber(self.config.crawlAcceleration) or 36) * 0.18, 3, 7)
-        if correction:Length() > maxChange then
-            correction:Normalize()
-            correction = correction * maxChange
-        end
+            if correction:Length() > maxChange then
+                correction:Normalize()
+                correction = correction * maxChange
+            end
             pelvis:SetVelocity(Vector(
                 velocity.x + correction.x,
                 velocity.y + correction.y,
