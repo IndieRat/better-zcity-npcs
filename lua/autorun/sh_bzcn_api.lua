@@ -420,8 +420,13 @@ end
 
 function BZCN.ResolveInventoryWeaponAlias(alias)
     if not isstring(alias) then return nil end
-    local lowered = string.lower(string.Trim(alias))
-    if lowered == "pistol:9mm" or lowered == "pistol 9mm" then
+    local trimmed = string.Trim(alias)
+    local lowered = string.lower(trimmed)
+    local compact = string.gsub(lowered, "[^%w]", "")
+
+    -- Accept current and legacy human-readable names. These are aliases only;
+    -- never put them into Inventory.Weapons or pass them to Give/SelectWeapon.
+    if compact == "pistol9mm" or compact == "9mmpistol" then
         local pools = BZCN.BuildWeaponPoolByAmmo()
         local candidates = {}
         for ammo, classes in pairs(pools) do
@@ -430,19 +435,25 @@ function BZCN.ResolveInventoryWeaponAlias(alias)
             end
         end
         table.sort(candidates)
-        -- Stable resolution means WeaponClass and Inventory.Weapons aliases
-        -- resolve to the same actual class even when normalized in separate paths.
+        -- Stable resolution keeps profile WeaponClass and Inventory.Weapons in sync.
         if #candidates > 0 then return candidates[1] end
         return nil
     end
 
-    -- Also accept an explicit ammo-family key for other profiles, e.g.
-    -- "Ammo:SMG1"; pools stay keyed by the exact Primary.Ammo string.
-    local ammoFamily = string.match(alias, "^[Aa]mmo:(.+)$")
+    -- Generic ammo-family aliases, e.g. "Ammo:SMG1". Match the ammo label
+    -- case-insensitively, but store and return the exact registered SWEP class.
+    local ammoFamily = string.match(trimmed, "^[Aa][Mm][Mm][Oo]%s*:%s*(.+)$")
     if ammoFamily then
         local pools = BZCN.BuildWeaponPoolByAmmo()
-        local pool = pools[ammoFamily]
-        if istable(pool) and #pool > 0 then return pool[math.random(#pool)] end
+        local requested = string.lower(string.Trim(ammoFamily))
+        local candidates = {}
+        for ammo, classes in pairs(pools) do
+            if string.lower(ammo) == requested then
+                for _, class in ipairs(classes) do candidates[#candidates + 1] = class end
+            end
+        end
+        table.sort(candidates)
+        if #candidates > 0 then return candidates[1] end
     end
     return nil
 end
