@@ -448,23 +448,26 @@ function ENT:Initialize()
             self:SetSkin(math.random(0, math.max(self:SkinCount() - 1, 0)))
         end
 
-        if appearanceApplied and appearance then
+        -- Keep each NPC's generated appearance even if Z-City's Player-only
+        -- ForceApplyAppearance path fails on this particular NextBot. Rendering
+        -- and identity must not depend on that function returning successfully.
+        if appearance then
             self.CurAppearance = table.Copy(appearance)
-
-            -- ForceApplyAppearance is player-oriented in some Z-City builds;
-            -- explicitly replicate the chosen accessory list so every spawned
-            -- NextBot has its own stable data instead of relying on renderer state.
-            if isfunction(self.SetNetVar) then
-                -- Publish a per-NPC accessory payload even when the appearance
-                -- has no attachments; never let a previous spawn's value leak
-                -- through a shared appearance/netvar cache.
-                local accessoryList = table.Copy(appearance.AAttachments or {})
-                local ok = pcall(self.SetNetVar, self, "Accessories", accessoryList)
-                if not ok then BZCN.SetNetVar(self, "Accessories", accessoryList) end
-            end
         end
+
+        -- Always publish an accessory value for every civilian, including an
+        -- empty list. This prevents a failed appearance apply or stale native
+        -- netvar sentinel from making later spawns lose their own accessories.
+        if isfunction(self.SetNetVar) then
+            local accessoryList = appearance and table.Copy(appearance.AAttachments or {}) or {}
+            local ok = pcall(self.SetNetVar, self, "Accessories", accessoryList)
+            if not ok then BZCN.SetNetVar(self, "Accessories", accessoryList) end
+        else
+            BZCN.SetNetVar(self, "Accessories", appearance and table.Copy(appearance.AAttachments or {}) or {})
+        end
+
         self.BZCNClassProfile.Model = self:GetModel()
-        local appearanceName = appearanceApplied and appearance and appearance.AName or nil
+        local appearanceName = appearance and appearance.AName or nil
         if not isstring(appearanceName) or string.Trim(appearanceName) == "" then
             appearanceName = nil
         end
