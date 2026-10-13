@@ -21,7 +21,12 @@ local function IsManaged(ent)
     if not IsValid(ent) then return false end
     if ent.GetNW2Bool and ent:GetNW2Bool("BZCNManaged", false) then return true end
     -- Keep compatibility with entities/branches still publishing the legacy NW bool.
-    return ent.GetNWBool and ent:GetNWBool("BZCNManaged", false) or false
+    if ent.GetNWBool and ent:GetNWBool("BZCNManaged", false) then return true end
+    -- Spawn-menu/toolgun creation can expose the entity before its managed
+    -- NW2 marker arrives. The addon's own class prefix is a reliable fallback
+    -- for both the name HUD and resolving the NPC's ragdoll.
+    local class = ent:GetClass()
+    return class == "npc_bzcn_base" or string.StartWith(class, "npc_bzcn_")
 end
 
 local function GetNPCDisplayName(npc)
