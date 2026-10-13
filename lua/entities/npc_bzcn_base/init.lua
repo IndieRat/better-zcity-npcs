@@ -317,7 +317,15 @@ function ENT:Initialize()
         self:SetNW2String("BZCNWeaponClass", self.BZCN_SelectedWeapon)
     end
 
-    if className == "default" then
+    local appearanceFaction = string.lower(tostring(profile.Faction or self.BZCN_Faction or ""))
+    local appearanceClass = string.lower(tostring(className or ""))
+    local wantsCivilianAppearance = (appearanceClass == "default"
+        or appearanceClass == "civilian" or appearanceClass == "citizen"
+        or appearanceFaction == "civilian" or appearanceFaction == "default")
+        and profile.Combat ~= true and profile.Ranged ~= true
+        and profile.WeaponClass == nil and self.BZCN_SelectedWeapon == nil
+
+    if wantsCivilianAppearance then
         local appearance
         local appearanceApplied = false
         if hg and hg.Appearance and isfunction(hg.Appearance.GetRandomAppearance)
@@ -399,7 +407,16 @@ function ENT:Initialize()
             self:SetSkin(math.random(0, math.max(self:SkinCount() - 1, 0)))
         end
 
-        if appearanceApplied and appearance then self.CurAppearance = table.Copy(appearance) end
+        if appearanceApplied and appearance then
+            self.CurAppearance = table.Copy(appearance)
+
+            -- ForceApplyAppearance is player-oriented in some Z-City builds;
+            -- explicitly replicate the chosen accessory list so every spawned
+            -- NextBot has its own stable data instead of relying on renderer state.
+            if isfunction(self.SetNetVar) and appearance.AAttachments ~= nil then
+                pcall(self.SetNetVar, self, "Accessories", table.Copy(appearance.AAttachments))
+            end
+        end
         self.BZCNClassProfile.Model = self:GetModel()
         local appearanceName = appearanceApplied and appearance and appearance.AName or nil
         if not isstring(appearanceName) or string.Trim(appearanceName) == "" then
@@ -413,6 +430,21 @@ function ENT:Initialize()
         self:SetNW2String("BZCNDisplayName", displayName)
         if self.SetNWString then self:SetNWString("PlayerName", displayName) end
     end
+
+    -- Every managed NPC needs an identifier even when it uses a custom
+    -- civilian-class alias or a non-randomized class profile.
+    local currentName = self.BZCNDisplayName
+    if not isstring(currentName) or string.Trim(currentName) == "" then
+        currentName = self.PlayerName
+    end
+    if not isstring(currentName) or string.Trim(currentName) == "" then
+        currentName = (BZCN and isfunction(BZCN.GetRandomHumanName)
+            and BZCN.GetRandomHumanName(self:GetModel())) or ("Civilian #" .. tostring(self:EntIndex()))
+    end
+    self.BZCNDisplayName = currentName
+    self.PlayerName = currentName
+    self:SetNW2String("BZCNDisplayName", currentName)
+    if self.SetNWString then self:SetNWString("PlayerName", currentName) end
 
     if profile.FurryStyle and self:GetModel() == profile.Model then
         self:SetSkin(profile.Skin or 4)
