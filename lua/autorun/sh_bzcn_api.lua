@@ -157,6 +157,8 @@ function BZCN.RegisterClass(className, definition)
     definition.Inventory = definition.Inventory or {Weapons = {}, Items = {}, Armor = {}}
     definition.Inventory.Weapons = definition.Inventory.Weapons or {}
     definition.Inventory.Items = definition.Inventory.Items or {}
+    definition.Inventory.Ammo = definition.Inventory.Ammo or {}
+    definition.Inventory.Attachments = definition.Inventory.Attachments or {}
     definition.Inventory.Armor = definition.Inventory.Armor or {}
     BZCN.Classes[className] = definition
     return true
@@ -205,10 +207,13 @@ BZCN.RegisterClass("Metrocop", {
     -- hostile on sight. Attacks and recent ally-threat memory still escalate.
     Faction = "Combine", EnemyPlayers = false, EnemyFactions = {"Rebel", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 160, HelpRange = 1350, HelpMemory = 10,
-    AnimationClass = "metrocop", AnimationHoldType = "smg", Ranged = false, WeaponDamage = 10,
-    WeaponRange = 1150, AttackDelay = 0.38, MedicalRange = 320, CanScavengeWeapons = true,
-    WeaponClass = "weapon_hands_sh",
-    Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
+    AnimationClass = "metrocop", AnimationHoldType = "pistol", Ranged = true, WeaponDamage = 9,
+    WeaponRange = 950, AttackDelay = 0.32, MedicalRange = 320, CanScavengeWeapons = true,
+    -- Civil Protection starts with its sidearm plus hands for noncombat use.
+    -- Keep both in the loot/inventory table; only the sidearm is active by default.
+    WeaponClass = "weapon_pistol",
+    Inventory = {Weapons = {weapon_pistol = true, weapon_hands_sh = true,
+        weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Ammo = {}, Armor = {}}
 })
 
 BZCN.RegisterClass("Rebel", {
@@ -1009,7 +1014,31 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     if resetInventory or not istable(inventory) then inventory = CopyTable(profile.Inventory) end
     inventory.Weapons = inventory.Weapons or {}
     inventory.Items = inventory.Items or {}
+    inventory.Ammo = inventory.Ammo or {}
+    inventory.Attachments = inventory.Attachments or {}
     inventory.Armor = inventory.Armor or {}
+
+    -- Seed native Z-City reserve ammo for each available firearm in a fresh
+    -- class loadout. Inventory-giver config can override any of these values.
+    if SERVER and resetInventory then
+        for weaponClass in pairs(inventory.Weapons) do
+            local stored = isstring(weaponClass) and weapons and weapons.GetStored
+                and weapons.GetStored(weaponClass) or nil
+            local primary = istable(stored) and istable(stored.Primary) and stored.Primary or nil
+            local ammoName = primary and primary.Ammo
+            local clip = primary and math.max(
+                tonumber(primary.ClipSize) or 0,
+                tonumber(primary.DefaultClip) or 0
+            ) or 0
+            if isstring(ammoName) and ammoName ~= "" and string.lower(ammoName) ~= "none"
+                and clip > 0 then
+                local ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
+                if isnumber(ammoID) and ammoID >= 0 and inventory.Ammo[ammoID] == nil then
+                    inventory.Ammo[ammoID] = math.min(math.max(math.floor(clip * 3), 1), 99999)
+                end
+            end
+        end
+    end
 
     if SERVER and profile.CivilianStyle == true and resetInventory then
         if weapons and weapons.GetStored and weapons.GetStored("weapon_glock17")
