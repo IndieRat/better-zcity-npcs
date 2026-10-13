@@ -260,7 +260,7 @@ local function EscalateNativeMetro(npc, attacker)
 end
 
 local function CivilianMurderResponse(victim, attacker)
-    if not IsCombatEntity(victim) or not IsValid(attacker) or not attacker:IsPlayer()
+    if not IsCombatEntity(victim) or not IsCombatActor(attacker)
         or victim == attacker or not IsCivilianVictim(victim) then return end
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("civilian_crime_response") then return end
 
@@ -286,7 +286,11 @@ local function CivilianMurderResponse(victim, attacker)
             metroWitnesses[#metroWitnesses + 1] = candidate
         elseif IsManagedNPC(candidate) then
             local profile = candidate.BZCNClassProfile or {}
-            if profile.CivilianStyle == true or FactionOf(candidate) == "civilian" then
+            local faction = FactionOf(candidate)
+            -- All human-aligned classes can witness a civilian death. Civilians
+            -- panic or retaliate; Combine/Rebels register the offender as hostile.
+            if profile.CivilianStyle == true or faction == "civilian"
+                or faction == "Combine" or faction == "Rebel" then
                 witnesses[#witnesses + 1] = candidate
             end
         end
@@ -304,7 +308,10 @@ local function CivilianMurderResponse(victim, attacker)
     for _, witness in ipairs(witnesses) do
         witness.BZCNMurderWitnessAt = now
         witness.BZCNMurderWitnessTarget = attacker
-        if not metroPresent and IsArmedCivilian(witness) then
+        local witnessFaction = FactionOf(witness)
+        if witnessFaction == "Combine" or witnessFaction == "Rebel" then
+            SetHostileGrievance(witness, attacker, 45, math.Rand(0.15, 0.35))
+        elseif not metroPresent and IsArmedCivilian(witness) then
             local weaponClass, ranged = SelectDefenseWeapon(witness)
             if weaponClass then
                 local profile = witness.BZCNClassProfile or {}
@@ -364,8 +371,10 @@ local function ReactToAlliedDamage(victim, attacker)
     if not IsCombatEntity(victim) or not IsCombatActor(attacker) or victim == attacker then return end
     local faction = FactionOf(victim)
     local attackerFaction = FactionOf(attacker)
-    if faction ~= "Combine" and faction ~= "Rebel" then return end
-    if attackerFaction == faction then return end
+    local humanFactions = {civilian = true, ["Combine"] = true, ["Rebel"] = true}
+    if not humanFactions[faction] or not humanFactions[attackerFaction] then return end
+    -- Neutral human classes also record grievances, including civilian-on-civilian
+    -- attacks. Do not discard same-faction violence.
 
     local radius = 1650
     for _, npc in ipairs(ents.FindInSphere(victim:GetPos(), radius)) do
@@ -377,7 +386,8 @@ local function ReactToAlliedDamage(victim, attacker)
         local distanceSqr = npc:GetPos():DistToSqr(victim:GetPos())
         if distanceSqr > radius * radius then continue end
         if not inSquad and not CanWitness(npc, victim, victim:WorldSpaceCenter()) then continue end
-        if SetHostileGrievance(npc, attacker, 24, math.Rand(0.08, 0.28)) then
+        if SetHostileGrievance(npc, attacker, faction == "civilian" and 18 or 24,
+            math.Rand(0.08, 0.28)) then
             hook.Run("BZCN_NPCDefendedAlly", npc, victim, attacker)
         end
     end
