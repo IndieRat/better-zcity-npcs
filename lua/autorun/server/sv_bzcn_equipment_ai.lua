@@ -358,6 +358,9 @@ hook.Add("PlayerCanPickupWeapon", "BZCN_RuntimeWeaponPickpocketSync", function(p
         -- deleting the weapon now owned by the player.
         hook.Run("BZCN_InventorySet", owner, inventory)
     end)
+    -- Z-City's TakeItem implementation treats a nil hook result as a denied
+    -- pickup, so explicitly permit this already-authorized inventory transfer.
+    return true
 end)
 
 local function GetDamageFromWeapon(weapon, profile, weaponClass)
