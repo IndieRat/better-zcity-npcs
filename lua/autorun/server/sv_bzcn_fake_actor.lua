@@ -374,6 +374,12 @@ function FakeActor:UpdateWeaponAim(dt)
     local now = CurTime()
     local solution = owner.BZCNCombatAimSolution
     local aimUntil = owner.GetNW2Float and owner:GetNW2Float("BZCNCombatAimUntil", 0) or 0
+    -- FireRuntimeWeapon clears its per-shot server solution after dispatch;
+    -- keep the arm pose alive through the short replicated aim window.
+    if not istable(solution) and owner.GetNW2Angle and aimUntil > now then
+        local replicated = owner:GetNW2Angle("BZCNCombatAimAngle", angle_zero)
+        if isangle(replicated) then solution = {angle = replicated} end
+    end
     local weapon = owner.BZCNRuntimeWeapon
     local weaponClass = owner.BZCN_SelectedWeapon or (IsValid(weapon) and weapon:GetClass()) or ""
     local physiology = self.physiology or {}
