@@ -319,3 +319,170 @@ hook.Add("EntityRemoved", "BZCN_TPIKCleanup", function(ent)
     ent.BZCNTPiKLogAt = nil
     ent.BZCNHandSetupLogAt = nil
 end)
+
+
+-- Homigrad weapon animation bridge for managed NPCs.
+-- We intentionally do not spoof IsPlayer(): native weapon pose methods are run
+-- with a temporary, narrowly-scoped owner compatibility shim only where needed.
+local function GetAnimationWeapon(ent)
+    local runtime = GetRuntimeWeapon(ent)
+    if IsValid(runtime) then return runtime end
+    local def, class = GetWeaponDefinition(ent)
+    if class == "" then return nil, def end
+    -- A registered SWEP definition is a fallback for hold-type metadata only;
+    -- we never invoke stateful animation methods on the shared definition.
+    return nil, def
+end
+
+local function SafeWeaponCall(weapon, method, ...)
+    if not IsValid(weapon) or not isfunction(weapon[method]) then return false end
+    local ok, err = pcall(weapon[method], weapon, ...)
+    if not ok then
+        local logAt = tonumber(weapon.BZCNAnimErrorAt) or 0
+        if CurTime() >= logAt then
+            weapon.BZCNAnimErrorAt = CurTime() + 5
+            ErrorNoHalt("[BZCN weapon animation] " .. tostring(weapon:GetClass())
+                .. ":" .. method .. ": " .. tostring(err) .. "\n")
+        end
+    end
+    return ok
+end
+
+local function ApplyNPCBonePose(ent, weapon, key, vec, ang, layer, lerp)
+    if not IsValid(ent) or not isvector(vec) or not isangle(ang) then return end
+    if not isstring(key) and not isnumber(key) then return end
+    local boneName = istable(hg) and istable(hg.bone) and hg.bone.matrixManual_Name
+        and hg.bone.matrixManual_Name[key] or key
+    local boneID = isnumber(key) and key or ent:LookupBone(boneName)
+    if not isnumber(boneID) or boneID < 0 then return end
+
+    -- These are small additive animation layers, not absolute replacements:
+    -- preserve the animation pose and combine Homigrad weapon layers with it.
+    ent.BZCNWeaponAnimLayers = ent.BZCNWeaponAnimLayers or {}
+    local entLayers = ent.BZCNWeaponAnimLayers
+    local layerName = tostring(layer or "weapon")
+    entLayers[boneID] = entLayers[boneID] or {}
+    local state = entLayers[boneID][layerName]
+    if not state then
+        state = {pos = vector_origin, ang = angle_zero, last = 0}
+        entLayers[boneID][layerName] = state
+    end
+    local dt = math.min(FrameTime(), 0.1)
+    if isnumber(lerp) then
+        local rate = math.Clamp(1 - math.pow(math.Clamp(lerp, 0, 1), dt), 0, 1)
+        state.pos = LerpVector(rate, state.pos, vec)
+        state.ang = LerpAngle(rate, state.ang, ang)
+    else
+        state.pos, state.ang = vec, ang
+    end
+    state.last = FrameNumber()
+end
+
+local function InstallWeaponBoneSetAdapter(ent, weapon)
+    if weapon.BZCNOriginalBoneSet then return end
+    local oldBoneSet = weapon.BoneSet
+    weapon.BZCNOriginalBoneSet = oldBoneSet
+    weapon.BZCNBoneSetOwner = ent
+
+    -- Keep the native path for Players; NPCs receive a compatible pose queue
+    -- that is consumed after the NPC's animated model has been rebuilt.
+    weapon.BoneSet = function(self, lookup_name, vec, ang, layer, lerp)
+        local owner = self:GetOwner()
+        if not IsValid(owner) then return end
+        if owner:IsPlayer() then
+            if isfunction(oldBoneSet) then
+                return oldBoneSet(self, lookup_name, vec, ang, layer, lerp)
+            end
+            return
+        end
+        if not IsManaged(owner) then return end
+        ApplyNPCBonePose(owner, self, lookup_name, vec or vector_origin,
+            ang or angle_zero, layer, lerp)
+    end
+end
+
+local function RunNativeWeaponAnimation(ent, weapon, definition)
+    if not IsValid(ent) or not IsValid(weapon) then return end
+    InstallWeaponBoneSetAdapter(ent, weapon)
+
+    -- Keep the custom SWEP Animation override: weapons can implement their own
+    -- attack/inspect/recoil poses. Then apply base idle/aim/recoil if present.
+    local ok = SafeWeaponCall(weapon, "Animation", ent)
+    if not ok then return end
+end
+
+local function ResolveNPCWeaponHold(ent, weapon, definition)
+    local hold = IsValid(weapon) and (weapon.holdtype or weapon.HoldType) or nil
+    if not isstring(hold) or hold == "" then
+        hold = istable(definition) and (definition.HoldType or definition.holdtype) or nil
+    end
+    if not isstring(hold) or hold == "" then hold = "smg" end
+    if IsValid(weapon) then
+        weapon.holdtype = hold
+        if isfunction(weapon.SetHoldType) then pcall(weapon.SetHoldType, weapon, hold) end
+        if isfunction(weapon.SetWeaponHoldType) then pcall(weapon.SetWeaponHoldType, weapon, hold) end
+    end
+    if isfunction(ent.SetNPCState) then
+        -- Do not overwrite an AI schedule; hold type is handled by gestures/IK.
+    end
+    return hold
+end
+
+local function ApplyQueuedNPCWeaponBones(ent)
+    if not IsValid(ent) or not ent.SetupBones then return end
+    local layers = ent.BZCNWeaponAnimLayers
+    if not istable(layers) then return end
+
+    -- Clear only stale layers registered by this adapter; no other addons'
+    -- bone manipulation is reset. Pose writes are local to this client.
+    local frame = FrameNumber()
+    for boneID, boneLayers in pairs(layers) do
+        if not ent:GetBoneName(boneID) or ent:GetBoneName(boneID) == "__INVALIDBONE__" then
+            layers[boneID] = nil
+            continue
+        end
+        local pos, ang = vector_origin, angle_zero
+        local active = false
+        for layerName, state in pairs(boneLayers) do
+            if state.last ~= frame then
+                state.pos = LerpVector(math.Clamp(FrameTime() * 12, 0, 1), state.pos, vector_origin)
+                state.ang = LerpAngle(math.Clamp(FrameTime() * 12, 0, 1), state.ang, angle_zero)
+            end
+            pos = pos + state.pos
+            ang = ang + state.ang
+            active = true
+        end
+        if active then
+            ent:ManipulateBonePosition(boneID, pos)
+            ent:ManipulateBoneAngles(boneID, ang)
+        end
+    end
+end
+
+local function RunNPCWeaponAnimations(ent)
+    if not IsManaged(ent) or ent:GetNoDraw() or ent:GetNW2Bool("BZCNNPCDowned", false) then return end
+    local definition, class = GetWeaponDefinition(ent)
+    if not WantsGunTPIK(ent, class) then
+        ApplyQueuedNPCWeaponBones(ent)
+        return
+    end
+    local weapon = GetRuntimeWeapon(ent)
+    if not IsValid(weapon) then return end
+
+    ResolveNPCWeaponHold(ent, weapon, definition)
+    RunNativeWeaponAnimation(ent, weapon, definition)
+    ApplyQueuedNPCWeaponBones(ent)
+end
+
+hook.Add("PreDrawOpaqueRenderables", "BZCN_HomigradWeaponAnimations", function(_, skybox)
+    if skybox then return end
+    local frame = FrameNumber()
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not IsManaged(ent) or ent:GetPos():DistToSqr(EyePos()) > 2500 * 2500 then continue end
+        if ent.BZCNWeaponAnimFrame == frame then continue end
+        ent.BZCNWeaponAnimFrame = frame
+        ent:SetupBones()
+        RunNPCWeaponAnimations(ent)
+    end
+end)
+
