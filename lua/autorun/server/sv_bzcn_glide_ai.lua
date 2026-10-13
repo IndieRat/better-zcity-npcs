@@ -157,6 +157,26 @@ local function SeatNPC(npc, vehicle, seat, role)
         return false
     end
 
+    -- If two BZCN/Z-City ragdoll slots diverged during a downed transition,
+    -- only the selected organism ragdoll should remain. Remove stale duplicates
+    -- only when they explicitly identify this NPC as their owner.
+    local actorBeforeSeat = npc.BZCNFakeActor
+    local staleCandidates = {
+        npc.BZCNNPCRagdoll,
+        npc.FakeRagdoll,
+        npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll") or nil,
+        istable(actorBeforeSeat) and actorBeforeSeat.ragdoll or nil
+    }
+    local seenRagdolls = {}
+    for _, stale in ipairs(staleCandidates) do
+        if IsValid(stale) and stale ~= rag and not seenRagdolls[stale] then
+            seenRagdolls[stale] = true
+            if stale.BZCNNPCOwner == npc or stale.GlideRagdollPlayer == npc then
+                stale:Remove()
+            end
+        end
+    end
+
     -- Mirror the metadata Glide assigns to its own crash ragdolls, but retain
     -- the NPC's organism/ragdoll ownership so damage and recovery stay bridged.
     rag.IsGlideRagdoll = true
