@@ -211,8 +211,8 @@ BZCN.RegisterClass("Metrocop", {
     WeaponRange = 950, AttackDelay = 0.32, MedicalRange = 320, CanScavengeWeapons = true,
     -- Civil Protection starts with its sidearm plus hands for noncombat use.
     -- Keep both in the loot/inventory table; only the sidearm is active by default.
-    WeaponClass = "weapon_pistol",
-    Inventory = {Weapons = {weapon_pistol = true, weapon_hands_sh = true,
+    WeaponClass = "Pistol:9mm",
+    Inventory = {Weapons = {["Pistol:9mm"] = true, weapon_hands_sh = true,
         weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Ammo = {}, Armor = {}}
 })
 
@@ -430,7 +430,9 @@ function BZCN.ResolveInventoryWeaponAlias(alias)
             end
         end
         table.sort(candidates)
-        if #candidates > 0 then return candidates[math.random(#candidates)] end
+        -- Stable resolution means WeaponClass and Inventory.Weapons aliases
+        -- resolve to the same actual class even when normalized in separate paths.
+        if #candidates > 0 then return candidates[1] end
         return nil
     end
 
