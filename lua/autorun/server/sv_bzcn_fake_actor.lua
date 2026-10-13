@@ -219,13 +219,23 @@ function FakeActor:RefreshPhysiology()
         if (tonumber(injury.shock) or 0) > 60 or (tonumber(injury.pain) or 0) > 70 then
             sitChance = math.min(sitChance, 0.3)
         end
+        -- A sit is a brief recovery beat, not a locked idle state.
+        sitChance = math.min(sitChance, faceDown and 0.35 or 0.58)
         self.posture = math.Rand(0, 1) < sitChance and "sit" or "crawl"
+        self.sitUntil = self.posture == "sit" and (now + math.Rand(1.15, 2.35)) or nil
         self.nextCrawlStroke = now + math.Rand(0.8, 1.25)
     elseif not downed and self.wasDowned then
         self.posture = nil
         self.postureChosenAt = nil
     end
     self.wasDowned = downed
+
+    -- Resolve the seated recovery quickly; don't loop every civilian through a
+    -- long seated animation. Once it ends, return to loose physics.
+    if downed and self.posture == "sit" and (self.sitUntil or 0) <= now then
+        self.posture = "rest"
+        self.sitUntil = nil
+    end
 
     local crawlDelay = math.Clamp(tonumber(self.config.autoCrawlDelay) or 1.45, 0.65, 3.0)
     local wantsCrawl = injury.crawling == true
