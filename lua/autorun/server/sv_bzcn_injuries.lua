@@ -1169,9 +1169,28 @@ end
 local function EnterDownedState(owner, reason)
     if not IsAlive(owner) then return end
     local state = Support.Attach(owner)
+    if not state then return false end
+
+    -- Multiple Z-City damage/impact hooks can request the same knockdown in
+    -- one tick. Reuse the already-created proxy instead of spawning a second
+    -- prop_ragdoll for the same living NPC.
+    local existingRag = owner.BZCNNPCRagdoll
+    if not IsValid(existingRag) and IsValid(owner.FakeRagdoll)
+        and owner.FakeRagdoll.BZCNNPCOwner == owner then
+        existingRag = owner.FakeRagdoll
+    end
+    if IsValid(existingRag) then
+        owner.BZCNNPCRagdoll = existingRag
+        state.ragdoll = existingRag
+        state.downed = true
+        state.gettingUp = false
+        owner.BZCNNPCDowned = true
+        return true
+    end
+
     -- Damage/organism callbacks may arrive while get-up is still playing.
     -- Treat that interval as recovery, not as a fresh knockdown.
-    if not state or state.downed or state.gettingUp then return false end
+    if state.downed or state.gettingUp then return false end
 
     local model = owner:GetModel()
     if not isstring(model) or model == "" then return end
@@ -1897,6 +1916,7 @@ function Support.OnNPCDeath(owner)
     local rag = owner.BZCNNPCRagdoll
     if IsValid(rag) then
         InstallDeathRagdollOrganism(owner, rag, sourceOrg)
+        owner.BZCN_DeathRagdollTransferred = rag
         DetachLivingRagdoll(owner, rag)
 
         if hg.organism and isfunction(hg.organism.Remove) then
@@ -1917,6 +1937,24 @@ end
 
 hook.Add("CreateEntityRagdoll", "BZCNNPCSupport_ZCityDeathRagdoll", function(owner, rag)
     if not IsValid(owner) or not IsValid(rag) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return end
+
+    -- If the NPC died while already downed, its visible proxy is the corpse.
+    -- The engine/Z-City death callback can still create a second ragdoll;
+    -- remove that extra entity and keep the transferred proxy as the one corpse.
+    local transferred = owner.BZCN_DeathRagdollTransferred
+    if IsValid(transferred) and transferred ~= rag then
+        rag:Remove()
+        return
+    end
+    local currentProxy = owner.BZCNNPCRagdoll
+    if not IsValid(currentProxy) and IsValid(owner.FakeRagdoll)
+        and owner.FakeRagdoll.BZCNNPCOwner == owner then
+        currentProxy = owner.FakeRagdoll
+    end
+    if IsValid(currentProxy) and currentProxy ~= rag and currentProxy.BZCNNPCOwner == owner then
+        rag:Remove()
+        return
+    end
     if not owner.BZCN_DeathRagdollPending and not owner.BZCNDeathHandled then return end
     local sourceOrg = owner.BZCN_DeathOrganismSnapshot or owner.organism or owner.BZCN_Organism
     InstallDeathRagdollOrganism(owner, rag, sourceOrg or {})
