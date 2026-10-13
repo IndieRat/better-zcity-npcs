@@ -401,9 +401,13 @@ function ENT:Initialize()
 
         if appearanceApplied and appearance then self.CurAppearance = table.Copy(appearance) end
         self.BZCNClassProfile.Model = self:GetModel()
-        local displayName = (appearanceApplied and appearance and appearance.AName)
+        local appearanceName = appearanceApplied and appearance and appearance.AName or nil
+        if not isstring(appearanceName) or string.Trim(appearanceName) == "" then
+            appearanceName = nil
+        end
+        local displayName = appearanceName
             or (BZCN and isfunction(BZCN.GetRandomHumanName) and BZCN.GetRandomHumanName(self:GetModel()))
-            or "Civilian"
+            or ("Civilian #" .. tostring(self:EntIndex()))
         self.BZCNDisplayName = displayName
         self.PlayerName = displayName
         self:SetNW2String("BZCNDisplayName", displayName)
