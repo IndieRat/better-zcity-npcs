@@ -130,7 +130,11 @@ end
 
 local function InventoryToConfig(inventory)
     local weaponsOut, itemsOut, ammoOut, attachmentsOut, armorOut = {}, {}, {}, {}, {}
-    for class, value in pairs(inventory.Weapons or {}) do
+    for storedClass, value in pairs(inventory.Weapons or {}) do
+        local class = isstring(storedClass) and storedClass or nil
+        if class and BZCN and isfunction(BZCN.ResolveInventoryWeaponAlias) then
+            class = BZCN.ResolveInventoryWeaponAlias(class) or class
+        end
         if isstring(class) and value ~= nil and (VIRTUAL_WEAPON_ITEMS[class]
             or (weapons and weapons.GetStored and istable(weapons.GetStored(class)))) then
             weaponsOut[#weaponsOut + 1] = class
