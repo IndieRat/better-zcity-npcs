@@ -327,10 +327,17 @@ local function OnNPCDeath(victim, attackerOrDamage)
     local attacker
     if isentity(attackerOrDamage) and IsValid(attackerOrDamage) then
         attacker = attackerOrDamage
-    elseif attackerOrDamage and isfunction(attackerOrDamage.GetAttacker) then
-        -- DamageInfo is not a Lua table in every GMod build.
-        local ok, result = pcall(attackerOrDamage.GetAttacker, attackerOrDamage)
-        if ok then attacker = result end
+    else
+        -- DamageInfo may be a table or userdata depending on the engine build.
+        -- Never index arbitrary non-entity scalars while trying to extract it.
+        local kind = type(attackerOrDamage)
+        if kind == "table" or kind == "userdata" then
+            local okGetter, getter = pcall(function() return attackerOrDamage.GetAttacker end)
+            if okGetter and isfunction(getter) then
+                local ok, result = pcall(getter, attackerOrDamage)
+                if ok then attacker = result end
+            end
+        end
     end
     CivilianMurderResponse(victim, attacker)
 end
