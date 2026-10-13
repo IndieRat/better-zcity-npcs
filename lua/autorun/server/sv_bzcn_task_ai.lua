@@ -1053,7 +1053,11 @@ function Tasks.RunIdleTask(ent)
     -- Keep combat fireteams together while they patrol and explore. The
     -- RunBehaviour loop has already yielded to active enemies, so this only
     -- owns idle movement; healing/help and Metrocop alert states still win first.
-    if kind == "combine" or kind == "rebel" then
+    local activeDriveTask = ent.BZCNCurrentTask == "drive"
+        and (ent.BZCNTaskUntil or 0) > CurTime()
+    if (kind == "combine" or kind == "rebel") and not activeDriveTask then
+        -- Squad cohesion normally owns these factions' idle movement, but an
+        -- already-assigned drive task is an explicit order and takes priority.
         if RunSquadIdleTask(ent, kind) then return true end
     end
 
