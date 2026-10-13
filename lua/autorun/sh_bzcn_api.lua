@@ -192,7 +192,7 @@ BZCN.RegisterClass("Combine", {
     Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
     CanScavengeWeapons = true, AnimationClass = "overwatch", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
-    MedicalRange = 300, WeaponClass = "weapon_mp7",
+    MedicalRange = 300, WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
     Inventory = {Weapons = {weapon_mp7 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {head = "combine_helmet"}}
 })
 
@@ -211,8 +211,8 @@ BZCN.RegisterClass("Metrocop", {
     WeaponRange = 950, AttackDelay = 0.32, MedicalRange = 320, CanScavengeWeapons = true,
     -- Civil Protection starts with its sidearm plus hands for noncombat use.
     -- Keep both in the loot/inventory table; only the sidearm is active by default.
-    WeaponClass = "weapon_glock26",
-    Inventory = {Weapons = {weapon_glock26 = true, weapon_hands_sh = true,
+    WeaponClass = "weapon_pistol",
+    Inventory = {Weapons = {weapon_pistol = true, weapon_hands_sh = true,
         weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Ammo = {}, Armor = {}}
 })
 
@@ -225,7 +225,7 @@ BZCN.RegisterClass("Rebel", {
     Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
     AnimationClass = "citizen_male", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
-    MedicalRange = 320, CanScavengeWeapons = true, WeaponClass = "weapon_ak74",
+    MedicalRange = 320, CanScavengeWeapons = true, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
     Inventory = {Weapons = {weapon_ak74 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {}}
 })
 
@@ -243,7 +243,7 @@ BZCN.RegisterClass("furry", {
     Ranged = false, MeleeDamage = 22, MeleeRange = 82, AttackDelay = 0.72,
     SmartFurryChance = 0.22,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
-    WeaponModel = "models/weapons/salat/anims/furry_fists.mdl", ForceWeaponModel = true,
+    WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
     MedicalRange = 250, FurryStyle = true, FurryGrabRange = 110, Skin = 4, BloodType = "c-",
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
 })
@@ -274,7 +274,7 @@ BZCN.RegisterClass("furry_companion", {
     FollowAllies = true, FollowRange = 2400, FollowDistance = 120, HelpRange = 1800, HelpMemory = 15,
     Ranged = false, MeleeDamage = 16, MeleeRange = 74, AttackDelay = 0.72,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
-    WeaponModel = "models/weapons/salat/anims/furry_fists.mdl", ForceWeaponModel = true,
+    WeaponModel = "models/weapons/salat/anims/furry_fists.mdl",
     MedicalRange = 420, FurryGrabRange = 105, Skin = 4, BloodType = "c-",
     CompanionAmmoStock = 120,
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {head = "protovisor"}}
@@ -1110,141 +1110,27 @@ for _, className in ipairs({"default", "Combine", "Metrocop", "Rebel", "civilian
     end
 end
 
--- Resolve hold poses from the actual Homigrad SWEP definition, including
--- derived weapons such as weapon_glock26 -> weapon_glock17 -> homigrad_base.
--- Z-City maps several unusual hold types into another animation pool, and
--- Homigrad dynamically shifts some weapons to "slam" while sprinting.
-BZCN.WeaponHoldTypeTranslator = BZCN.WeaponHoldTypeTranslator or {
-    [""] = "normal", physgun = "smg", ar2 = "smg", camera = "smg",
-    crossbow = "shotgun", rpg = "grenade", slam = "smg", grenade = "grenade",
-    fist = "normal", melee2 = "melee", passive = "passive", knife = "melee",
-    duel = "pistol", magic = "normal", revolver = "smg"
-}
-
--- Read inherited SWEP metadata from the first class in the Base chain that
--- defines it. weapons.GetStored(child) doesn't consistently materialize parent
--- fields, but Homigrad variants such as weapon_glock26 depend on the parent
--- WorldModel, WorldPos, WorldAng, HoldType, and animation flags.
-function BZCN.GetWeaponDefinitionValue(class, key)
-    if not isstring(class) or class == "" or not isstring(key) then return nil end
-    local current, seen = class, {}
-    for _ = 1, 12 do
-        if not isstring(current) or current == "" or seen[current] then return nil end
-        seen[current] = true
-        local definition = weapons and weapons.GetStored and weapons.GetStored(current)
-        if not istable(definition) then return nil end
-        if definition[key] ~= nil then return definition[key], definition, current end
-        current = definition.Base
-    end
-    return nil
-end
-
-function BZCN.IsHomigradWeaponClass(class)
-    if not isstring(class) or class == "" then return false end
-    local current, seen = class, {}
-    for _ = 1, 12 do
-        if not isstring(current) or current == "" or seen[current] then return false end
-        if current == "homigrad_base" then return true end
-        seen[current] = true
-        local definition = weapons and weapons.GetStored and weapons.GetStored(current)
-        if not istable(definition) then return false end
-        current = definition.Base
-    end
-    return false
-end
-
-function BZCN.GetWeaponAnimationHoldType(owner, weaponClass, weaponEntity)
-    local ownerValid = isentity(owner) and IsValid(owner)
-    local profile = ownerValid and owner.BZCNClassProfile or {}
-    weaponClass = isstring(weaponClass) and weaponClass or
-        (ownerValid and (owner.BZCN_SelectedWeapon
-            or (owner.GetNW2String and owner:GetNW2String("BZCNWeaponClass", "")))) or ""
-    local definition = isstring(weaponClass) and weapons and weapons.GetStored
-        and weapons.GetStored(weaponClass) or nil
-    local configuredHold = BZCN.GetWeaponDefinitionValue(weaponClass, "HoldType")
-        or BZCN.GetWeaponDefinitionValue(weaponClass, "holdtype")
-
-    if not (isentity(weaponEntity) and IsValid(weaponEntity)) and ownerValid then
-        local candidate = owner.BZCNRuntimeWeapon
-        if isentity(candidate) and IsValid(candidate) and candidate:GetClass() == weaponClass then
-            weaponEntity = candidate
-        else
-            candidate = owner.BZCNRuntimeMedicalWeapon
-            if isentity(candidate) and IsValid(candidate) and candidate:GetClass() == weaponClass then
-                weaponEntity = candidate
-            end
-        end
-    end
-
-    local rawHold
-    if isentity(weaponEntity) and IsValid(weaponEntity) then
-        -- Homigrad writes its current stance to .holdtype and mirrors it via
-        -- SetHoldType(). Prefer that runtime field, then a non-default engine
-        -- value, and finally the inherited SWEP declaration if the engine still
-        -- reports its generic default for a freshly spawned NextBot weapon.
-        rawHold = weaponEntity.holdtype
-        local engineHold
-        if isfunction(weaponEntity.GetHoldType) then
-            local ok, value = pcall(weaponEntity.GetHoldType, weaponEntity)
-            if ok and isstring(value) and value ~= "" then engineHold = value end
-        end
-        if (not isstring(rawHold) or rawHold == "") and engineHold and string.lower(engineHold) ~= "normal" then
-            rawHold = engineHold
-        end
-        rawHold = rawHold or weaponEntity.HoldType or configuredHold or engineHold
-    end
-    rawHold = (isstring(rawHold) and rawHold ~= "" and rawHold) or configuredHold
-        or (istable(definition) and (definition.HoldType or definition.holdtype)) or nil
-    if not isstring(rawHold) or rawHold == "" then
-        rawHold = (isstring(profile.AnimationHoldTypeOverride) and profile.AnimationHoldTypeOverride)
-            or profile.AnimationHoldType or "normal"
-    end
-    rawHold = string.lower(rawHold)
-
-    local inheritedEpicRun = BZCN.GetWeaponDefinitionValue(weaponClass, "CanEpicRun") == true
-    local epicRun = inheritedEpicRun or (istable(definition) and definition.CanEpicRun == true)
-        or (isentity(weaponEntity) and IsValid(weaponEntity) and weaponEntity.CanEpicRun == true)
-    local pistolStyle = rawHold == "pistol" or rawHold == "revolver"
-        or string.find(string.lower(weaponClass), "glock", 1, true) ~= nil
-        or string.find(string.lower(weaponClass), "pistol", 1, true) ~= nil
-    local sprinting = ownerValid and (owner.BZCN_Sprinting == true
-        or (isfunction(owner.IsSprinting) and owner:IsSprinting() == true))
-    if sprinting and (epicRun or pistolStyle) then rawHold = "slam" end
-
-    return BZCN.WeaponHoldTypeTranslator[rawHold] or rawHold
-end
-
 function BZCN.GetWeaponModel(ent, weaponClass)
     if not IsValid(ent) then return nil end
     local profile = ent.BZCNClassProfile or BZCN.GetClass(ent.BZCNClass or ent.PlayerClassName)
     weaponClass = weaponClass or ent.BZCN_SelectedWeapon
         or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
-    if not isstring(weaponClass) or weaponClass == "" then return nil end
 
+    -- A profile override is appropriate only while its configured weapon is
+    -- selected. Otherwise use the selected Z-City SWEP's real world model
+    -- (medkits/bandages included), rather than continuing to show the old gun.
+    if profile and isstring(profile.WeaponModel) and profile.WeaponModel ~= ""
+        and (not weaponClass or weaponClass == "" or weaponClass == profile.WeaponClass) then
+        return profile.WeaponModel
+    end
+    if not isstring(weaponClass) or weaponClass == "" then return nil end
     local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local model = BZCN.GetWeaponDefinitionValue(weaponClass, "WorldModel")
-        or (istable(stored) and stored.WorldModel) or nil
-    local worldModelFn = BZCN.GetWeaponDefinitionValue(weaponClass, "GetWeaponWorldModel")
-    if isfunction(worldModelFn) then
-        local runtime = isentity(ent.BZCNRuntimeWeapon) and IsValid(ent.BZCNRuntimeWeapon)
-            and ent.BZCNRuntimeWeapon:GetClass() == weaponClass and ent.BZCNRuntimeWeapon or nil
-        local ok, result = pcall(worldModelFn, runtime or stored)
-        if ok and isstring(result) and result ~= "" then model = result end
-    elseif istable(stored) and isfunction(stored.GetWeaponWorldModel) then
+    local model = istable(stored) and stored.WorldModel or nil
+    if istable(stored) and isfunction(stored.GetWeaponWorldModel) then
         local ok, result = pcall(stored.GetWeaponWorldModel, stored)
         if ok and isstring(result) and result ~= "" then model = result end
     end
-    local validModel = isstring(model) and model ~= ""
-        and string.EndsWith(string.lower(model), ".mdl")
-
-    -- Homigrad world models and hand transforms belong to the SWEP itself.
-    -- Only opt-out profiles (currently furry fists) may force a custom model.
-    local useProfileModel = profile and isstring(profile.WeaponModel) and profile.WeaponModel ~= ""
-        and weaponClass == profile.WeaponClass
-    if useProfileModel and profile.ForceWeaponModel == true then return profile.WeaponModel end
-    if BZCN.IsHomigradWeaponClass(weaponClass) and validModel then return model end
-    if useProfileModel then return profile.WeaponModel end
-    if validModel then return model end
+    if isstring(model) and model ~= "" and string.EndsWith(string.lower(model), ".mdl") then return model end
     return nil
 end
 
@@ -1420,7 +1306,16 @@ if SERVER then
     local heldWeaponProxies = setmetatable({}, {__mode = "k"})
 
     local function IsHomigradWeaponClass(class)
-        return BZCN.IsHomigradWeaponClass(class)
+        local current, seen = class, {}
+        for _ = 1, 12 do
+            if not isstring(current) or current == "" or seen[current] then return false end
+            if current == "homigrad_base" then return true end
+            seen[current] = true
+            local definition = weapons and weapons.GetStored and weapons.GetStored(current)
+            if not istable(definition) then return false end
+            current = definition.Base
+        end
+        return false
     end
 
     local function UpdateHeldWeaponTransform(ent, proxy)
@@ -1437,12 +1332,8 @@ if SERVER then
             and ent.BZCNRuntimeWeapon or nil
         local definition = isstring(weaponClass) and weapons and weapons.GetStored
             and weapons.GetStored(weaponClass) or nil
-        local worldPos = runtime and runtime.WorldPos
-            or BZCN.GetWeaponDefinitionValue(weaponClass, "WorldPos")
-            or (istable(definition) and definition.WorldPos)
-        local worldAng = runtime and runtime.WorldAng
-            or BZCN.GetWeaponDefinitionValue(weaponClass, "WorldAng")
-            or (istable(definition) and definition.WorldAng)
+        local worldPos = runtime and runtime.WorldPos or (istable(definition) and definition.WorldPos)
+        local worldAng = runtime and runtime.WorldAng or (istable(definition) and definition.WorldAng)
         if not isvector(worldPos) then worldPos = vector_origin end
         if not isangle(worldAng) then worldAng = angle_zero end
 
