@@ -432,8 +432,10 @@ local function WriteInventory(ent, inventory, clearVirtualItems)
                 profile.WeaponClass = selected
                 profile.WeaponModel = nil
             end
+            -- The active weapon decides whether this NPC should use firearm
+            -- pursuit/aim behavior; clear stale ranged flags when a gun is removed.
+            profile.Ranged = selectedRanged == true
             if selectedRanged then
-                profile.Ranged = true
                 ent.BZCNRangedWeaponEquipped = true
                 local stored = GetInventoryWeaponInfo(selected)
                 if istable(stored) and isstring(stored.HoldType) and stored.HoldType ~= "" then
