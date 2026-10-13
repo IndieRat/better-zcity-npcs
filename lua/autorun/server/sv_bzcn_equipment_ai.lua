@@ -432,6 +432,10 @@ local function FireStatBasedShot(ent, target, weapon)
 
     if didFire then
         local firedAt = CurTime()
+        -- Shared state consumed by FakeActor so the ragdoll's hands can show
+        -- the same trigger/recoil window as the hidden runtime weapon.
+        ent.BZCNActorFiringUntil = firedAt + 0.11
+        ent.BZCNActorLastShotAt = firedAt
         local delay = BZCNCombatActor and BZCNCombatActor.GetFireDelay
             and BZCNCombatActor.GetFireDelay(ent, weapon)
             or math.max(tonumber(profile.AttackDelay) or 0.35, 0.34)
