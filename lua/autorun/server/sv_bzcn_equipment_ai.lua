@@ -584,6 +584,9 @@ function BZCN.FireRuntimeWeapon(ent, target)
             end
         end
         if nativeHandled then
+            -- Share the native trigger window with the fake-ragdoll arm controller.
+            ent.BZCNActorFiringUntil = CurTime() + 0.11
+            ent.BZCNActorLastShotAt = CurTime()
             -- Homigrad already consumed ammo and ran its ammo-type bullet path.
             -- Keep the actor's cooldown per weapon instance, not in shared SWEP.Primary.
             local nextFire = now + (BZCNCombatActor and BZCNCombatActor.GetFireDelay
