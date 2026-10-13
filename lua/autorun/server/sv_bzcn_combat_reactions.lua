@@ -98,6 +98,10 @@ local function IsCombatActor(ent)
         and ent:Health() > 0 and not (ent:IsPlayer() and not ent:Alive())
 end
 
+local function IsCombatEntity(ent)
+    return IsValid(ent) and (ent:IsPlayer() or ent:IsNPC() or IsManagedNPC(ent))
+end
+
 local function IsMedicalWeapon(class)
     return BZCN.IsMedicalWeaponClass and BZCN.IsMedicalWeaponClass(class) == true
         or class == "weapon_hands_sh" or class == "weapon_zombclaws"
@@ -197,6 +201,7 @@ local function SetHostileGrievance(npc, attacker, duration, delay)
     if not IsManagedNPC(npc) or not IsCombatActor(attacker) or npc == attacker then return false end
     local now = CurTime()
     npc.BZCNHostileOffender = attacker
+    if istable(npc.BZCNBefriendedPlayers) then npc.BZCNBefriendedPlayers[attacker] = nil end
     npc.BZCNHostileOffenderUntil = now + (duration or 22)
     npc.BZCNOffendedAttackAt = now + (delay or 0.15)
     npc.BZCNEnemy = attacker
@@ -255,7 +260,7 @@ local function EscalateNativeMetro(npc, attacker)
 end
 
 local function CivilianMurderResponse(victim, attacker)
-    if not IsValid(victim) or not IsValid(attacker) or not attacker:IsPlayer()
+    if not IsCombatEntity(victim) or not IsValid(attacker) or not attacker:IsPlayer()
         or victim == attacker or not IsCivilianVictim(victim) then return end
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("civilian_crime_response") then return end
 
@@ -320,9 +325,10 @@ end
 
 local function OnNPCDeath(victim, attackerOrDamage)
     local attacker
-    if IsValid(attackerOrDamage) then
+    if isentity(attackerOrDamage) and IsValid(attackerOrDamage) then
         attacker = attackerOrDamage
-    elseif istable(attackerOrDamage) and isfunction(attackerOrDamage.GetAttacker) then
+    elseif attackerOrDamage and isfunction(attackerOrDamage.GetAttacker) then
+        -- DamageInfo is not a Lua table in every GMod build.
         local ok, result = pcall(attackerOrDamage.GetAttacker, attackerOrDamage)
         if ok then attacker = result end
     end
@@ -347,7 +353,7 @@ end)
 
 local function ReactToAlliedDamage(victim, attacker)
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("npc_ally_defense") then return end
-    if not IsCombatActor(victim) or not IsCombatActor(attacker) or victim == attacker then return end
+    if not IsCombatEntity(victim) or not IsCombatActor(attacker) or victim == attacker then return end
     local faction = FactionOf(victim)
     local attackerFaction = FactionOf(attacker)
     if faction ~= "Combine" and faction ~= "Rebel" then return end
@@ -357,8 +363,9 @@ local function ReactToAlliedDamage(victim, attacker)
     for _, npc in ipairs(ents.FindInSphere(victim:GetPos(), radius)) do
         if not IsManagedNPC(npc) or npc == victim or npc:Health() <= 0 then continue end
         if FactionOf(npc) ~= faction then continue end
-        local inSquad = IsValid(victim.BZCNSquadLeader)
-            and (npc == victim.BZCNSquadLeader or npc.BZCNSquadID == victim.BZCNSquadID)
+        local sameFactionPlayer = victim:IsPlayer() and FactionOf(victim) == faction
+        local inSquad = sameFactionPlayer or (IsValid(victim.BZCNSquadLeader)
+            and (npc == victim.BZCNSquadLeader or npc.BZCNSquadID == victim.BZCNSquadID))
         local distanceSqr = npc:GetPos():DistToSqr(victim:GetPos())
         if distanceSqr > radius * radius then continue end
         if not inSquad and not CanWitness(npc, victim, victim:WorldSpaceCenter()) then continue end
