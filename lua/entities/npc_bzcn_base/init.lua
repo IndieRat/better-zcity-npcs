@@ -323,7 +323,6 @@ function ENT:Initialize()
         or appearanceClass == "civilian" or appearanceClass == "citizen"
         or appearanceFaction == "civilian" or appearanceFaction == "default")
         and profile.Combat ~= true and profile.Ranged ~= true
-        and profile.WeaponClass == nil and self.BZCN_SelectedWeapon == nil
 
     if wantsCivilianAppearance then
         local appearance
