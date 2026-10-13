@@ -622,20 +622,23 @@ function FakeActor:UpdateCrawl(dt)
         end
         torso:ApplyForceCenter(force)
     else
-        local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 42, 24, 48)
-        local velocity = pelvis:GetVelocity()
+        if now >= (self.nextCrawlNudge or 0) then
+            self.nextCrawlNudge = now + math.Rand(0.16, 0.22)
+            local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 34, 20, 38)
+            local velocity = pelvis:GetVelocity()
         local horizontal = Vector(velocity.x, velocity.y, 0)
         local correction = direction * speed - horizontal
-        local maxChange = math.max(1, (tonumber(self.config.crawlAcceleration) or 72) * dt)
+            local maxChange = math.Clamp((tonumber(self.config.crawlAcceleration) or 36) * 0.18, 3, 7)
         if correction:Length() > maxChange then
             correction:Normalize()
             correction = correction * maxChange
         end
-        pelvis:SetVelocity(Vector(
-            velocity.x + correction.x,
-            velocity.y + correction.y,
-            math.min(velocity.z, 0)
-        ))
+            pelvis:SetVelocity(Vector(
+                velocity.x + correction.x,
+                velocity.y + correction.y,
+                velocity.z
+            ))
+        end
     end
 
     pelvis:ApplyForceCenter(Vector(0, 0, -110))
