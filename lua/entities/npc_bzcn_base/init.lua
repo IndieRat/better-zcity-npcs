@@ -380,8 +380,37 @@ function ENT:Initialize()
                     end
                 end
 
-                -- Match Z-City's own NPC conversion appearance pipeline.
+                -- ForceApplyAppearance was authored for Player entities. It calls
+                -- Player-only SetPlayerColor/SetNWVector/SetBodyGroups methods;
+                -- without a short-lived NPC adapter it errors before publishing
+                -- PlayerName and Accessories, so later civilians lose both.
+                local savedMethods = {}
+                local function InstallShim(name, fn)
+                    if not isfunction(self[name]) then
+                        savedMethods[name] = self[name]
+                        self[name] = fn
+                    end
+                end
+                InstallShim("SetPlayerColor", function(ent, color)
+                    if not isvector(color) then return end
+                    ent.BZCNPlayerColor = color
+                    if ent.SetNW2Vector then ent:SetNW2Vector("PlayerColor", color) end
+                end)
+                InstallShim("SetNWVector", function(ent, key, value)
+                    if ent.SetNW2Vector and isvector(value) then ent:SetNW2Vector(key, value) end
+                end)
+                InstallShim("SetBodyGroups", function(ent, groups)
+                    if not isstring(groups) then return end
+                    for _, bodygroup in ipairs(ent:GetBodyGroups() or {}) do
+                        local id = tonumber(bodygroup.id)
+                        if id and id >= 0 then
+                            local digit = string.sub(groups, id + 1, id + 1)
+                            if digit ~= "" then ent:SetBodygroup(id, tonumber(digit) or 0) end
+                        end
+                    end
+                end)
                 local applied, applyResult = pcall(hg.Appearance.ForceApplyAppearance, self, appearance)
+                for name, oldMethod in pairs(savedMethods) do self[name] = oldMethod end
                 appearanceApplied = applied and util.IsValidModel(self:GetModel())
                 if not applied then
                     ErrorNoHalt("[BZCN] Z-City appearance application failed: "
