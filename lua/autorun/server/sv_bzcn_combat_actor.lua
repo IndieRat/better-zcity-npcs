@@ -164,27 +164,32 @@ function Actor.GetWeaponHoldType(owner, weapon, weaponClass)
     weaponClass = weaponClass or (IsValidEntity(weapon) and weapon:GetClass())
         or (IsValidEntity(owner) and owner.BZCN_SelectedWeapon) or ""
 
-    -- Use the same inherited Homigrad SWEP metadata and sprint transition as
-    -- BodyUpdate. Stock overrides such as Glock -> "pistol" hid Z-City's own
-    -- revolver->smg activity mapping and produced the wrong held-arm pose.
-    if BZCN and isfunction(BZCN.GetWeaponAnimationHoldType) then
-        return BZCN.GetWeaponAnimationHoldType(owner, weaponClass, weapon)
+    -- Use weapon-specific animation pools before a class's default. Some
+    -- Homigrad SWEPs intentionally report an unusual HoldType for grip code.
+    if weaponClass == "weapon_glock17" then return "pistol" end
+    if weaponClass == "weapon_ak74" or weaponClass == "weapon_ak74u"
+        or weaponClass == "weapon_akm" or weaponClass == "weapon_ak47"
+        or weaponClass == "weapon_mp7" then
+        return "smg"
     end
 
     local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local hold = isentity(weapon) and IsValid(weapon)
-        and (weapon.holdtype or weapon.HoldType or (isfunction(weapon.GetHoldType) and weapon:GetHoldType()))
-        or (BZCN and BZCN.GetWeaponDefinitionValue
-            and BZCN.GetWeaponDefinitionValue(weaponClass, "HoldType"))
+    local hold = IsValidEntity(weapon) and (weapon.HoldType or weapon.holdtype)
         or (istable(stored) and (stored.HoldType or stored.holdtype)) or nil
-    hold = isstring(hold) and string.lower(hold) or "normal"
-    local translator = BZCN and BZCN.WeaponHoldTypeTranslator or {
-        revolver = "smg", duel = "pistol", physgun = "smg", ar2 = "smg",
-        camera = "smg", slam = "smg", grenade = "grenade", rpg = "grenade",
-        crossbow = "shotgun", fist = "normal", melee2 = "melee", knife = "melee",
-        magic = "normal", passive = "passive"
+    hold = isstring(hold) and string.lower(hold) or nil
+    local translator = {
+        revolver = "pistol", duel = "pistol",
+        physgun = "smg", ar2 = "smg", slam = "smg",
+        crossbow = "shotgun", rpg = "grenade",
+        fist = "normal", melee2 = "melee", knife = "melee"
     }
-    return translator[hold] or hold
+    if hold and hold ~= "" then return translator[hold] or hold end
+
+    local profile = IsValidEntity(owner) and (owner.BZCNClassProfile or {}) or {}
+    if isstring(profile.AnimationHoldType) and profile.AnimationHoldType ~= "" then
+        return string.lower(profile.AnimationHoldType)
+    end
+    return "normal"
 end
 
 function Actor.ApplyWeaponAnimationPool(owner, weapon, weaponClass)
