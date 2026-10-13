@@ -1479,10 +1479,10 @@ function ENT:AttackTarget(target)
     local ranged = profile.Ranged == true and not meleeOnlyWeapon
         and distance <= (tonumber(profile.WeaponRange) or 1100)
     if ranged then
-        local retryDelay = BZCNCombatActor and BZCNCombatActor.GetFireDelay
-            and BZCNCombatActor.GetFireDelay(self, self.BZCNRuntimeWeapon)
-            or math.max(tonumber(profile.AttackDelay) or 0.3, 0.06)
-        self.LastAttack = now + math.min(retryDelay, 0.10)
+        -- This is the decision/aim refresh cadence, not the weapon's shot
+        -- cadence. GetFireDelay mutates burst/recoil state and must only run
+        -- when a real shot is emitted by the runtime weapon adapter.
+        self.LastAttack = now + 0.08
         local weapon = self.BZCNRuntimeWeapon
         local fireReady = not (BZCNCombatActor and BZCNCombatActor.CanFire)
             or BZCNCombatActor.CanFire(self, weapon)
