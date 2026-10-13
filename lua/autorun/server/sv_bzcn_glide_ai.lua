@@ -134,7 +134,7 @@ local function SeatNPC(npc, vehicle, seat, role)
     end
 
     local actor = npc.BZCNFakeActor
-    if IsValid(actor) and actor.SetVehicleSeat then actor:SetVehicleSeat(seat) end
+    if istable(actor) and isfunction(actor.SetVehicleSeat) then actor:SetVehicleSeat(seat) end
     hook.Run("BZCN_NPCEnteredGlideVehicle", npc, vehicle, role or "passenger")
     return true
 end
@@ -158,7 +158,7 @@ local function UnseatNPC(npc, reason, keepDowned)
         npc.BZCNGlideExitAt = CurTime() + 2
 
         local actor = npc.BZCNFakeActor
-        if IsValid(actor) and actor.SetVehicleSeat then actor:SetVehicleSeat(nil) end
+        if istable(actor) and isfunction(actor.SetVehicleSeat) then actor:SetVehicleSeat(nil) end
         if IsValid(rag) then
             rag:SetParent(NULL)
             rag:SetMoveType(MOVETYPE_VPHYSICS)
