@@ -377,9 +377,88 @@ local function DecodeNetworkTable(value, depth, seen)
     return out
 end
 
+-- Build a live weapon pool keyed by each SWEP's actual Primary.Ammo.
+-- Inventory profiles may use human-readable family aliases instead of one
+-- hard-coded workshop weapon class; those aliases resolve to a real Z-City SWEP.
+function BZCN.BuildWeaponPoolByAmmo()
+    local pools = {}
+    if not weapons or not weapons.GetList or not weapons.GetStored then
+        BZCN.WeaponPoolByAmmo = pools
+        return pools
+    end
+
+    local seen = {}
+    for _, listed in ipairs(weapons.GetList() or {}) do
+        local class = istable(listed) and (listed.ClassName or listed.Class or listed.Classname) or nil
+        if not isstring(class) or class == "" or seen[class] then continue end
+        seen[class] = true
+        local stored = weapons.GetStored(class)
+        if not istable(stored) then continue end
+        local primary = istable(stored.Primary) and stored.Primary or {}
+        local ammo = primary.Ammo
+        if not isstring(ammo) or ammo == "" or class == "weapon_hands_sh"
+            or (BZCN.IsMedicalWeaponClass and BZCN.IsMedicalWeaponClass(class)) then continue end
+        pools[ammo] = pools[ammo] or {}
+        pools[ammo][#pools[ammo] + 1] = class
+    end
+
+    for _, pool in pairs(pools) do table.sort(pool) end
+    BZCN.WeaponPoolByAmmo = pools
+    return pools
+end
+
+local function IsNineMillimeterAmmo(ammo)
+    if not isstring(ammo) then return false end
+    local normalized = string.lower(ammo)
+    normalized = string.gsub(normalized, "[^%w]", "")
+    return string.find(normalized, "9x17", 1, true) ~= nil
+        or string.find(normalized, "9x18", 1, true) ~= nil
+        or string.find(normalized, "9x19", 1, true) ~= nil
+        or string.find(normalized, "9mm", 1, true) ~= nil
+        or string.find(normalized, "9mmparabellum", 1, true) ~= nil
+end
+
+function BZCN.ResolveInventoryWeaponAlias(alias)
+    if not isstring(alias) then return nil end
+    local lowered = string.lower(string.Trim(alias))
+    if lowered == "pistol:9mm" or lowered == "pistol 9mm" then
+        local pools = BZCN.WeaponPoolByAmmo or BZCN.BuildWeaponPoolByAmmo()
+        local candidates = {}
+        for ammo, classes in pairs(pools) do
+            if IsNineMillimeterAmmo(ammo) then
+                for _, class in ipairs(classes) do candidates[#candidates + 1] = class end
+            end
+        end
+        table.sort(candidates)
+        if #candidates > 0 then return candidates[math.random(#candidates)] end
+        return nil
+    end
+
+    -- Also accept an explicit ammo-family key for other profiles, e.g.
+    -- "Ammo:SMG1"; pools stay keyed by the exact Primary.Ammo string.
+    local ammoFamily = string.match(alias, "^[Aa]mmo:(.+)$")
+    if ammoFamily then
+        local pools = BZCN.WeaponPoolByAmmo or BZCN.BuildWeaponPoolByAmmo()
+        local pool = pools[ammoFamily]
+        if istable(pool) and #pool > 0 then return pool[math.random(#pool)] end
+    end
+    return nil
+end
+
 local function NormalizeInventoryWeaponValues(inventory)
     if not istable(inventory) or not istable(inventory.Weapons) then return inventory end
-    for class, value in pairs(inventory.Weapons) do
+    for class, value in pairs(table.Copy(inventory.Weapons)) do
+        -- Resolve profile aliases before inventory is initialized, published,
+        -- selected, or copied to a corpse. Keep the original saved state when
+        -- a class alias already carries a structured weapon info table.
+        local resolved = BZCN.ResolveInventoryWeaponAlias
+            and BZCN.ResolveInventoryWeaponAlias(class) or nil
+        if resolved then
+            inventory.Weapons[class] = nil
+            if inventory.Weapons[resolved] == nil then inventory.Weapons[resolved] = value end
+            class = resolved
+        end
+
         -- In Z-City's loot transfer routine, a truthy weapon value is passed
         -- to SWEP:SetInfo(). Use the SWEP's own default info table instead of
         -- boolean true for real weapons; reserve true for genuine virtual items.
