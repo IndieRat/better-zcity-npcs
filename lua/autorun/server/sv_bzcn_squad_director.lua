@@ -75,28 +75,43 @@ local function FindSquads()
     return groups, included
 end
 
+local MAX_SQUAD_SIZE = 4
+
 local function ElectLeaders(groups)
     for faction, members in pairs(groups) do
         table.sort(members, StableOrder)
-        local visited = {}
-        for _, seed in ipairs(members) do
-            if visited[seed] then continue end
-            local squad = {}
-            local queue = {seed}
-            visited[seed] = true
-            local cursor = 1
+        local pending = {}
+        for _, member in ipairs(members) do pending[member] = true end
 
-            while cursor <= #queue do
-                local current = queue[cursor]
-                cursor = cursor + 1
-                squad[#squad + 1] = current
+        -- Form compact fireteams instead of letting one proximity chain become
+        -- a map-wide squad. Each additional member is picked by closeness to
+        -- someone already assigned, with four actors per fireteam by default.
+        while true do
+            local seed
+            for _, member in ipairs(members) do
+                if pending[member] then seed = member break end
+            end
+            if not IsValid(seed) then break end
+            pending[seed] = nil
+            local squad = {seed}
+
+            while #squad < MAX_SQUAD_SIZE do
+                local closest, closestDistance
                 for _, candidate in ipairs(members) do
-                    if not visited[candidate]
-                        and current:GetPos():DistToSqr(candidate:GetPos()) <= SQUAD_RADIUS * SQUAD_RADIUS then
-                        visited[candidate] = true
-                        queue[#queue + 1] = candidate
+                    if not pending[candidate] then continue end
+                    local distance
+                    for _, existing in ipairs(squad) do
+                        local candidateDistance = candidate:GetPos():DistToSqr(existing:GetPos())
+                        if not distance or candidateDistance < distance then distance = candidateDistance end
+                    end
+                    if distance and distance <= SQUAD_RADIUS * SQUAD_RADIUS
+                        and (not closestDistance or distance < closestDistance) then
+                        closest, closestDistance = candidate, distance
                     end
                 end
+                if not IsValid(closest) then break end
+                pending[closest] = nil
+                squad[#squad + 1] = closest
             end
 
             table.sort(squad, StableOrder)
