@@ -628,7 +628,7 @@ function FakeActor:UpdateCrawl(dt)
         local torso = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2") or pelvis
         local hand = grip.hand
         local power = math.Clamp(tonumber(self.controlPower) or 1, 0.05, 1)
-        local force = direction * (2000 * (dt / 0.015) * power * strength)
+        local force = direction * (2700 * (dt / 0.015) * power * strength)
 
         if IsValid(hand) then
             local handOffset = hand:GetPos() - torso:GetPos()
@@ -643,11 +643,14 @@ function FakeActor:UpdateCrawl(dt)
     else
         if now >= (self.nextCrawlNudge or 0) then
             self.nextCrawlNudge = now + math.Rand(0.16, 0.22)
-            local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 34, 20, 38)
+            -- A crawl should visibly translate the body, not just twitch the
+            -- pelvis. Keep the pull capped, but raise its useful baseline so
+            -- an injured NPC can actually drag itself across the floor.
+            local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 52, 32, 62)
             local velocity = pelvis:GetVelocity()
             local horizontal = Vector(velocity.x, velocity.y, 0)
             local correction = direction * speed - horizontal
-            local maxChange = math.Clamp((tonumber(self.config.crawlAcceleration) or 36) * 0.18, 3, 7)
+            local maxChange = math.Clamp((tonumber(self.config.crawlAcceleration) or 72) * 0.18, 5, 12)
             if correction:Length() > maxChange then
                 correction:Normalize()
                 correction = correction * maxChange
