@@ -302,6 +302,7 @@ local function ReleaseVehicle(vehicle, reason)
     vehicle.BZCNAIPassengers = nil
     vehicle.BZCNGlideAITarget = nil
     vehicle.BZCNGlideAINextTargetAt = nil
+    vehicle.BZCNGlideAINextAvoidAt = nil
     vehicle.BZCNGlideAINextThink = nil
     vehicle.BZCNGlideAIMode = nil
 end
@@ -375,6 +376,7 @@ local function BeginVehicleAI(vehicle, driver)
     vehicle.BZCNGlideAIMode = info.combat and "combat" or "wander"
     vehicle.BZCNGlideAITarget = nil
     vehicle.BZCNGlideAINextTargetAt = 0
+    vehicle.BZCNGlideAINextAvoidAt = 0
     vehicle.BZCNGlideAINextThink = 0
     vehicle.BZCNAIClaimedAt = CurTime()
 
@@ -473,10 +475,12 @@ local function UpdateVehicleAI(vehicle, now)
     if not clearAhead or hazard then
         throttle = 0
         brake = combat and 0.7 or 0.9
-        if not combat then
-            -- Retarget to an open forward sector once the obstruction is found.
+        if not combat and now >= (vehicle.BZCNGlideAINextAvoidAt or 0) then
+            -- Retarget to an open forward sector, but debounce this so the
+            -- vehicle doesn't randomly change steering every Think tick.
             vehicle.BZCNGlideAITarget = FindWanderGoal(vehicle)
             vehicle.BZCNGlideAINextTargetAt = now + math.Rand(2.5, 4.5)
+            vehicle.BZCNGlideAINextAvoidAt = now + 1.2
         end
     end
 
