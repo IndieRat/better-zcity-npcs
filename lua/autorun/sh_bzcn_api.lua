@@ -644,7 +644,15 @@ function BZCN.InstallAdapter(ent)
         end
         if isfunction(nativeGetNetVar) then
             local ok, value = pcall(nativeGetNetVar, self, key, default)
-            if ok and value ~= nil then return value end
+            if ok and value ~= nil then
+                -- Some Z-City builds return an empty-string sentinel when a
+                -- Player-oriented netvar write silently failed for a NextBot.
+                -- Treat that as missing for identity/accessories so the
+                -- explicitly replicated BZCN NW2 value can recover it.
+                local missingAppearanceValue = (key == "PlayerName" or key == "Accessories")
+                    and (value == "" or value == "none")
+                if not missingAppearanceValue then return value end
+            end
         end
         return BZCN.GetNetVar(self, key, default)
     end
