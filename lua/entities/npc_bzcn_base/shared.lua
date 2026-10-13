@@ -552,9 +552,21 @@ function ENT:BodyUpdate()
     local sequence = self:GetBZCNMovementSequence(speed, state)
     if sequence >= 0 then
         if sequence ~= self.BZCNCurrentSequence or self:GetSequence() ~= sequence then
+            local priorState = self.BZCNRenderedMovementState
+            local priorCycle = self:GetCycle()
+            local continuousLocomotion = (state == "walking" or state == "running" or state == "sprinting")
+                and (priorState == "walking" or priorState == "running" or priorState == "sprinting")
+                and CurTime() - (self.BZCNLastLocomotionUpdateAt or 0) <= 0.15
             self:ResetSequence(sequence)
-            self:SetCycle(0)
+            -- Preserve the gait phase when moving from walk to run or run to
+            -- sprint; restarting every sequence at cycle zero made acceleration
+            -- look like a stutter-step instead of one continuous stride.
+            self:SetCycle(continuousLocomotion and math.Clamp(priorCycle, 0, 0.99) or 0)
             self.BZCNCurrentSequence = sequence
+        end
+        self.BZCNRenderedMovementState = state
+        if state == "walking" or state == "running" or state == "sprinting" then
+            self.BZCNLastLocomotionUpdateAt = CurTime()
         end
         local playbackRate = 1
         if state == "crawling" then
@@ -587,8 +599,17 @@ function ENT:BodyUpdate()
             -- walk/run pose parameters and can visually cancel a crawl sequence.
             self:SetPlaybackRate(playbackRate)
             self:FrameAdvance()
-        elseif state == "walking" or state == "running" or state == "sprinting"
-            or state == "climbing" then
+        elseif state == "running" or state == "sprinting" then
+            -- Keep the chosen ACT_MP_RUN (or a model's dedicated sprint clip).
+            -- BodyMoveXY can recalculate activity from its own velocity threshold
+            -- and replace this run cycle with a walk during acceleration frames.
+            if self.SetPoseParameter and velocity:Length2DSqr() > 0.25 then
+                local moveYaw = math.NormalizeAngle(velocity:Angle().y - self:GetAngles().y)
+                pcall(self.SetPoseParameter, self, "move_yaw", moveYaw)
+            end
+            self:SetPlaybackRate(playbackRate)
+            self:FrameAdvance()
+        elseif state == "walking" or state == "climbing" then
             local profile = self.BZCNClassProfile or {}
             if profile.HeadcrabStyle == true or profile.ZombieStyle == true then
                 -- Creature models have their own HL2 movement sequences. Directly
@@ -597,8 +618,6 @@ function ENT:BodyUpdate()
                 self:SetPlaybackRate(playbackRate)
                 self:FrameAdvance()
             else
-                -- BodyMoveXY updates pose parameters and may reset playback rate.
-                -- Reapply our eased rate so walk/run/sprint transitions are smooth.
                 self:BodyMoveXY()
                 self:SetPlaybackRate(playbackRate)
             end
