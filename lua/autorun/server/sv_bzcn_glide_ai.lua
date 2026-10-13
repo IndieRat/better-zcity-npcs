@@ -67,12 +67,19 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
--- Glide computes forwardSpeed from the chassis-local +X velocity component.
--- Use the same +X axis for steering, obstacle traces and signed speed checks.
+-- Use the driver's actual seat-facing axis as the vehicle's semantic
+-- forward. Some Glide chassis models expose a model-forward axis that is
+-- reversed relative to the windshield; using it for path steering and signed
+-- velocity checks makes the AI consistently select reverse-facing goals.
 local function GetDrivingForward(vehicle)
     if not IsValid(vehicle) then return vector_origin end
-    local forward = vehicle:GetForward()
+    local seat = istable(vehicle.seats) and vehicle.seats[1] or nil
+    local forward = IsValid(seat) and seat:GetForward() or vehicle:GetForward()
     forward.z = 0
+    if forward:LengthSqr() < 0.01 then
+        forward = vehicle:GetForward()
+        forward.z = 0
+    end
     if forward:LengthSqr() > 0.01 then forward:Normalize() end
     return forward
 end
