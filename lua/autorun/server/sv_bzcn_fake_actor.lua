@@ -755,6 +755,88 @@ function FakeActor:UpdatePounce(dt)
     end
 end
 
+
+-- Hold a downed NPC ragdoll in a vehicle seat using the same per-bone fake
+-- controller as crawling and combat. The owner stays hidden for AI/state, while
+-- the visible body remains a real physics ragdoll and can be ejected on impact.
+function FakeActor:SetVehicleSeat(seat)
+    self.vehicleSeat = IsValid(seat) and seat or nil
+    if self.vehicleSeat then
+        self.manualMode = "vehicle"
+        self.manualModeUntil = nil
+        self.mode = "vehicle"
+    elseif self.manualMode == "vehicle" then
+        self.manualMode = nil
+        self.mode = "loose"
+    end
+end
+
+function FakeActor:UpdateVehicleSeat(dt)
+    local rag, seat = self.ragdoll, self.vehicleSeat
+    if not IsValid(rag) or not IsValid(seat) then
+        self:SetVehicleSeat(nil)
+        return
+    end
+
+    local seatAng = seat:GetAngles()
+    local yaw = seatAng.y
+    local upright = Angle(0, yaw, 0)
+    upright:RotateAroundAxis(upright:Forward(), 90)
+    upright:RotateAroundAxis(upright:Up(), 90)
+    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.12, 0.6)
+    local pelvisPos = seat:LocalToWorld(Vector(0, 0, 14))
+    local spinePos = seat:LocalToWorld(Vector(0, 0, 36))
+    local headPos = seat:LocalToWorld(Vector(0, 0, 57))
+
+    -- Soft position control keeps the pelvis/torso in the seat without welding
+    -- the ragdoll to the chassis; impacts can still overcome the shadow control.
+    self:ShadowBone("ValveBiped.Bip01_Pelvis", upright, 0.16, 48 * power, 34,
+        pelvisPos, 90, 55)
+    self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.14, 52 * power, 36,
+        spinePos, 90, 55)
+    self:ShadowBone("ValveBiped.Bip01_Head1", Angle(-8, yaw, 0), 0.13, 60 * power, 40,
+        headPos, 95, 55)
+
+    local legs = {
+        {thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf", side = -1},
+        {thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf", side = 1}
+    }
+    for _, leg in ipairs(legs) do
+        local thighPos = seat:LocalToWorld(Vector(18, leg.side * 7, 7))
+        local calfPos = seat:LocalToWorld(Vector(30, leg.side * 7, -5))
+        self:ShadowBone(leg.thigh, upright, 0.18, 40 * power, 34,
+            thighPos, 85, 50)
+        self:ShadowBone(leg.calf, upright, 0.18, 34 * power, 30,
+            calfPos, 85, 50)
+    end
+
+    for _, arm in ipairs({
+        {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand"},
+        {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand"}
+    }) do
+        local upperPos = seat:LocalToWorld(Vector(-1, arm.side * 12, 33))
+        local forearmPos = seat:LocalToWorld(Vector(10, arm.side * 13, 25))
+        local handPos = seat:LocalToWorld(Vector(16, arm.side * 12, 19))
+        self:ShadowBone(arm.upper, upright, 0.18, 38 * power, 32,
+            upperPos, 78, 48)
+        self:ShadowBone(arm.forearm, upright, 0.17, 36 * power, 30,
+            forearmPos, 78, 48)
+        self:ShadowBone(arm.hand, upright, 0.16, 34 * power, 28,
+            handPos, 78, 48)
+    end
+
+    -- The driver body follows the seat's current motion so the fake actor keeps
+    -- the chassis momentum instead of lagging behind at its original spawn point.
+    local velocity = IsValid(seat:GetParent()) and seat:GetParent():GetVelocity() or seat:GetVelocity()
+    local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis")
+    if IsValid(pelvis) and isvector(velocity) then
+        local current = pelvis:GetVelocity()
+        local delta = velocity - current
+        if delta:Length() > 90 then delta = delta:GetNormalized() * 90 end
+        pelvis:SetVelocity(current + delta * math.Clamp(dt * 8, 0, 1))
+    end
+end
+
 function FakeActor:Update(dt)
     if not self.active or not IsValid(self.owner) or not IsValid(self.ragdoll) then
         self:Destroy()
@@ -771,7 +853,10 @@ function FakeActor:Update(dt)
     self:UpdateLookTarget()
     self:UpdateUpperPose()
 
-    if self.mode == "sit" then
+    if self.mode == "vehicle" then
+        self:UpdateVehicleSeat(dt)
+        return
+    elseif self.mode == "sit" then
         self:UpdateSit(dt)
         self:UpdateWeaponAim(dt)
         return
