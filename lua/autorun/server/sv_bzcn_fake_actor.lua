@@ -811,11 +811,10 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 
     local seatAng = seat:GetAngles()
-    -- Keep the fake body's heading on the same forward axis used by the Glide
-    -- AI controller. Negating the vehicle axis made seated ragdolls face the
-    -- rear even when the car was moving forward.
+    -- Glide's chassis model forward axis is opposite its actual travel axis.
+    -- Match the same inverted drivetrain axis used by the driving controller.
     local vehicle = seat:GetParent()
-    local desiredForward = IsValid(vehicle) and vehicle:GetForward() or seatAng:Forward()
+    local desiredForward = IsValid(vehicle) and -vehicle:GetForward() or seatAng:Forward()
     desiredForward.z = 0
     if desiredForward:LengthSqr() < 0.01 then
         desiredForward = seatAng:Forward()
