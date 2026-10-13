@@ -305,6 +305,47 @@ local function ReleaseVehicle(vehicle, reason)
     vehicle.BZCNGlideAINextAvoidAt = nil
     vehicle.BZCNGlideAINextThink = nil
     vehicle.BZCNGlideAIMode = nil
+    vehicle.BZCNGlideAIPreviousVelocity = nil
+    vehicle.BZCNGlideAIPreviousVelocityAt = nil
+end
+
+-- Glide's native crash ejection only processes real Player occupants. Managed
+-- NextBots need their own downed/ragdoll transition, with the vehicle's impact
+-- velocity transferred to every physics bone so the ejection feels physical.
+local function CrashEjectVehicle(vehicle, impactVelocity, impactDelta)
+    if not IsValid(vehicle) then return end
+    local occupants = {}
+    if IsValid(vehicle.BZCNAIDriver) then occupants[#occupants + 1] = vehicle.BZCNAIDriver end
+    for _, passenger in ipairs(vehicle.BZCNAIPassengers or {}) do
+        if IsValid(passenger) then occupants[#occupants + 1] = passenger end
+    end
+
+    ReleaseVehicle(vehicle, "glide_crash")
+    local support = hg and hg.BZCNNPCSupport
+    for _, npc in ipairs(occupants) do
+        if IsManaged(npc) and npc:Health() > 0
+            and not npc:GetNW2Bool("BZCNNPCDowned", false)
+            and support and isfunction(support.EnterDownedState) then
+            local ok, entered = pcall(support.EnterDownedState, npc, "glide_crash")
+            if ok and entered ~= false then
+                local rag = npc.BZCNNPCRagdoll
+                    or npc.FakeRagdoll
+                    or (npc.GetNW2Entity and npc:GetNW2Entity("BZCNNPCRagdoll"))
+                if IsValid(rag) then
+                    local inherited = isvector(impactVelocity) and impactVelocity or vector_origin
+                    local impulse = isvector(impactDelta) and impactDelta * 0.22 or vector_origin
+                    for i = 0, rag:GetPhysicsObjectCount() - 1 do
+                        local phys = rag:GetPhysicsObjectNum(i)
+                        if IsValid(phys) then
+                            phys:Wake()
+                            phys:SetVelocity(inherited + impulse)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    hook.Run("BZCN_GlideVehicleCrashEject", vehicle, occupants, impactVelocity, impactDelta)
 end
 
 local function GetSquadmates(driver, radius)
@@ -378,6 +419,8 @@ local function BeginVehicleAI(vehicle, driver)
     vehicle.BZCNGlideAINextTargetAt = 0
     vehicle.BZCNGlideAINextAvoidAt = 0
     vehicle.BZCNGlideAINextThink = 0
+    vehicle.BZCNGlideAIPreviousVelocity = vehicle:GetVelocity()
+    vehicle.BZCNGlideAIPreviousVelocityAt = CurTime()
     vehicle.BZCNAIClaimedAt = CurTime()
 
     if isfunction(vehicle.TurnOn) and (not isfunction(vehicle.GetEngineState) or vehicle:GetEngineState() == 0) then
@@ -424,7 +467,26 @@ local function UpdateVehicleAI(vehicle, now)
         vehicle.BZCNGlideAINextTargetAt = 0
     end
 
-    local speed = math.abs(tonumber(vehicle.forwardSpeed) or vehicle:GetVelocity():Length())
+    -- Sample chassis velocity at the AI cadence. A sharp high-speed velocity
+    -- change is a crash, not ordinary steering; eject the entire NPC crew into
+    -- the same downed/fake-ragdoll system used by Z-City combat impacts.
+    local currentVelocity = vehicle:GetVelocity()
+    local previousVelocity = vehicle.BZCNGlideAIPreviousVelocity
+    local previousAt = vehicle.BZCNGlideAIPreviousVelocityAt or now
+    local sampleDt = math.max(now - previousAt, 0.01)
+    local speed = math.abs(tonumber(vehicle.forwardSpeed) or currentVelocity:Length())
+    if isvector(previousVelocity) then
+        local impactDelta = currentVelocity - previousVelocity
+        local previousSpeed = previousVelocity:Length()
+        if previousSpeed >= 400 and impactDelta:Length() >= 440
+            and impactDelta:Length() / sampleDt >= 2200 then
+            CrashEjectVehicle(vehicle, currentVelocity, impactDelta)
+            return
+        end
+    end
+    vehicle.BZCNGlideAIPreviousVelocity = currentVelocity
+    vehicle.BZCNGlideAIPreviousVelocityAt = now
+
     local goal = vehicle.BZCNGlideAITarget
     if not isvector(goal) or now >= (vehicle.BZCNGlideAINextTargetAt or 0)
         or vehicle:GetPos():DistToSqr(goal) < 220 * 220 then
