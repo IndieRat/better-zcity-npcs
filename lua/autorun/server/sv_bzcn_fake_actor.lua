@@ -308,6 +308,23 @@ function FakeActor:GetLookAngles()
     local owner = self.owner
     if not IsValid(owner) then return angle_zero end
 
+    -- A fake body must look where its AI is actually attending, not at the
+    -- hidden NextBot's stale EyeAngles. Combat target, recent attacker, and
+    -- ambient look target are all world-space points from UpdateLookTarget().
+    local targetPoint = isvector(self.aimTarget) and self.aimTarget
+        or isvector(self.lookTarget) and self.lookTarget or nil
+    if isvector(targetPoint) and IsValid(self.ragdoll) then
+        local head = GetPhysicsForBone(self.ragdoll, "ValveBiped.Bip01_Head1")
+            or GetPhysicsForBone(self.ragdoll, "ValveBiped.Bip01_Spine2")
+        local origin = IsValid(head) and head:GetPos() or self.ragdoll:WorldSpaceCenter()
+        local delta = targetPoint - origin
+        if delta:LengthSqr() > 1 then
+            local angles = delta:Angle()
+            return Angle(math.Clamp(math.NormalizeAngle(angles.p), -55, 45),
+                math.NormalizeAngle(angles.y), 0)
+        end
+    end
+
     local angles
     if isfunction(owner.EyeAngles) then
         local ok, value = pcall(owner.EyeAngles, owner)
