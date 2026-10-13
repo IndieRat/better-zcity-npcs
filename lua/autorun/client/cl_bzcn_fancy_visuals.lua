@@ -18,11 +18,23 @@ local function GetAccessories(ent)
         if ok then accessories = value end
     end
 
-    -- The network var can arrive as an empty sentinel before/without the
-    -- appearance table. Prefer actual appearance data whenever the netvar has
-    -- no selected accessories instead of letting an empty value mask it.
+    -- The native Z-City GetNetVar may return an empty Player-only sentinel
+    -- for NextBots even though the BZCN NW2 mirror has the real value. Read that
+    -- mirror directly on clients instead of trusting the native accessor alone.
     local hasAccessories = accessories ~= nil and accessories ~= "" and accessories ~= "none"
     if istable(accessories) then hasAccessories = next(accessories) ~= nil end
+    if not hasAccessories and ent.GetNW2String
+        and ent:GetNW2String("BZCN_NV_type_Accessories", "") == "table" then
+        local encoded = ent:GetNW2String("BZCN_NV_table_Accessories", "")
+        local ok, decoded = pcall(util.JSONToTable, encoded)
+        if ok and istable(decoded) and next(decoded) ~= nil then
+            accessories = decoded
+            hasAccessories = true
+        end
+    end
+
+    -- Empty network values must not mask an appearance payload that is already
+    -- available on the entity (for example on locally replicated NPC adapters).
     if not hasAccessories and istable(ent.CurAppearance) then
         local appearanceAccessories = ent.CurAppearance.AAttachments
         local appearanceHasAccessories = appearanceAccessories ~= nil
