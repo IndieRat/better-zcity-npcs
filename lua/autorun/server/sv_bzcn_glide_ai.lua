@@ -692,8 +692,12 @@ local function UpdateVehicleAI(vehicle, now)
 
     local forward = GetDrivingForward(vehicle)
     local right = Vector(-forward.y, forward.x, 0)
-    local steer = math.Clamp(direction:Dot(right) * 2.0, -1, 1)
+    local lateral = direction:Dot(right)
     local alignment = math.Clamp(forward:Dot(direction), -1, 1)
+    -- Smooth steering at shallow angles; commit to a wide turn for a goal
+    -- behind the car instead of flipping steering every AI tick.
+    local steerGain = alignment < -0.15 and 1.15 or 1.65
+    local steer = math.Clamp(lateral * steerGain, -1, 1)
     local combat = vehicle.BZCNGlideAIMode == "combat"
     local desiredSpeed = combat and COMBAT_SPEED or CIVILIAN_SPEED
 
@@ -705,13 +709,17 @@ local function UpdateVehicleAI(vehicle, now)
     local brake = 0
     if speed > desiredSpeed then throttle = 0.08 end
     if speed < desiredSpeed and alignment > 0.35 then throttle = combat and 0.82 or 0.36 end
-    if alignment < 0.10 then
-        -- Never accelerate into a goal behind the vehicle. Brake and let the
-        -- wide steering arc turn the car around; reverse is not a navigation tool.
-        throttle = 0
-        brake = math.max(brake, speed > 80 and 0.65 or 0.15)
+    if alignment < -0.35 then
+        -- Avoid full braking throughout a turn: that repeatedly stalls the car
+        -- and lets residual momentum make it appear to switch between forward
+        -- and reverse. Keep a small crawl while the steering arc develops.
+        throttle = speed < 45 and (combat and 0.38 or 0.24) or 0.12
+        brake = 0
+    elseif alignment < 0.12 then
+        throttle = math.min(throttle, 0.18)
+        brake = speed > desiredSpeed + 80 and 0.18 or 0
     end
-    if math.abs(steer) > 0.55 then throttle = math.min(throttle, combat and 0.55 or 0.25) end
+    if math.abs(steer) > 0.72 then throttle = math.min(throttle, combat and 0.48 or 0.30) end
 
     -- Glide exposes signed forwardSpeed. If the chassis is still travelling
     -- backward from a previous steering correction, brake it to a stop before
