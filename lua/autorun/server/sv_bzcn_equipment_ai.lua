@@ -1717,7 +1717,11 @@ local function ChooseMedicalClass(inventory, target, healer)
         -- empty; falling back to an inventory boolean would make the AI choose
         -- that same empty item forever and starve other valid treatments.
         local runtime = IsValid(healer) and healer.BZCNRuntimeMedicalWeapon or nil
-        if IsValid(runtime) and runtime:GetClass() == class and istable(runtime.modeValues) then
+        -- Stale/loadout adapters may leave a truthy marker in the runtime slot.
+        -- GMod's IsValid(true) errors instead of returning false, so check the
+        -- value's entity type before touching engine validity methods.
+        if isentity(runtime) and IsValid(runtime)
+            and runtime:GetClass() == class and istable(runtime.modeValues) then
             if istable(modes) then
                 for _, mode in ipairs(modes) do
                     if (tonumber(runtime.modeValues[mode]) or 0) > 0 then return true end
