@@ -365,6 +365,56 @@ local function FindNavPoint(vehicle, minDist, maxDist)
     return candidates[math.random(#candidates)]
 end
 
+local function FindParkingPoint(vehicle)
+    if not IsValid(vehicle) or not navmesh or not navmesh.GetAllNavAreas then return nil end
+    local origin = vehicle:GetPos()
+    local forward = GetDrivingForward(vehicle)
+    local candidates = {}
+    for _, area in ipairs(navmesh.GetAllNavAreas() or {}) do
+        if area and not area:IsUnderwater() then
+            local center = area:GetCenter()
+            local offset = center - origin
+            local distance = offset:Length()
+            offset.z = 0
+            local sx, sy = area:GetSizeX(), area:GetSizeY()
+            -- Smaller walkable nav areas are a better proxy for a pull-off,
+            -- driveway, or lot than the broad areas used for ordinary driving.
+            if distance >= 280 and distance <= 900 and sx >= 45 and sy >= 45
+                and sx <= 190 and sy <= 190 and offset:LengthSqr() > 1 then
+                offset:Normalize()
+                if forward:Dot(offset) > -0.15 then
+                    local trace = util.TraceHull({
+                        start = vehicle:WorldSpaceCenter(),
+                        endpos = center + Vector(0, 0, 28),
+                        mins = Vector(-30, -30, -8),
+                        maxs = Vector(30, 30, 30),
+                        filter = {vehicle, unpack(vehicle:GetChildren())},
+                        mask = MASK_SOLID
+                    })
+                    if not trace.Hit then
+                        local ground = util.TraceLine({
+                            start = center + Vector(0, 0, 90),
+                            endpos = center - Vector(0, 0, 180),
+                            filter = {vehicle},
+                            mask = MASK_SOLID
+                        })
+                        if ground.Hit and not ground.HitSky then
+                            candidates[#candidates + 1] = {
+                                pos = ground.HitPos + Vector(0, 0, 12),
+                                score = math.abs(sx - sy) * 0.2 + distance * 0.08
+                                    + math.max(0, forward:Dot(offset)) * 18
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #candidates == 0 then return nil end
+    table.sort(candidates, function(a, b) return a.score < b.score end)
+    return candidates[math.random(1, math.min(4, #candidates))].pos
+end
+
 local function FindWanderGoal(vehicle)
     local origin = vehicle:GetPos()
     local forward = GetDrivingForward(vehicle)
@@ -745,7 +795,7 @@ local function UpdateVehicleAI(vehicle, now)
     elseif not info.combat and not parkMode and (vehicle.BZCNGlideAIParkAt or math.huge) <= now then
         vehicle.BZCNGlideAIMode = "park_approach"
         parkMode = true
-        goal = FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
+        goal = FindParkingPoint(vehicle) or FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
         vehicle.BZCNGlideAITarget = goal
         vehicle.BZCNGlideAINextTargetAt = now + 20
     elseif parkMode and isvector(goal) and vehicle:GetPos():DistToSqr(goal) < 220 * 220 then
@@ -764,7 +814,7 @@ local function UpdateVehicleAI(vehicle, now)
         if vehicle.BZCNGlideAIMode == "combat" and IsValid(target) and targetAhead then
             goal = target:GetPos()
         elseif parkMode then
-            goal = FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
+            goal = FindParkingPoint(vehicle) or FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
         else
             goal = FindNavPoint(vehicle, 650, 2200)
             if not isvector(goal) then goal = FindWanderGoal(vehicle) end
