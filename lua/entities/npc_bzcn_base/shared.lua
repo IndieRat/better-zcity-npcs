@@ -37,24 +37,18 @@ function ENT:FindSequence(names)
 end
 
 local HOLDTYPE_TRANSLATOR = {
-    [""] = "normal", physgun = "smg", ar2 = "smg", camera = "smg",
-    crossbow = "shotgun", rpg = "grenade", slam = "smg", grenade = "grenade",
-    fist = "normal", melee2 = "melee", passive = "passive", knife = "melee",
-    duel = "pistol", magic = "normal", revolver = "smg"
+    physgun = "smg", ar2 = "smg", crossbow = "shotgun", camera = "melee",
+    rpg = "grenade", slam = "smg", fist = "normal", melee2 = "melee",
+    passive = "passive", knife = "melee", duel = "pistol", revolver = "pistol"
 }
 
 local function GetWeaponHoldType(self)
     local profile = self.BZCNClassProfile or (BZCN and BZCN.GetClass and BZCN.GetClass(self.BZCNClass))
     local weaponClass = self.BZCN_SelectedWeapon or (profile and profile.WeaponClass)
-    local runtime = isentity(self.BZCNRuntimeWeapon) and IsValid(self.BZCNRuntimeWeapon)
-        and self.BZCNRuntimeWeapon or nil
-    if BZCN and isfunction(BZCN.GetWeaponAnimationHoldType) then
-        return BZCN.GetWeaponAnimationHoldType(self, weaponClass, runtime)
-    end
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local rawHold = istable(stored) and (stored.HoldType or stored.holdtype) or "normal"
-    rawHold = isstring(rawHold) and string.lower(rawHold) or "normal"
-    return HOLDTYPE_TRANSLATOR[rawHold] or rawHold
+    local holdType = istable(stored) and (stored.HoldType or stored.holdtype) or "normal"
+    holdType = isstring(holdType) and holdType or "normal"
+    return HOLDTYPE_TRANSLATOR[holdType] or holdType
 end
 
 local function GetFirstSequence(self, names)
@@ -262,18 +256,11 @@ function ENT:GetBZCNMovementSequence(speed, state)
 
     local weaponClass = self.BZCN_SelectedWeapon or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local runtime = isentity(self.BZCNRuntimeWeapon) and IsValid(self.BZCNRuntimeWeapon)
-        and self.BZCNRuntimeWeapon or nil
-    -- Derive the pose from the real selected SWEP every update. Profile defaults
-    -- must not mask Homigrad's own HoldType, inherited base fields, or sprint
-    -- transition to its "slam" hold pool.
-    local holdType = BZCN and isfunction(BZCN.GetWeaponAnimationHoldType)
-        and BZCN.GetWeaponAnimationHoldType(self, weaponClass, runtime) or nil
-    holdType = holdType or self.BZCNCombatHoldType
-        or profile.AnimationHoldTypeOverride or profile.AnimationHoldType
+    local holdType = self.BZCNCombatHoldType or profile.AnimationHoldType
         or (istable(stored) and (stored.HoldType or stored.holdtype)) or "normal"
     holdType = isstring(holdType) and string.lower(holdType) or "normal"
-    self.ixAnimHoldType = HOLDTYPE_TRANSLATOR[holdType] or holdType
+    self.ixAnimHoldType = self.BZCNCombatHoldType or profile.AnimationHoldType
+        or HOLDTYPE_TRANSLATOR[holdType] or holdType
     local animationSet = animClass[self.ixAnimHoldType] or animClass.normal or animClass
     if not istable(animationSet) then return -1 end
 
