@@ -799,9 +799,28 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 
     local seatAng = seat:GetAngles()
-    -- Glide's driver seat is mounted facing opposite the vehicle's nose.
-    -- Rotate the occupant 180 degrees so the NPC looks through the windshield.
-    local yaw = math.NormalizeAngle(seatAng.y + 180)
+    -- Seat-local angles are not consistent across Glide vehicle classes:
+    -- car seats may face backward relative to the drivetrain, while motorcycle
+    -- seats commonly already face the direction of travel. Resolve the body
+    -- heading from the parent vehicle's travel axis and only apply the 180°
+    -- correction when the seat's forward axis actually points the wrong way.
+    local vehicle = seat:GetParent()
+    local desiredForward = IsValid(vehicle) and -vehicle:GetForward() or seatAng:Forward()
+    desiredForward.z = 0
+    if desiredForward:LengthSqr() < 0.01 then
+        desiredForward = seatAng:Forward()
+        desiredForward.z = 0
+    end
+    desiredForward:Normalize()
+    local seatForward = seatAng:Forward()
+    seatForward.z = 0
+    if seatForward:LengthSqr() < 0.01 then seatForward = desiredForward end
+    seatForward:Normalize()
+    local yaw = math.NormalizeAngle(seatAng.y
+        + (seatForward:Dot(desiredForward) < 0 and 180 or 0))
+    -- Use the chassis travel direction directly when available so leaning or
+    -- rotating a motorcycle seat cannot turn the occupant backward.
+    yaw = math.NormalizeAngle(desiredForward:Angle().y)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
