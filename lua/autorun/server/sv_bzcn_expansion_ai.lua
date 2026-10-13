@@ -841,7 +841,8 @@ hook.Add("PlayerUse", "BZCN_CivilianShareConsumable", function(ply, civilian)
         or not Managed(civilian) or not IsCivilian(civilian)
         or ply:GetPos():DistToSqr(civilian:GetPos()) > 115 * 115
         or IsValid(civilian.BZCNEnemy) then return end
-    if CurTime() < (civilian.BZCNNextShareConsumableAt or 0) then return end
+    if CurTime() < (civilian.BZCNNextShareConsumableAt or 0)
+        or IsValid(civilian.BZCNRuntimeConsumable) then return end
 
     local inventory = BZCN.GetNetVar and BZCN.GetNetVar(civilian, "Inventory", nil)
         or civilian.inventory or civilian.Inventory
