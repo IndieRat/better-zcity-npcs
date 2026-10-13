@@ -117,7 +117,16 @@ local function RenderNPCAccessories(ent)
     -- Z-City's player-oriented renderer checks these visibility flags and calls
     -- equipment APIs that ordinary NextBots do not expose. Temporarily bridge
     -- just those lookups, restore every value immediately after drawing.
-    local body = IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or ent
+    local body = IsValid(ent.FakeRagdoll) and ent.FakeRagdoll
+        or (IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll)
+        or (ent.GetNW2Entity and IsValid(ent:GetNW2Entity("FakeRagdoll"))
+            and ent:GetNW2Entity("FakeRagdoll")) or ent
+
+    -- Z-City's renderer only knows the Player-style FakeRagdoll field. BZCN
+    -- stores the actual proxy as BZCNNPCRagdoll, so temporarily expose the same
+    -- ragdoll while rendering; otherwise hats/glasses stay on the invisible bot.
+    local oldFakeRagdoll = ent.FakeRagdoll
+    if body ~= ent then ent.FakeRagdoll = body end
 
     -- Z-City's ThatPlyIsFemale() calls Player:GetSubModels() when its model
     -- cache is cold. NextBots do not expose that Player-only method, so seed
@@ -148,6 +157,13 @@ local function RenderNPCAccessories(ent)
         oldBodyNotSeen = body.NotSeen
     end
     local oldGetEquipmentBySlot = ent.GetEquipmentBySlot
+    local oldGetPlayerColor = ent.GetPlayerColor
+    if not isfunction(oldGetPlayerColor) then
+        ent.GetPlayerColor = function(self)
+            if self.GetNW2Vector then return self:GetNW2Vector("PlayerColor", Vector(1, 1, 1)) end
+            return self.BZCNPlayerColor or Vector(1, 1, 1)
+        end
+    end
 
     ent.shouldTransmit = true
     ent.NotSeen = false
@@ -182,6 +198,8 @@ local function RenderNPCAccessories(ent)
     if not isfunction(oldGetEquipmentBySlot) then
         ent.GetEquipmentBySlot = oldGetEquipmentBySlot
     end
+    if not isfunction(oldGetPlayerColor) then ent.GetPlayerColor = oldGetPlayerColor end
+    ent.FakeRagdoll = oldFakeRagdoll
 
     if not ok and not reportedRenderErrors[ent] then
         reportedRenderErrors[ent] = true
