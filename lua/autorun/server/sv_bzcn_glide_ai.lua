@@ -95,31 +95,64 @@ local function SeatNPC(npc, vehicle, seat, role)
         }
     end
 
-    -- Do not fake a seated animation on the standing NextBot. Enter Z-City's
-    -- organism-backed fake/ragdoll state and keep that physical proxy seated
-    -- under per-bone shadow control. The proxy can then react to hits/crashes.
+    -- Set the lock BEFORE creating the fake ragdoll: Z-City's organism
+    -- hooks run synchronously during ragdoll creation and may otherwise request
+    -- an immediate FakeUp/recovery before the Glide seat adapter is initialized.
+    npc.BZCNGlideVehicle = vehicle
+    npc.BZCNGlideSeat = seat
+    npc.BZCNGlideRole = role or "passenger"
+    npc.BZCNGlideSeatedFake = true
+    npc.BZCNGlideState = true
+    npc:SetNW2Bool("BZCNGlideRiding", true)
+    npc:SetNW2Bool("BZCNGlideState", true)
+    npc:SetNW2String("BZCNGlideSeatRole", role or "passenger")
+
     local support = hg and hg.BZCNNPCSupport
     if not npc:GetNW2Bool("BZCNNPCDowned", false) then
-        if not support or not isfunction(support.EnterDownedState) then return false end
+        if not support or not isfunction(support.EnterDownedState) then
+            npc.BZCNGlideSeatedFake = nil
+            npc.BZCNGlideState = nil
+            npc:SetNW2Bool("BZCNGlideRiding", false)
+            npc:SetNW2Bool("BZCNGlideState", false)
+            return false
+        end
         local ok, entered = pcall(support.EnterDownedState, npc, "glide_seat")
-        if not ok or entered == false then return false end
+        if not ok or entered == false then
+            npc.BZCNGlideSeatedFake = nil
+            npc.BZCNGlideState = nil
+            npc.BZCNGlideVehicle = nil
+            npc.BZCNGlideSeat = nil
+            npc.BZCNGlideRole = nil
+            npc:SetNW2Bool("BZCNGlideRiding", false)
+            npc:SetNW2Bool("BZCNGlideState", false)
+            npc:SetNW2String("BZCNGlideSeatRole", "")
+            return false
+        end
     end
 
     local rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
         or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
     if not IsValid(rag) then
-        if support and isfunction(support.Recover) then
-            pcall(support.Recover, npc, nil)
-        end
+        npc.BZCNGlideSeatedFake = nil
+        npc.BZCNGlideState = nil
+        npc.BZCNGlideVehicle = nil
+        npc.BZCNGlideSeat = nil
+        npc.BZCNGlideRole = nil
+        npc:SetNW2Bool("BZCNGlideRiding", false)
+        npc:SetNW2Bool("BZCNGlideState", false)
+        npc:SetNW2String("BZCNGlideSeatRole", "")
         return false
     end
 
-    npc.BZCNGlideVehicle = vehicle
-    npc.BZCNGlideSeat = seat
-    npc.BZCNGlideRole = role or "passenger"
-    npc.BZCNGlideSeatedFake = true
-    npc:SetNW2Bool("BZCNGlideRiding", true)
-    npc:SetNW2String("BZCNGlideSeatRole", role or "passenger")
+    -- Mirror the metadata Glide assigns to its own crash ragdolls, but retain
+    -- the NPC's organism/ragdoll ownership so damage and recovery stay bridged.
+    rag.IsGlideRagdoll = true
+    rag.GlideRagdollPlayer = npc
+    rag.GlideVehicle = vehicle
+    rag.GlideSeat = seat
+    npc.GlideRagdoll = rag
+    npc.GlideRagdollStartPos = seat:GetPos()
+    npc.GlideRagdollTimeout = math.huge
 
     rag:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
     rag:SetMoveType(MOVETYPE_VPHYSICS)
@@ -149,17 +182,26 @@ local function UnseatNPC(npc, reason, keepDowned)
         local rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
             or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
         npc:SetNW2Bool("BZCNGlideRiding", false)
+        npc:SetNW2Bool("BZCNGlideState", false)
         npc:SetNW2String("BZCNGlideSeatRole", "")
         npc.BZCNGlideVehicle = nil
         npc.BZCNGlideSeat = nil
         npc.BZCNGlideRole = nil
         npc.BZCNGlideSeatedFake = nil
+        npc.BZCNGlideState = nil
         npc.BZCNGlideSavedState = nil
+        if npc.GlideRagdoll == rag then npc.GlideRagdoll = nil end
+        npc.GlideRagdollStartPos = nil
+        npc.GlideRagdollTimeout = nil
         npc.BZCNGlideExitAt = CurTime() + 2
 
         local actor = npc.BZCNFakeActor
         if istable(actor) and isfunction(actor.SetVehicleSeat) then actor:SetVehicleSeat(nil) end
         if IsValid(rag) then
+            rag.IsGlideRagdoll = nil
+            rag.GlideRagdollPlayer = nil
+            rag.GlideVehicle = nil
+            rag.GlideSeat = nil
             rag:SetParent(NULL)
             rag:SetMoveType(MOVETYPE_VPHYSICS)
             rag:SetSolid(SOLID_VPHYSICS)
