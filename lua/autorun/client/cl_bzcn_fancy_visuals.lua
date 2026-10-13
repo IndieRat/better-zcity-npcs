@@ -8,7 +8,14 @@ local reportedRenderErrors = setmetatable({}, {__mode = "k"})
 local function IsManagedHumanNPC(ent)
     if not IsValid(ent) or ent:IsPlayer() then return false end
     if ent.GetNW2Bool and ent:GetNW2Bool("BZCNManaged", false) then return true end
-    return ent.BZCNManaged == true
+    if ent.BZCNManaged == true then return true end
+
+    -- NW2 metadata can arrive a tick after a freshly spawned NextBot, and some
+    -- spawn paths fail to publish the managed flag consistently. The entity
+    -- class is a stable discriminator for this addon's own managed NPCs, so
+    -- do not make appearance rendering depend on that one network boolean.
+    local class = ent:GetClass()
+    return class == "npc_bzcn_base" or string.StartWith(class, "npc_bzcn_")
 end
 
 local function GetAccessories(ent)
