@@ -1228,15 +1228,29 @@ local function EnterDownedState(owner, reason)
         local bone = rag:TranslatePhysBoneToBone(i)
         local matrix = bone and owner:GetBoneMatrix(bone)
         if IsValid(phys) and matrix then
-            phys:SetPos(matrix:GetTranslation())
-            phys:SetAngles(matrix:GetAngles())
+            local bonePos = matrix:GetTranslation()
+            local boneAng = matrix:GetAngles()
+            if IsValid(glideSeat) then
+                -- Carry the whole initial pose into Glide's seat frame before
+                -- physics starts. The fake actor then folds it into the seat
+                -- pose with shadow control instead of letting a standing-body
+                -- ragdoll fall back to the NPC's pre-entry world position.
+                local localBonePos, localBoneAng = WorldToLocal(
+                    bonePos, boneAng, owner:GetPos(), owner:GetAngles())
+                localBonePos.z = localBonePos.z - 34
+                bonePos = glideSeat:LocalToWorld(localBonePos)
+                boneAng = glideSeat:LocalToWorldAngles(localBoneAng)
+            end
+            phys:SetPos(bonePos)
+            phys:SetAngles(boneAng)
             -- A freshly spawned proxy must be an ordinary gravity-driven
             -- ragdoll. Some model/physics setups retain disabled gravity or
             -- motion on one or more bones, which looks like a floating body.
             phys:EnableMotion(true)
             phys:EnableGravity(true)
             phys:Wake()
-            local velocity = owner:GetVelocity()
+            local velocity = IsValid(glideSeat) and IsValid(owner.BZCNGlideVehicle)
+                and owner.BZCNGlideVehicle:GetVelocity() or owner:GetVelocity()
             if velocity:LengthSqr() > 1 then phys:SetVelocity(velocity) end
         end
     end
