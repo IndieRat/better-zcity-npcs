@@ -427,7 +427,6 @@ local function ApplyQueuedNPCWeaponBones(ent)
                 or math.Clamp(FrameTime() * 12, 0, 1)
             state.pos = LerpVector(smoothing, state.pos, state.targetPos)
             state.ang = LerpAngle(smoothing, state.ang, state.targetAng)
-            end
             pos = pos + state.pos
             ang = ang + state.ang
             active = true
