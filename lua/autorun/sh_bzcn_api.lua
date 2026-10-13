@@ -422,7 +422,7 @@ function BZCN.ResolveInventoryWeaponAlias(alias)
     if not isstring(alias) then return nil end
     local lowered = string.lower(string.Trim(alias))
     if lowered == "pistol:9mm" or lowered == "pistol 9mm" then
-        local pools = BZCN.WeaponPoolByAmmo or BZCN.BuildWeaponPoolByAmmo()
+        local pools = BZCN.BuildWeaponPoolByAmmo()
         local candidates = {}
         for ammo, classes in pairs(pools) do
             if IsNineMillimeterAmmo(ammo) then
@@ -440,7 +440,7 @@ function BZCN.ResolveInventoryWeaponAlias(alias)
     -- "Ammo:SMG1"; pools stay keyed by the exact Primary.Ammo string.
     local ammoFamily = string.match(alias, "^[Aa]mmo:(.+)$")
     if ammoFamily then
-        local pools = BZCN.WeaponPoolByAmmo or BZCN.BuildWeaponPoolByAmmo()
+        local pools = BZCN.BuildWeaponPoolByAmmo()
         local pool = pools[ammoFamily]
         if istable(pool) and #pool > 0 then return pool[math.random(#pool)] end
     end
