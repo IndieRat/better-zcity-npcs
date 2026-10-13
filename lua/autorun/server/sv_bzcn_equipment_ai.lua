@@ -2124,6 +2124,57 @@ function BZCN.TryUseMedicalItem(ent)
     return ok
 end
 
+-- Civilian food is a consumable, not a medical treatment. Use the real
+-- Z-City SWEP Heal method so satiety, sounds, and food behavior stay native.
+-- Stop at five bites because the stock sixth bite calls Player:SelectWeapon,
+-- which is not a safe NextBot API; then consume the inventory entry ourselves.
+function BZCN.TryUseSmallConsumable(ent)
+    if not IsValid(ent) or not BZCN.IsManaged(ent) then return false end
+    local profile = ent.BZCNClassProfile or {}
+    local className = string.lower(tostring(ent.BZCNClass or ent.PlayerClassName or ""))
+    local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+    if not (profile.CivilianStyle == true or faction == "civilian"
+        or className == "default" or className == "citizen" or className == "civilian") then return false end
+
+    local now = CurTime()
+    if now < (ent.BZCNNextConsumableUseAt or 0) then return false end
+    local inventory = GetInventory(ent)
+    if not istable(inventory.Weapons) or inventory.Weapons.weapon_smallconsumable == nil then return false end
+
+    local org = ent.organism or ent.BZCN_Organism
+    if not istable(org) or (tonumber(org.satiety) or 100) > 40 then return false end
+    local food = ConfigureWeaponEntity(ent, "weapon_smallconsumable", "BZCNRuntimeConsumable")
+    if not IsValid(food) or not isfunction(food.Heal) then
+        ent.BZCNNextConsumableUseAt = now + 8
+        return false
+    end
+
+    PlaceRuntimeWeapon(ent, food)
+    local ok, result = pcall(food.Heal, food, ent, 1)
+    if not ok then
+        ent.BZCNNextConsumableUseAt = now + 8
+        ErrorNoHalt("[BZCN] Small-consumable use failed for NPC #"
+            .. tostring(ent:EntIndex()) .. ": " .. tostring(result) .. "\\n")
+        return false
+    end
+    if result ~= true then
+        ent.BZCNNextConsumableUseAt = now + 2
+        return false
+    end
+
+    food.Eating = tonumber(food.Eating) or 0
+    ent.BZCNNextConsumableUseAt = CurTime() + 1.2
+    if food.Eating >= 5 then
+        inventory.Weapons.weapon_smallconsumable = nil
+        if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
+        ent.BZCNRuntimeConsumable = nil
+        food:Remove()
+        ent.BZCNNextConsumableUseAt = CurTime() + 35
+        hook.Run("BZCN_NPCConsumedSmallConsumable", ent)
+    end
+    return true
+end
+
 hook.Add("OnEntityCreated", "BZCN_EquipNativeSWEP", function(ent)
     timer.Simple(0.2, function()
         if not IsValid(ent) or not BZCN.IsManaged(ent) then return end
@@ -2136,6 +2187,7 @@ timer.Create("BZCN_MedicalAI", 1, 0, function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if IsValid(ent) and BZCN.IsManaged(ent) then
             BZCN.TryUseMedicalItem(ent)
+            BZCN.TryUseSmallConsumable(ent)
         end
     end
 end)
