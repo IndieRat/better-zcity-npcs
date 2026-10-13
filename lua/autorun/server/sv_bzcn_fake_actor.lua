@@ -811,17 +811,17 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 
     local seatAng = seat:GetAngles()
-    -- Glide computes signed forward speed from chassis-local +X. Use that same
-    -- axis for the occupant's heading, and prefer the owner's recorded vehicle
-    -- over GetParent() because seat hierarchy can vary between vehicle models.
-    local ownerVehicle = IsValid(self.owner) and self.owner.BZCNGlideVehicle or nil
-    local vehicle = IsValid(ownerVehicle) and ownerVehicle or seat:GetParent()
-    local desiredForward = IsValid(vehicle) and vehicle:GetForward() or seatAng:Forward()
+    -- The occupant must face the seat/windshield, not the chassis model axis:
+    -- some Glide vehicle models have a reversed entity-forward basis. The seat
+    -- rotates with the vehicle and is the authoritative occupant-facing frame.
+    local desiredForward = seatAng:Forward()
     desiredForward.z = 0
     if desiredForward:LengthSqr() < 0.01 then
-        desiredForward = seatAng:Forward()
+        local ownerVehicle = IsValid(self.owner) and self.owner.BZCNGlideVehicle or nil
+        desiredForward = IsValid(ownerVehicle) and ownerVehicle:GetForward() or vector_origin
         desiredForward.z = 0
     end
+    if desiredForward:LengthSqr() < 0.01 then return end
     desiredForward:Normalize()
     local yaw = math.NormalizeAngle(desiredForward:Angle().y)
     local upright = Angle(0, yaw, 0)
