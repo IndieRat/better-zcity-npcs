@@ -1874,6 +1874,38 @@ local function UseBloodBag(healer, target, med, org)
     return true
 end
 
+local function PublishTreatmentVisuals(target)
+    if not IsValid(target) then return end
+    local visibleBodies = {target}
+    local candidates = {
+        target.BZCNNPCRagdoll,
+        target.FakeRagdoll,
+        target.GetNWEntity and target:GetNWEntity("FakeRagdoll") or nil
+    }
+    for _, body in pairs(candidates) do
+        if IsValid(body) and body ~= target then visibleBodies[#visibleBodies + 1] = body end
+    end
+
+    for _, body in ipairs(visibleBodies) do
+        -- Z-City appearance hooks read these exact networked fields. The
+        -- organism belongs to the living NPC, but treatment marks must also
+        -- be published on the visible ragdoll proxy.
+        if istable(target.bandaged_limbs) then
+            body.bandaged_limbs = table.Copy(target.bandaged_limbs)
+            if body.SetNetVar then body:SetNetVar("bandaged_limbs", body.bandaged_limbs) end
+        end
+        if istable(target.tourniquets) then
+            body.tourniquets = table.Copy(target.tourniquets)
+            if body.SetNetVar then body:SetNetVar("Tourniquets", body.tourniquets) end
+        end
+        local org = target.organism or target.BZCN_Organism
+        if istable(org) and body.SetNetVar then
+            if istable(org.wounds) then body:SetNetVar("wounds", org.wounds) end
+            if istable(org.arterialwounds) then body:SetNetVar("arterialwounds", org.arterialwounds) end
+        end
+    end
+end
+
 local function PersistMedicalSupply(healer, class, med)
     local inventory = GetInventory(healer)
     inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
@@ -1924,6 +1956,9 @@ local function UseMedicalItem(healer, target, class)
     -- 3 tranexamic/internal-bleed treatment, and 4 tourniquet.
     PlaceRuntimeWeapon(healer, med)
     local org = target.organism or target.BZCN_Organism or {}
+    -- Legacy/partially initialized organism tables can lose their owner
+    -- pointer. Native Z-City medicine publishes wound state through org.owner.
+    if istable(org) and not IsValid(org.owner) then org.owner = target end
     local actions = {}
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
     local woundCount = WoundCount(org.wounds)
@@ -2041,6 +2076,7 @@ local function UseMedicalItem(healer, target, class)
     end
 
     if applied then
+        PublishTreatmentVisuals(target)
         healer.BZCNLastMedicalUse = CurTime()
         healer.BZCNLastMedicalTarget = target
         healer.BZCNLastMedicalClass = class
