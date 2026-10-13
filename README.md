@@ -70,6 +70,16 @@ Open **Spawn Menu → Utilities → User → Better ZCity NPCs** to toggle the s
 
 The matching archived server convars are named `bzcn_rule_furry_grabs`, `bzcn_rule_furry_tackles`, `bzcn_rule_ragdoll_sitting`, `bzcn_rule_door_interaction`, and `bzcn_rule_armed_civilian_bravery`. All default to enabled.
 
+### Inventory Giver and loadout rules
+
+Choose the **Inventory Giver** under **Tools → Better ZCity**. Enter comma-separated SWEP classes, optional Z-City scripted entity classes, ammo entries such as `Pistol:120,SMG1:90`, attachment IDs, and armor entries such as `head=combine_helmet`. Left-click a managed NPC or player to apply the configuration; right-click copies a target's current inventory into the fields. The tool preserves a player's unrelated physical weapons and treats the NPC inventory as Z-City loot data. Automatic reserve ammo is enabled by default and can be switched off in the tool panel; explicit ammo amounts take priority.
+
+Metro Police start with a pistol and keep hands in their inventory for noncombat use. An NPC can hold only one selected weapon model at a time, but its inventory retains the rest of the loadout. For managed NPCs, the inventory giver selects a valid non-medical firearm in preference to the hands weapon when one is available.
+
+The gameplay rules menu also contains **Civilian murder witnesses** and **NPCs defend hit allies**. Killing a civilian starts a temporary murderer flag. Nearby witnesses with a visible line to the incident panic; armed civilian NPCs retaliate when no Metro Police witness is present, while Metro Police witnesses escalate against the killer. Combine and Rebel NPCs can also retaliate against attackers who hurt their faction allies, including faction-aligned players. Squad tactics group nearby Combine/Rebel NPCs into fireteams of up to four; idle members follow a shared patrol leader, while combat and medical behavior take priority.
+
+These are server-side compatibility behaviors that depend on the relevant Z-City weapons, armor, and inventory systems being mounted.
+
 Useful server commands (admin or server console):
 
 ```text
