@@ -67,21 +67,14 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
--- Some Glide models expose a chassis forward axis opposite to the driver seat.
--- Steering against that axis makes the AI pursue goals by driving backward.
+-- Navigation and throttle must use the chassis' actual forward axis.
+-- Some Glide seat entities face backward relative to their vehicle; using the
+-- seat's axis here makes the AI steer toward its goal as if reverse were forward.
+-- Keep seat orientation for posing occupants only, never for vehicle travel.
 local function GetDrivingForward(vehicle)
+    if not IsValid(vehicle) then return vector_origin end
     local forward = vehicle:GetForward()
     forward.z = 0
-    local seat = GetDriverSeat(vehicle)
-    if IsValid(seat) then
-        local seatForward = seat:GetForward()
-        seatForward.z = 0
-        if seatForward:LengthSqr() > 0.01 and forward:LengthSqr() > 0.01 then
-            seatForward:Normalize()
-            forward:Normalize()
-            if forward:Dot(seatForward) < -0.15 then forward = seatForward end
-        end
-    end
     if forward:LengthSqr() > 0.01 then forward:Normalize() end
     return forward
 end
@@ -174,6 +167,10 @@ local function SeatNPC(npc, vehicle, seat, role)
     npc.GlideRagdollStartPos = seat:GetPos()
     npc.GlideRagdollTimeout = math.huge
 
+    -- The physical ragdoll is the only visible body while seated. Reassert
+    -- this because civilian appearance/animation hooks can leave the source
+    -- NextBot drawable after the injury bridge initially hid it.
+    npc:SetNoDraw(true)
     rag:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
     rag:SetMoveType(MOVETYPE_VPHYSICS)
     rag:SetSolid(SOLID_VPHYSICS)
@@ -576,6 +573,15 @@ local function UpdateVehicleAI(vehicle, now)
     if IsValid(seatDriver) and seatDriver ~= driver then
         ReleaseVehicle(vehicle, "seat_taken_by_player")
         return
+    end
+
+    -- The seated ragdoll is fake-actor controlled; the standing NextBot must
+    -- never render beside it. Some civilian appearance hooks re-enable drawing.
+    if not driver:GetNoDraw() then driver:SetNoDraw(true) end
+    for _, passenger in ipairs(vehicle.BZCNAIPassengers or {}) do
+        if IsValid(passenger) and not passenger:GetNoDraw() then
+            passenger:SetNoDraw(true)
+        end
     end
 
     for i = #(vehicle.BZCNAIPassengers or {}), 1, -1 do
