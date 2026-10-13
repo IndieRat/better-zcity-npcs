@@ -1026,6 +1026,22 @@ function Tasks.RunIdleTask(ent)
     local kind = GetKind(ent)
     local home = EnsureHome(ent)
 
+    -- Passive H scavenging is needs-driven and throttled. Civilians don't
+    -- instantly become armed; they collect nearby ammunition and supplies,
+    -- while weapons remain a deliberate task or threat-driven choice.
+    if (kind == "civilian" or kind == "metrocop" or kind == "rebel")
+        and CurTime() >= (ent.BZCNNextPassiveScavengeAt or 0) then
+        ent.BZCNNextPassiveScavengeAt = CurTime() + math.Rand(5, 9)
+        local profile = ent.BZCNClassProfile or {}
+        local selected = tostring(ent.BZCN_SelectedWeapon or "")
+        local cravingAmmo = profile.Ranged == true or selected ~= ""
+            or ent.BZCNLastDamageTime and CurTime() - ent.BZCNLastDamageTime < 20
+        if cravingAmmo and Tasks.TryPickupAmmo then Tasks.TryPickupAmmo(ent) end
+        if (profile.CanScavengeWeapons == true or kind == "metrocop" or kind == "rebel")
+            and (profile.Ranged == true or selected ~= "")
+            and Tasks.TryPickupWeapon then Tasks.TryPickupWeapon(ent) end
+    end
+
     -- Alertness is a stationary observation state, not a target-acquisition or
     -- attack order. Existing NPC combat behavior remains in its own layer.
     if kind == "metrocop" and (ent.BZCNMetrocopAlertUntil or 0) > CurTime() then
@@ -1382,6 +1398,65 @@ function Tasks.RunIdleTask(ent)
             coroutine.wait(0.45)
         else
             coroutine.wait(0.55)
+        end
+        return true
+    end
+
+    if task == "meetup" then
+        Tasks.HangoutSpots = Tasks.HangoutSpots or {}
+        local candidates, bestDistance = {}, math.huge
+        for _, spot in ipairs(Tasks.HangoutSpots) do
+            if not isvector(spot.pos) or spot.pos:DistToSqr(ent:GetPos()) < 520 * 520 then continue end
+            local compatible = spot.kind == kind
+                or (kind == "civilian" and (spot.kind == "metrocop" or spot.kind == "rebel"))
+                or (kind == "metrocop" and (spot.kind == "civilian" or spot.kind == "rebel"))
+                or (kind == "rebel" and (spot.kind == "civilian" or spot.kind == "metrocop"))
+            local distance = ent:GetPos():DistToSqr(spot.pos)
+            if compatible and distance < 9000 * 9000 then
+                candidates[#candidates + 1] = {pos = spot.pos, distance = distance}
+            end
+        end
+        table.sort(candidates, function(a, b) return a.distance < b.distance end)
+        if #candidates > 0 then
+            -- Pick among several near-enough gathering points, not always the
+            -- nearest one, so the whole population doesn't form one giant blob.
+            local pick = candidates[math.random(1, math.min(4, #candidates))]
+            MoveTo(ent, NavPoint(ent, pick.pos, 320), 1.4, 0.55)
+            if ent.loco then ent.loco:SetDesiredSpeed(0) end
+            coroutine.wait(math.Rand(0.4, 1.1))
+        else
+            local destination = ChooseHomePoint(ent, math.Rand(700, 1350))
+            MoveTo(ent, destination, 1.2, 0.52)
+        end
+        return true
+    end
+
+    if task == "explore" then
+        local destination
+        local areas = navmesh.GetAllNavAreas()
+        if istable(areas) and #areas > 0 then
+            local options = {}
+            for _, area in ipairs(areas) do
+                if not area or area:IsUnderwater() then continue end
+                local point = area:GetCenter()
+                local distance = ent:GetPos():Distance(point)
+                if distance >= 650 and distance <= 2600 then
+                    options[#options + 1] = {pos = point, distance = distance}
+                end
+            end
+            table.sort(options, function(a, b) return a.distance < b.distance end)
+            if #options > 0 then
+                local pick = options[math.random(1, math.min(5, #options))]
+                destination = NavPoint(ent, pick.pos, 300)
+            end
+        end
+        if not isvector(destination) then destination = ChooseHomePoint(ent, math.Rand(850, 1450)) end
+        MoveTo(ent, destination, 1.35, 0.58)
+        ent.BZCNLastExploreAt = CurTime()
+        if math.random(1, 3) == 1 then
+            ent.loco:SetDesiredSpeed(0)
+            ent:SetAngles(Angle(0, ent:GetAngles().y + math.Rand(-55, 55), 0))
+            coroutine.wait(math.Rand(0.35, 0.9))
         end
         return true
     end
