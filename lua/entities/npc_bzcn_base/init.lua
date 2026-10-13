@@ -275,6 +275,15 @@ function ENT:Initialize()
     -- Only select weapons that were added to that NPC's inventory and actually
     -- exist in the mounted Z-City weapon registry.
     local runtimeProfile = self.BZCNClassProfile
+    -- Resolve a class' configured weapon alias only after the entity has been
+    -- created, when the mounted Z-City SWEP registry is available. The profile
+    -- keeps the alias as configuration, but runtime state always uses a real
+    -- registered class.
+    if runtimeProfile and isstring(runtimeProfile.WeaponClass)
+        and BZCN and isfunction(BZCN.ResolveInventoryWeaponAlias) then
+        runtimeProfile.WeaponClass = BZCN.ResolveInventoryWeaponAlias(runtimeProfile.WeaponClass)
+            or runtimeProfile.WeaponClass
+    end
     local choices = runtimeProfile and runtimeProfile.WeaponChoices
     -- Homigrad's inventory UI indexes Inventory directly when a player
     -- opens a downed entity's inventory. Managed NextBots do not pass through
