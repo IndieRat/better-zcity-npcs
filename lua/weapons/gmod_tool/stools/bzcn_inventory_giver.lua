@@ -566,7 +566,7 @@ function TOOL.BuildCPanel(panel)
     familyPicker:AddChoice("Pistol family: 9mm", "Pistol:9mm")
     familyChoices["Pistol:9mm"] = true
     local selectedAlias
-    familyPicker.OnSelect = function(_, _, value) selectedAlias = value end
+    familyPicker.OnSelect = function(_, _, value, data) selectedAlias = isstring(data) and data or value end
     local appendAlias = vgui.Create("DButton", panel)
     appendAlias:SetText("Add selected weapon pool to inventory")
     appendAlias:Dock(TOP)
