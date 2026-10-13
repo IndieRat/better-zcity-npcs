@@ -833,6 +833,41 @@ local function GiveItemIfMissing(ply, class)
     return ok and result ~= nil
 end
 
+-- Civilians can offer a spare consumable to a nearby player on use.
+-- Only remove the inventory entry after Give succeeds; never invent a supply
+-- or consume the civilian's item when the player already owns that class.
+hook.Add("PlayerUse", "BZCN_CivilianShareConsumable", function(ply, civilian)
+    if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive()
+        or not Managed(civilian) or not IsCivilian(civilian)
+        or ply:GetPos():DistToSqr(civilian:GetPos()) > 115 * 115
+        or IsValid(civilian.BZCNEnemy) then return end
+    if CurTime() < (civilian.BZCNNextShareConsumableAt or 0) then return end
+
+    local inventory = BZCN.GetNetVar and BZCN.GetNetVar(civilian, "Inventory", nil)
+        or civilian.inventory or civilian.Inventory
+    if not istable(inventory) or not istable(inventory.Weapons) then return end
+
+    for _, class in ipairs({"weapon_smallconsumable", "weapon_bigconsumable"}) do
+        if inventory.Weapons[class] ~= nil and GiveItemIfMissing(ply, class) then
+            inventory.Weapons[class] = nil
+            if BZCN.SetNetVar then
+                BZCN.SetNetVar(civilian, "Inventory", inventory)
+            else
+                civilian.inventory, civilian.Inventory = inventory, inventory
+            end
+            if civilian.BZCN_SelectedWeapon == class then
+                civilian.BZCN_SelectedWeapon = nil
+                if civilian.SetNW2String then civilian:SetNW2String("BZCNWeaponClass", "") end
+                if BZCN.HideHeldWeapon then BZCN.HideHeldWeapon(civilian) end
+            end
+            civilian.BZCNNextShareConsumableAt = CurTime() + 75
+            Companion.Say(civilian, "greeting", ply)
+            hook.Run("BZCN_CivilianSharedConsumable", civilian, ply, class)
+            return false
+        end
+    end
+end)
+
 local function DefectGoodOfficer(officer, playerTarget)
     if not Managed(officer) or LineKind(officer) ~= "metrocop"
         or officer.BZCNGoodCopDefected or not IsValid(playerTarget) then return false end
