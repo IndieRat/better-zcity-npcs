@@ -67,13 +67,13 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
--- Navigation and throttle must use the chassis' actual forward axis.
--- Some Glide seat entities face backward relative to their vehicle; using the
--- seat's axis here makes the AI steer toward its goal as if reverse were forward.
--- Keep seat orientation for posing occupants only, never for vehicle travel.
+-- Glide car models and their physics chassis can expose the model's local
+-- forward axis opposite to the direction the drivetrain calls forward. For
+-- managed AI, use the opposite chassis axis so steering, alignment, and signed
+-- velocity checks agree with the car's actual forward travel direction.
 local function GetDrivingForward(vehicle)
     if not IsValid(vehicle) then return vector_origin end
-    local forward = vehicle:GetForward()
+    local forward = -vehicle:GetForward()
     forward.z = 0
     if forward:LengthSqr() > 0.01 then forward:Normalize() end
     return forward
