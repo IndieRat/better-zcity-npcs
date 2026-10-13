@@ -532,7 +532,13 @@ function BZCN.GetNetVar(ent, key, default)
     if not IsValid(ent) or not isstring(key) then return default end
     local data = ent:GetTable()
     local vars = data.BZCN_NetVars
-    if vars and vars[key] ~= nil then return vars[key] end
+    if vars and vars[key] ~= nil then
+        local value = vars[key]
+        if key == "Inventory" and istable(value) then
+            NormalizeInventoryWeaponValues(value)
+        end
+        return value
+    end
     if not ent.GetNW2String then return default end
 
     local kind = ent:GetNW2String(NetworkKey(key, "type"), "")
@@ -545,6 +551,9 @@ function BZCN.GetNetVar(ent, key, default)
         local decoded = raw ~= "" and util.JSONToTable(raw) or nil
         if not istable(decoded) then return default end
         local restored = DecodeNetworkTable(decoded)
+        if key == "Inventory" and istable(restored) then
+            NormalizeInventoryWeaponValues(restored)
+        end
         return istable(restored) and restored or default
     end
     return default
