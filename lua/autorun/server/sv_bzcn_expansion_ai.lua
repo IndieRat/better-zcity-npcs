@@ -910,7 +910,9 @@ timer.Create("BZCN_MetroCopCivilianGifts", 7, 0, function()
         end
         if #civilians == 0 or math.random(1, 4) ~= 1 then continue end
         local civilian = civilians[math.random(#civilians)]
-        local gift = math.random(1, 2) == 1 and "weapon_bandage_sh" or "weapon_smallconsumable"
+        -- Civilian gifts are food/drink for the recipient's own use, not
+        -- medical treatment. Bandages remain part of the separate player-aid behavior.
+        local gift = "weapon_smallconsumable"
         if GiveConsumableToCivilian(officer, civilian, gift) then
             officer.BZCNNextCivilianGiftAt = CurTime() + math.Rand(85, 135)
             Companion.Say(officer, "greeting", civilian)
