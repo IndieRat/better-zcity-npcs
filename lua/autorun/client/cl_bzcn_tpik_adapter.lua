@@ -293,27 +293,6 @@ local function UpdateRenderedWeapon(ent)
     proxy:SetupBones()
 end
 
-hook.Add("PreDrawOpaqueRenderables", "BZCN_TPIKAndWeaponPose", function(_, skybox)
-    if skybox then return end
-    local viewPos = EyePos()
-    local frame = FrameNumber()
-
-    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
-        if not IsManaged(ent) or ent:GetPos():DistToSqr(viewPos) > 2500 * 2500 then continue end
-
-        if ent.BZCNTPiKFrame ~= frame then
-            -- Build the model pose, apply the SWEP's native animation through
-            -- its NPC-safe BoneSet adapter, then solve both hands against it.
-            ent:SetupBones()
-            RunNPCWeaponAnimations(ent)
-            ent:SetupBones()
-            ApplyTPIK(ent)
-            ent.BZCNTPiKFrame = frame
-        end
-        UpdateRenderedWeapon(ent)
-    end
-end)
-
 hook.Add("EntityRemoved", "BZCN_TPIKCleanup", function(ent)
     if not ent then return end
     if IsValid(ent.BZCNHandWorldModel) then ent.BZCNHandWorldModel:Remove() end
@@ -326,15 +305,6 @@ end)
 -- Homigrad weapon animation bridge for managed NPCs.
 -- We intentionally do not spoof IsPlayer(): native weapon pose methods are run
 -- with a temporary, narrowly-scoped owner compatibility shim only where needed.
-local function GetAnimationWeapon(ent)
-    local runtime = GetRuntimeWeapon(ent)
-    if IsValid(runtime) then return runtime end
-    local def, class = GetWeaponDefinition(ent)
-    if class == "" then return nil, def end
-    -- A registered SWEP definition is a fallback for hold-type metadata only;
-    -- we never invoke stateful animation methods on the shared definition.
-    return nil, def
-end
 
 local function SafeWeaponCall(weapon, method, ...)
     if not IsValid(weapon) or not isfunction(weapon[method]) then return false end
@@ -475,3 +445,25 @@ local function RunNPCWeaponAnimations(ent)
     RunNativeWeaponAnimation(ent, weapon, definition)
     ApplyQueuedNPCWeaponBones(ent)
 end
+
+hook.Add("PreDrawOpaqueRenderables", "BZCN_TPIKAndWeaponPose", function(_, skybox)
+    if skybox then return end
+    local viewPos = EyePos()
+    local frame = FrameNumber()
+
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not IsManaged(ent) or ent:GetPos():DistToSqr(viewPos) > 2500 * 2500 then continue end
+
+        if ent.BZCNTPiKFrame ~= frame then
+            -- Build the model pose, run the SWEP animation, then let TPIK
+            -- solve the arms against the current frame's animated pose.
+            ent:SetupBones()
+            RunNPCWeaponAnimations(ent)
+            ent:SetupBones()
+            ApplyTPIK(ent)
+            ent.BZCNTPiKFrame = frame
+        end
+        UpdateRenderedWeapon(ent)
+    end
+end)
+
