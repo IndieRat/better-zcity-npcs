@@ -790,6 +790,36 @@ hook.Add("PostEntityTakeDamage", "BZCN_GoodCopPlayerCrossfireAid", function(vict
     TryGoodCopCrossfireAid(victim, attacker, damageInfo)
 end)
 
+local function GiveConsumableToCivilian(officer, civilian, class)
+    if not Managed(officer) or LineKind(officer) ~= "metrocop"
+        or not Managed(civilian) or not IsCivilian(civilian)
+        or not weapons or not weapons.GetStored or not weapons.GetStored(class) then return false end
+    if isfunction(officer.IsBZCNEnemy) and officer:IsBZCNEnemy(civilian) then return false end
+    if isfunction(civilian.IsBZCNEnemy) and civilian:IsBZCNEnemy(officer) then return false end
+    local inventory = BZCN.GetNetVar and BZCN.GetNetVar(civilian, "Inventory", nil)
+        or civilian.inventory or civilian.Inventory
+    if not istable(inventory) then inventory = {} end
+    inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    inventory.Items = istable(inventory.Items) and inventory.Items or {}
+    inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+    inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
+    if inventory.Weapons[class] ~= nil then return false end
+    inventory.Weapons[class] = true
+    if BZCN.SetNetVar then
+        BZCN.SetNetVar(civilian, "Inventory", inventory)
+    else
+        civilian.inventory = inventory
+        civilian.Inventory = inventory
+    end
+    civilian.BZCNLastConsumableGiftAt = CurTime()
+    if BZCN.Social and isfunction(BZCN.Social.PlayGesture) then
+        BZCN.Social.PlayGesture(officer, "thumbsup")
+        BZCN.Social.PlayGesture(civilian, "agree")
+    end
+    hook.Run("BZCN_MetroCopCivilianGift", officer, civilian, class)
+    return true
+end
+
 local function GiveItemIfMissing(ply, class)
     if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive()
         or not weapons or not weapons.GetStored or not weapons.GetStored(class) then return false end
@@ -823,6 +853,36 @@ local function DefectGoodOfficer(officer, playerTarget)
     hook.Run("BZCN_GoodCopDefected", officer, playerTarget)
     return true
 end
+
+-- A small number of well-intentioned officers also hand out first-aid
+-- supplies to nearby civilians, not only to player characters. Keep the gift
+-- rare, non-combat, and inventory-backed so the civilian can use it later.
+timer.Create("BZCN_MetroCopCivilianGifts", 7, 0, function()
+    for _, officer in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not Managed(officer) or LineKind(officer) ~= "metrocop"
+            or officer.BZCNCopMood ~= "good"
+            or IsValid(officer.BZCNEnemy)
+            or CurTime() < (officer.BZCNNextCivilianGiftAt or 0) then continue end
+
+        local civilians = {}
+        for _, civilian in ipairs(ents.FindInSphere(officer:GetPos(), 165)) do
+            if civilian ~= officer and Managed(civilian) and IsCivilian(civilian)
+                and civilian:Health() > 0
+                and not IsValid(civilian.BZCNEnemy)
+                and CurTime() >= (civilian.BZCNLastConsumableGiftAt or 0) + 120 then
+                civilians[#civilians + 1] = civilian
+            end
+        end
+        if #civilians == 0 or math.random(1, 4) ~= 1 then continue end
+        local civilian = civilians[math.random(#civilians)]
+        local gift = math.random(1, 2) == 1 and "weapon_bandage_sh" or "weapon_smallconsumable"
+        if GiveConsumableToCivilian(officer, civilian, gift) then
+            officer.BZCNNextCivilianGiftAt = CurTime() + math.Rand(85, 135)
+            Companion.Say(officer, "greeting", civilian)
+            hook.Run("BZCN_GoodCopGift", officer, civilian, gift)
+        end
+    end
+end)
 
 timer.Create("BZCN_GoodCopBehavior", 5, 0, function()
     for _, officer in ipairs(ents.FindByClass("npc_bzcn_*")) do
