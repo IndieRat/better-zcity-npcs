@@ -752,7 +752,13 @@ hook.Add("EntityRemoved", "BZCN_GlideVehicleCleanup", function(ent)
 end)
 
 hook.Add("BZCN_NPCMovementStateChanged", "BZCN_GlideExitOnDowned", function(ent, _, state)
-    if IsValid(ent) and ent.BZCNGlideVehicle and (state == "downed" or state == "getting_up") then
+    -- Boarding intentionally uses the NPC's fake-ragdoll state to pose it in a
+    -- seat. Do not interpret that initial "downed" transition as a crash/eject;
+    -- a real get-up transition or a later incapacitation still releases it.
+    local intentionalSeatPose = IsValid(ent) and ent.BZCNGlideSeatedFake == true
+        and IsValid(ent.BZCNGlideVehicle)
+    if IsValid(ent) and ent.BZCNGlideVehicle
+        and (state == "getting_up" or (state == "downed" and not intentionalSeatPose)) then
         local vehicle = ent.BZCNGlideVehicle
         if IsValid(vehicle) and vehicle.BZCNAIDriver == ent then
             ReleaseVehicle(vehicle, "driver_incapacitated")
