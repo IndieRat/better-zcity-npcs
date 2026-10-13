@@ -475,6 +475,3 @@ local function RunNPCWeaponAnimations(ent)
     RunNativeWeaponAnimation(ent, weapon, definition)
     ApplyQueuedNPCWeaponBones(ent)
 end
-
-)
-
