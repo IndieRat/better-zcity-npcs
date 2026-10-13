@@ -63,12 +63,16 @@ The chain lives in `lua/autorun/server/sv_bzcn_adapter_chain.lua`. It feeds the 
 Open **Spawn Menu → Utilities → User → Better ZCity NPCs** to toggle the server-side gamerules. The options are server-authoritative and require admin permissions:
 
 - Furry grabs and assimilation
-- Furry pounce / ragdoll tackle
-- Ragdoll sitting
-- NPC door interactions
+- Furry pounce / ragdoll tackle, including the staged pounce boost
+- Ragdoll sitting and NPC door interactions
 - Armed civilians resisting fleeing
+- Headcrab leaps and infection/zombification
+- Combine/Rebel squad tactics and optional zombie horde coordination
+- Civilian murder-witness panic and armed civilian retaliation
+- NPC ally defense after a Combine/Rebel player or NPC is attacked
+- Optional civilian panic spread
 
-The matching archived server convars are named `bzcn_rule_furry_grabs`, `bzcn_rule_furry_tackles`, `bzcn_rule_ragdoll_sitting`, `bzcn_rule_door_interaction`, and `bzcn_rule_armed_civilian_bravery`. All default to enabled.
+The archived server convars use the `bzcn_rule_` prefix and the rule identifiers shown by the menu (for example, `bzcn_rule_civilian_crime_response` and `bzcn_rule_npc_ally_defense`). Experimental zombie horde coordination is disabled by default; most core behavior rules are enabled.
 
 ### Inventory Giver and loadout rules
 
