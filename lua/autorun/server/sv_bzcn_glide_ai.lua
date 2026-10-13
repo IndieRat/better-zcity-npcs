@@ -67,6 +67,26 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
+-- Some Glide models expose a chassis forward axis opposite to the actual
+-- driver-seat facing. Steering against the chassis axis makes the AI pursue
+-- goals by driving backward; use the seat's forward axis when the two disagree.
+local function GetDrivingForward(vehicle)
+    local forward = vehicle:GetForward()
+    forward.z = 0
+    local seat = GetDriverSeat(vehicle)
+    if IsValid(seat) then
+        local seatForward = seat:GetForward()
+        seatForward.z = 0
+        if seatForward:LengthSqr() > 0.01 and forward:LengthSqr() > 0.01 then
+            seatForward:Normalize()
+            forward:Normalize()
+            if forward:Dot(seatForward) < -0.15 then forward = seatForward end
+        end
+    end
+    if forward:LengthSqr() > 0.01 then forward:Normalize() end
+    return forward
+end
+
 local function IsSeatFree(seat)
     if not IsValid(seat) then return false end
     local driver = isfunction(seat.GetDriver) and seat:GetDriver() or nil
@@ -167,7 +187,18 @@ local function SeatNPC(npc, vehicle, seat, role)
     end
 
     local actor = npc.BZCNFakeActor
-    if istable(actor) and isfunction(actor.SetVehicleSeat) then actor:SetVehicleSeat(seat) end
+    if not istable(actor) and BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
+        local ok, attached = pcall(BZCN.FakeActor.Attach, npc, rag)
+        if ok then actor = attached end
+    end
+    if istable(actor) and isfunction(actor.SetVehicleSeat) then
+        actor:SetVehicleSeat(seat)
+    else
+        -- Do not leave an uncontrolled physics proxy loose beside the car.
+        -- If the fake actor could not be attached, fail boarding cleanly.
+        rag:SetPos(seat:LocalToWorld(Vector(0, 0, 18)))
+        rag:SetAngles(seat:GetAngles())
+    end
     hook.Run("BZCN_NPCEnteredGlideVehicle", npc, vehicle, role or "passenger")
     return true
 end
@@ -282,9 +313,7 @@ local function FindNavPoint(vehicle, minDist, maxDist)
     local areas = navmesh.GetAllNavAreas()
     if not istable(areas) or #areas == 0 then return nil end
     local origin = vehicle:GetPos()
-    local forward = vehicle:GetForward()
-    forward.z = 0
-    if forward:LengthSqr() > 0 then forward:Normalize() end
+    local forward = GetDrivingForward(vehicle)
     local candidates = {}
     for _, area in ipairs(areas) do
         if area and not area:IsUnderwater() then
@@ -309,10 +338,8 @@ end
 
 local function FindWanderGoal(vehicle)
     local origin = vehicle:GetPos()
-    local forward = vehicle:GetForward()
-    forward.z = 0
+    local forward = GetDrivingForward(vehicle)
     if forward:LengthSqr() < 1 then return origin + Vector(1000, 0, 0) end
-    forward:Normalize()
 
     -- With no useful navmesh, wander in broad, forward-biased arcs like a
     -- walking civilian with a much larger turning radius. Check several
@@ -354,7 +381,7 @@ end
 
 local function HasClearForward(vehicle, distance)
     local startPos = vehicle:WorldSpaceCenter()
-    local endPos = startPos + vehicle:GetForward() * distance
+    local endPos = startPos + GetDrivingForward(vehicle) * distance
     local trace = util.TraceHull({
         start = startPos,
         endpos = endPos,
@@ -627,9 +654,7 @@ local function UpdateVehicleAI(vehicle, now)
     end
     direction:Normalize()
 
-    local forward = vehicle:GetForward()
-    forward.z = 0
-    if forward:LengthSqr() > 0 then forward:Normalize() end
+    local forward = GetDrivingForward(vehicle)
     local right = Vector(-forward.y, forward.x, 0)
     local steer = math.Clamp(direction:Dot(right) * 2.0, -1, 1)
     local alignment = math.Clamp(forward:Dot(direction), -1, 1)
@@ -656,8 +681,7 @@ local function UpdateVehicleAI(vehicle, now)
     -- backward from a previous steering correction, brake it to a stop before
     -- applying forward throttle; absolute speed alone caused reverse momentum
     -- to be mistaken for ordinary forward travel.
-    local signedForwardSpeed = tonumber(vehicle.forwardSpeed)
-    if signedForwardSpeed == nil then signedForwardSpeed = currentVelocity:Dot(forward) end
+    local signedForwardSpeed = currentVelocity:Dot(forward)
     if signedForwardSpeed < -45 then
         throttle = 0
         brake = math.max(brake, 0.85)
