@@ -296,6 +296,18 @@ function FakeActor:UpdateLookTarget()
         end
     end
 
+    -- When no combat/attacker target owns attention, orient the head and upper
+    -- spine along the ragdoll's actual travel direction. This makes a moving
+    -- downed body look where it is sliding/crawling instead of staring at an
+    -- unrelated random point; below walking speed, resume ambient scanning.
+    local pelvis = GetPhysicsForBone(self.ragdoll, "ValveBiped.Bip01_Pelvis")
+    local velocity = IsValid(pelvis) and pelvis:GetVelocity() or self.ragdoll:GetVelocity()
+    local horizontalVelocity = Vector(velocity.x, velocity.y, 0)
+    if horizontalVelocity:LengthSqr() > 90 * 90 then
+        self.lookTarget = self.ragdoll:WorldSpaceCenter() + horizontalVelocity:GetNormalized() * 500
+        return
+    end
+
     if not isvector(self.lookTarget) or now >= (self.nextLookScanAt or 0) then
         self.nextLookScanAt = now + math.Rand(1.25, 2.8)
         local yaw = self.ragdoll:GetAngles().y + math.Rand(-32, 32)
