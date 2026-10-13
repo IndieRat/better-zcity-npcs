@@ -538,14 +538,61 @@ end
 function TOOL.BuildCPanel(panel)
     panel:Help("Configure a native Z-City inventory, then left-click a player or managed BZCN NPC to apply it.")
     panel:Help("Right-click a player/NPC to copy its current inventory, including live player ammo. Reload clears extra player inventory data or the NPC inventory.")
+
+    panel:Help("Choose a live ammo family below to add a pool alias, or enter an exact SWEP class.")
+    local familyPicker = panel:ComboBox("Weapon pool / ammo family", "bzcn_inventory_giver_weapon_pool_picker")
+    local familyChoices, poolCounts = {}, {}
+    if weapons and weapons.GetList and weapons.GetStored then
+        for _, listed in ipairs(weapons.GetList() or {}) do
+            local class = istable(listed) and (listed.ClassName or listed.Class or listed.Classname) or nil
+            local stored = isstring(class) and weapons.GetStored(class) or nil
+            local primary = istable(stored) and istable(stored.Primary) and stored.Primary or nil
+            local ammo = primary and primary.Ammo
+            if isstring(class) and class ~= "" and isstring(ammo) and ammo ~= ""
+                and string.lower(ammo) ~= "none" and class ~= "weapon_hands_sh"
+                and not (BZCN and BZCN.IsMedicalWeaponClass and BZCN.IsMedicalWeaponClass(class)) then
+                poolCounts[ammo] = (poolCounts[ammo] or 0) + 1
+            end
+        end
+    end
+    local ammoNames = {}
+    for ammo in pairs(poolCounts) do ammoNames[#ammoNames + 1] = ammo end
+    table.sort(ammoNames)
+    for _, ammo in ipairs(ammoNames) do
+        local alias = "Ammo:" .. ammo
+        familyPicker:AddChoice("Ammo family: " .. ammo .. " (" .. poolCounts[ammo] .. " weapons)", alias)
+        familyChoices[alias] = true
+    end
+    familyPicker:AddChoice("Pistol family: 9mm", "Pistol:9mm")
+    familyChoices["Pistol:9mm"] = true
+    local selectedAlias
+    familyPicker.OnSelect = function(_, _, value) selectedAlias = value end
+    local appendAlias = vgui.Create("DButton", panel)
+    appendAlias:SetText("Add selected weapon pool to inventory")
+    appendAlias:Dock(TOP)
+    appendAlias:DockMargin(0, 2, 0, 6)
+    appendAlias.DoClick = function()
+        if not isstring(selectedAlias) or selectedAlias == "" then return end
+        local convarName = "tool_bzcn_inventory_giver_weapons"
+        local current = GetConVar(convarName)
+        local entries = SplitList(current and current:GetString() or "", 64)
+        for _, entry in ipairs(entries) do
+            if string.lower(entry) == string.lower(selectedAlias) then
+                surface.PlaySound("buttons/button10.wav")
+                return
+            end
+        end
+        entries[#entries + 1] = selectedAlias
+        RunConsoleCommand(convarName, table.concat(entries, ","))
+    end
+
     panel:TextEntry("Weapon classes or ammo-family aliases (comma-separated)", "tool_bzcn_inventory_giver_weapons")
     panel:TextEntry("Z-City scripted entity classes (comma-separated)", "tool_bzcn_inventory_giver_items")
     panel:TextEntry("Ammo type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
     panel:TextEntry("Attachments (comma-separated IDs)", "tool_bzcn_inventory_giver_attachments")
     panel:TextEntry("Armor slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
     panel:CheckBox("Automatically add reserve ammo for configured weapons", "tool_bzcn_inventory_giver_autoammo")
-    panel:Help("Weapon aliases: Pistol:9mm (also accepts legacy '9mm Pistol'); Ammo:SMG1 selects a registered SWEP using that exact ammo family.")
-    panel:Help("Weapon aliases resolve to real registered SWEP classes before being stored; right-click copies the resolved classes.")
+    panel:Help("Aliases resolve through the live registered SWEP pool and are stored as real weapon classes. A pool alias selects one deterministic registered SWEP from that ammo family.")
     panel:Help("Example reserve ammo: Pistol:120,SMG1:90")
     panel:Help("Example attachments: supressor2,scope1")
     panel:Help("Example armor: head=combine_helmet,torso=vest3")
