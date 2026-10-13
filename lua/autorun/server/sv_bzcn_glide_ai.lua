@@ -40,10 +40,12 @@ local function ClassInfo(ent)
 end
 
 local function CanDrive(ent)
-    if not IsManaged(ent) or not ent.loco or ent:GetNW2Bool("BZCNNPCDowned", false)
-        or ent:GetNW2Bool("BZCNNPCGettingUp", false) or ent.BZCNFurryGrab
+    if not IsManaged(ent) or not ent.loco or ent.BZCNFurryGrab
         or CurTime() < (ent.BZCNMedicalUntil or 0) then return false end
-    if BZCNCombatActor and BZCNCombatActor.IsIncapacitated
+    local seatedFake = ent.BZCNGlideSeatedFake == true and IsValid(ent.BZCNGlideVehicle)
+    if not seatedFake and (ent:GetNW2Bool("BZCNNPCDowned", false)
+        or ent:GetNW2Bool("BZCNNPCGettingUp", false)) then return false end
+    if not seatedFake and BZCNCombatActor and BZCNCombatActor.IsIncapacitated
         and BZCNCombatActor.IsIncapacitated(ent) then return false end
     local info = ClassInfo(ent)
     return info.civilian or info.combat
@@ -80,9 +82,8 @@ end
 local function SeatNPC(npc, vehicle, seat, role)
     if not IsManaged(npc) or not IsValid(vehicle) or not IsValid(seat) then return false end
     if npc.BZCNGlideVehicle and npc.BZCNGlideVehicle ~= vehicle then return false end
-    if IsValid(npc:GetParent()) and npc:GetParent() ~= seat then return false end
+    if IsValid(npc:GetParent()) then return false end
 
-    -- Preserve the NextBot's locomotion settings for clean exit/recovery.
     if not npc.BZCNGlideSavedState then
         npc.BZCNGlideSavedState = {
             moveType = npc:GetMoveType(),
@@ -93,47 +94,97 @@ local function SeatNPC(npc, vehicle, seat, role)
             cycle = npc:GetCycle()
         }
     end
-    local localPos, localAng = SeatLocalPosition(vehicle, seat)
-    npc:SetParent(seat)
-    npc:SetLocalPos(Vector(0, 0, 0))
-    npc:SetLocalAngles(Angle(0, 0, 0))
-    npc:SetMoveType(MOVETYPE_NONE)
-    npc:SetSolid(SOLID_NONE)
-    npc:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
-    -- Use a seated/driver loop when the model provides one; otherwise retain
-    -- its current sequence rather than forcing an invalid activity.
-    -- Glide's player animation hooks do not run for NextBots, so explicitly
-    -- pick a seated sequence that actually exists on this model. Prefer a
-    -- looping vehicle/passenger pose over a generic standing fallback.
-    local sitSequence = -1
-    local candidates = role == "driver"
-        and {"drive_jeep", "sit_rollercoaster", "sit_passive", "sit"}
-        or {"sit_rollercoaster", "sit_passive", "sit", "drive_jeep"}
-    for _, sequenceName in ipairs(candidates) do
-        local candidate = npc:LookupSequence(sequenceName)
-        if isnumber(candidate) and candidate >= 0 then
-            sitSequence = candidate
-            break
+
+    -- Do not fake a seated animation on the standing NextBot. Enter Z-City's
+    -- organism-backed fake/ragdoll state and keep that physical proxy seated
+    -- under per-bone shadow control. The proxy can then react to hits/crashes.
+    local support = hg and hg.BZCNNPCSupport
+    if not npc:GetNW2Bool("BZCNNPCDowned", false) then
+        if not support or not isfunction(support.EnterDownedState) then return false end
+        local ok, entered = pcall(support.EnterDownedState, npc, "glide_seat")
+        if not ok or entered == false then return false end
+    end
+
+    local rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
+        or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
+    if not IsValid(rag) then
+        if support and isfunction(support.Recover) then
+            pcall(support.Recover, npc, nil)
         end
+        return false
     end
-    if sitSequence >= 0 then
-        npc:ResetSequence(sitSequence)
-        npc:SetCycle(0)
-        npc:SetPlaybackRate(1)
-    end
-    npc:SetNW2Bool("BZCNGlideRiding", true)
-    npc:SetNW2String("BZCNGlideSeatRole", role or "passenger")
+
     npc.BZCNGlideVehicle = vehicle
     npc.BZCNGlideSeat = seat
     npc.BZCNGlideRole = role or "passenger"
+    npc.BZCNGlideSeatedFake = true
+    npc:SetNW2Bool("BZCNGlideRiding", true)
+    npc:SetNW2String("BZCNGlideSeatRole", role or "passenger")
+
+    rag:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
+    rag:SetMoveType(MOVETYPE_VPHYSICS)
+    rag:SetSolid(SOLID_VPHYSICS)
+    for i = 0, rag:GetPhysicsObjectCount() - 1 do
+        local phys = rag:GetPhysicsObjectNum(i)
+        if IsValid(phys) then
+            phys:EnableMotion(true)
+            phys:EnableGravity(true)
+            phys:Wake()
+        end
+    end
+
+    local actor = npc.BZCNFakeActor
+    if IsValid(actor) and actor.SetVehicleSeat then actor:SetVehicleSeat(seat) end
+    hook.Run("BZCN_NPCEnteredGlideVehicle", npc, vehicle, role or "passenger")
     return true
 end
 
-local function UnseatNPC(npc, reason)
+local function UnseatNPC(npc, reason, keepDowned)
     if not IsValid(npc) then return end
     local vehicle = npc.BZCNGlideVehicle
     local seat = npc.BZCNGlideSeat
     local saved = npc.BZCNGlideSavedState
+    local wasSeatedFake = npc.BZCNGlideSeatedFake == true
+    if wasSeatedFake then
+        local rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
+            or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
+        npc:SetNW2Bool("BZCNGlideRiding", false)
+        npc:SetNW2String("BZCNGlideSeatRole", "")
+        npc.BZCNGlideVehicle = nil
+        npc.BZCNGlideSeat = nil
+        npc.BZCNGlideRole = nil
+        npc.BZCNGlideSeatedFake = nil
+        npc.BZCNGlideSavedState = nil
+        npc.BZCNGlideExitAt = CurTime() + 2
+
+        local actor = npc.BZCNFakeActor
+        if IsValid(actor) and actor.SetVehicleSeat then actor:SetVehicleSeat(nil) end
+        if IsValid(rag) then
+            rag:SetParent(NULL)
+            rag:SetMoveType(MOVETYPE_VPHYSICS)
+            rag:SetSolid(SOLID_VPHYSICS)
+            rag:SetCollisionGroup(COLLISION_GROUP_NONE)
+            for i = 0, rag:GetPhysicsObjectCount() - 1 do
+                local phys = rag:GetPhysicsObjectNum(i)
+                if IsValid(phys) then
+                    phys:EnableMotion(true)
+                    phys:EnableGravity(true)
+                    phys:Wake()
+                end
+            end
+        end
+
+        if keepDowned then return end
+        timer.Simple(0.12, function()
+            if not IsValid(npc) or npc:Health() <= 0 then return end
+            local support = hg and hg.BZCNNPCSupport
+            if support and isfunction(support.Recover) then
+                pcall(support.Recover, npc, IsValid(rag) and rag or nil)
+            end
+        end)
+        hook.Run("BZCN_NPCExitedGlideVehicle", npc, vehicle, reason)
+        return
+    end
     if IsValid(npc:GetParent()) and (npc:GetParent() == seat or npc:GetParent() == vehicle) then
         npc:SetParent(NULL)
     end
@@ -174,9 +225,10 @@ end
 
 local function FindCombatTarget(driver, radius)
     local best, bestDist
-    for _, target in ipairs(ents.FindInSphere(driver:GetPos(), radius)) do
+    local origin = IsValid(driver.BZCNGlideVehicle) and driver.BZCNGlideVehicle:GetPos() or driver:GetPos()
+    for _, target in ipairs(ents.FindInSphere(origin, radius)) do
         if IsHostile(driver, target) and target:Health() > 0 then
-            local distance = driver:GetPos():DistToSqr(target:GetPos())
+            local distance = origin:DistToSqr(target:GetPos())
             if not bestDist or distance < bestDist then best, bestDist = target, distance end
         end
     end
@@ -290,13 +342,13 @@ local function SetControls(vehicle, throttle, steer, brake)
     vehicle:SetInputFloat(1, "brake", math.Clamp(brake or 0, 0, 1))
 end
 
-local function ReleaseVehicle(vehicle, reason)
+local function ReleaseVehicle(vehicle, reason, keepDowned)
     if not IsValid(vehicle) then return end
     SetControls(vehicle, 0, 0, 1)
     local driver = vehicle.BZCNAIDriver
-    if IsValid(driver) then UnseatNPC(driver, reason or "vehicle_release") end
+    if IsValid(driver) then UnseatNPC(driver, reason or "vehicle_release", keepDowned == true) end
     for _, passenger in ipairs(vehicle.BZCNAIPassengers or {}) do
-        if IsValid(passenger) then UnseatNPC(passenger, reason or "vehicle_release") end
+        if IsValid(passenger) then UnseatNPC(passenger, reason or "vehicle_release", keepDowned == true) end
     end
     vehicle.BZCNAIDriver = nil
     vehicle.BZCNAIPassengers = nil
@@ -320,28 +372,40 @@ local function CrashEjectVehicle(vehicle, impactVelocity, impactDelta)
         if IsValid(passenger) then occupants[#occupants + 1] = passenger end
     end
 
-    ReleaseVehicle(vehicle, "glide_crash")
+    ReleaseVehicle(vehicle, "glide_crash", true)
     local support = hg and hg.BZCNNPCSupport
     for _, npc in ipairs(occupants) do
-        if IsManaged(npc) and npc:Health() > 0
-            and not npc:GetNW2Bool("BZCNNPCDowned", false)
-            and support and isfunction(support.EnterDownedState) then
-            local ok, entered = pcall(support.EnterDownedState, npc, "glide_crash")
-            if ok and entered ~= false then
-                local rag = npc.BZCNNPCRagdoll
-                    or npc.FakeRagdoll
-                    or (npc.GetNW2Entity and npc:GetNW2Entity("BZCNNPCRagdoll"))
-                if IsValid(rag) then
-                    local inherited = isvector(impactVelocity) and impactVelocity or vector_origin
-                    local impulse = isvector(impactDelta) and impactDelta * 0.22 or vector_origin
-                    for i = 0, rag:GetPhysicsObjectCount() - 1 do
-                        local phys = rag:GetPhysicsObjectNum(i)
-                        if IsValid(phys) then
-                            phys:Wake()
-                            phys:SetVelocity(inherited + impulse)
-                        end
+        if IsManaged(npc) and npc:Health() > 0 then
+            local rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
+                or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
+            if not IsValid(rag) and support and isfunction(support.EnterDownedState) then
+                local ok, entered = pcall(support.EnterDownedState, npc, "glide_crash")
+                if ok and entered ~= false then
+                    rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
+                end
+            end
+            if IsValid(rag) then
+                local inherited = isvector(impactVelocity) and impactVelocity or vector_origin
+                local impulse = isvector(impactDelta) and impactDelta * 0.22 or vector_origin
+                rag:SetCollisionGroup(COLLISION_GROUP_NONE)
+                for i = 0, rag:GetPhysicsObjectCount() - 1 do
+                    local phys = rag:GetPhysicsObjectNum(i)
+                    if IsValid(phys) then
+                        phys:EnableMotion(true)
+                        phys:EnableGravity(true)
+                        phys:Wake()
+                        phys:SetVelocity(inherited + impulse)
                     end
                 end
+                local delay = 3.6
+                timer.Simple(delay, function()
+                    if not IsValid(npc) or npc:Health() <= 0 then return end
+                    if not npc:GetNW2Bool("BZCNNPCDowned", false) then return end
+                    local supportNow = hg and hg.BZCNNPCSupport
+                    if supportNow and isfunction(supportNow.Recover) then
+                        pcall(supportNow.Recover, npc, rag)
+                    end
+                end)
             end
         end
     end
@@ -457,10 +521,21 @@ local function UpdateVehicleAI(vehicle, now)
 
     local info = ClassInfo(driver)
     local target
+    local targetAhead = false
     if info.combat then target = FindCombatTarget(driver, 2200) end
     if IsValid(target) then
+        local toTarget = target:GetPos() - vehicle:GetPos()
+        toTarget.z = 0
+        local chassisForward = vehicle:GetForward()
+        chassisForward.z = 0
+        if chassisForward:LengthSqr() > 0 then chassisForward:Normalize() end
+        if toTarget:LengthSqr() > 1 then toTarget:Normalize() end
+        targetAhead = chassisForward:Dot(toTarget) > -0.05
         vehicle.BZCNGlideAIMode = "combat"
-        vehicle.BZCNGlideAITarget = target:GetPos()
+        -- Do not ask a car to reverse toward an enemy behind it. Take a forward
+        -- turning arc first, then reacquire once the target is in front.
+        vehicle.BZCNGlideAITarget = targetAhead and target:GetPos() or nil
+        if not targetAhead then vehicle.BZCNGlideAINextTargetAt = 0 end
     elseif vehicle.BZCNGlideAIMode == "combat" then
         vehicle.BZCNGlideAIMode = "wander"
         vehicle.BZCNGlideAITarget = nil
@@ -490,7 +565,7 @@ local function UpdateVehicleAI(vehicle, now)
     local goal = vehicle.BZCNGlideAITarget
     if not isvector(goal) or now >= (vehicle.BZCNGlideAINextTargetAt or 0)
         or vehicle:GetPos():DistToSqr(goal) < 220 * 220 then
-        if vehicle.BZCNGlideAIMode == "combat" and IsValid(target) then
+        if vehicle.BZCNGlideAIMode == "combat" and IsValid(target) and targetAhead then
             goal = target:GetPos()
         else
             goal = FindNavPoint(vehicle, 650, 2200)
