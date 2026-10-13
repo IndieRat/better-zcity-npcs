@@ -67,17 +67,19 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
--- Use the driver's actual seat-facing axis as the vehicle's semantic
--- forward. Some Glide chassis models expose a model-forward axis that is
--- reversed relative to the windshield; using it for path steering and signed
--- velocity checks makes the AI consistently select reverse-facing goals.
+-- Glide applies accelerate/brake and reports chassis velocity in the
+-- vehicle entity's own forward frame. Steering against the driver's seat axis
+-- can therefore aim toward a point that the throttle moves away from, producing
+-- the characteristic 180-degree turn followed by apparent reverse driving.
+-- Keep path planning and signed-speed checks in the same frame as the physics
+-- controls. Seat orientation remains a separate concern for the visible rider.
 local function GetDrivingForward(vehicle)
     if not IsValid(vehicle) then return vector_origin end
-    local seat = istable(vehicle.seats) and vehicle.seats[1] or nil
-    local forward = IsValid(seat) and seat:GetForward() or vehicle:GetForward()
+    local forward = vehicle:GetForward()
     forward.z = 0
     if forward:LengthSqr() < 0.01 then
-        forward = vehicle:GetForward()
+        local seat = istable(vehicle.seats) and vehicle.seats[1] or nil
+        forward = IsValid(seat) and seat:GetForward() or vector_origin
         forward.z = 0
     end
     if forward:LengthSqr() > 0.01 then forward:Normalize() end
