@@ -35,6 +35,16 @@ local function NormalizeAccessoryList(accessories)
     end
     local function Visit(value, key, depth)
         if depth > 5 then return end
+
+        -- Z-City appearance data can be either an array of accessory names or
+        -- a keyed map such as { ["baseball cap"] = true } / { ["eyeglasses"] = 1 }.
+        -- The latter was silently discarded because numeric values are neither
+        -- strings nor tables. Only accept keys present in the real definition table.
+        if isstring(key) and definitions and istable(definitions[key])
+            and value ~= false and value ~= nil and value ~= 0 then
+            Add(key)
+        end
+
         if isstring(value) then
             Add(value)
             if isstring(key) then Add(key) end
@@ -224,7 +234,10 @@ end
 hook.Add("PostDrawOpaqueRenderables", "BZCN_FancyNPCAccessories", function(depth, skybox)
     if skybox then return end
 
-    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+    -- Iterate the entity list rather than relying on wildcard classname
+    -- matching: some Z-City spawn paths register managed variants under custom
+    -- classnames, and those actors still need the same appearance bridge.
+    for _, ent in ipairs(ents.GetAll()) do
         if IsManagedHumanNPC(ent) then
             if istable(hg) and istable(hg.Accessories) then
                 RenderNPCAccessories(ent)
