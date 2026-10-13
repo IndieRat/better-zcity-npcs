@@ -1121,6 +1121,24 @@ BZCN.WeaponHoldTypeTranslator = BZCN.WeaponHoldTypeTranslator or {
     duel = "pistol", magic = "normal", revolver = "smg"
 }
 
+-- Read inherited SWEP metadata from the first class in the Base chain that
+-- defines it. weapons.GetStored(child) doesn't consistently materialize parent
+-- fields, but Homigrad variants such as weapon_glock26 depend on the parent
+-- WorldModel, WorldPos, WorldAng, HoldType, and animation flags.
+function BZCN.GetWeaponDefinitionValue(class, key)
+    if not isstring(class) or class == "" or not isstring(key) then return nil end
+    local current, seen = class, {}
+    for _ = 1, 12 do
+        if not isstring(current) or current == "" or seen[current] then return nil end
+        seen[current] = true
+        local definition = weapons and weapons.GetStored and weapons.GetStored(current)
+        if not istable(definition) then return nil end
+        if definition[key] ~= nil then return definition[key], definition, current end
+        current = definition.Base
+    end
+    return nil
+end
+
 function BZCN.IsHomigradWeaponClass(class)
     if not isstring(class) or class == "" then return false end
     local current, seen = class, {}
@@ -1143,6 +1161,8 @@ function BZCN.GetWeaponAnimationHoldType(owner, weaponClass, weaponEntity)
             or (owner.GetNW2String and owner:GetNW2String("BZCNWeaponClass", "")))) or ""
     local definition = isstring(weaponClass) and weapons and weapons.GetStored
         and weapons.GetStored(weaponClass) or nil
+    local configuredHold = BZCN.GetWeaponDefinitionValue(weaponClass, "HoldType")
+        or BZCN.GetWeaponDefinitionValue(weaponClass, "holdtype")
 
     if not (isentity(weaponEntity) and IsValid(weaponEntity)) and ownerValid then
         local candidate = owner.BZCNRuntimeWeapon
@@ -1164,7 +1184,7 @@ function BZCN.GetWeaponAnimationHoldType(owner, weaponClass, weaponEntity)
         end
         rawHold = rawHold or weaponEntity.holdtype or weaponEntity.HoldType
     end
-    rawHold = (isstring(rawHold) and rawHold ~= "" and rawHold)
+    rawHold = (isstring(rawHold) and rawHold ~= "" and rawHold) or configuredHold
         or (istable(definition) and (definition.HoldType or definition.holdtype)) or nil
     if not isstring(rawHold) or rawHold == "" then
         rawHold = (isstring(profile.AnimationHoldTypeOverride) and profile.AnimationHoldTypeOverride)
@@ -1172,7 +1192,8 @@ function BZCN.GetWeaponAnimationHoldType(owner, weaponClass, weaponEntity)
     end
     rawHold = string.lower(rawHold)
 
-    local epicRun = (istable(definition) and definition.CanEpicRun == true)
+    local inheritedEpicRun = BZCN.GetWeaponDefinitionValue(weaponClass, "CanEpicRun") == true
+    local epicRun = inheritedEpicRun or (istable(definition) and definition.CanEpicRun == true)
         or (isentity(weaponEntity) and IsValid(weaponEntity) and weaponEntity.CanEpicRun == true)
     local pistolStyle = rawHold == "pistol" or rawHold == "revolver"
         or string.find(string.lower(weaponClass), "glock", 1, true) ~= nil
@@ -1192,8 +1213,15 @@ function BZCN.GetWeaponModel(ent, weaponClass)
     if not isstring(weaponClass) or weaponClass == "" then return nil end
 
     local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local model = istable(stored) and stored.WorldModel or nil
-    if istable(stored) and isfunction(stored.GetWeaponWorldModel) then
+    local model = BZCN.GetWeaponDefinitionValue(weaponClass, "WorldModel")
+        or (istable(stored) and stored.WorldModel) or nil
+    local worldModelFn = BZCN.GetWeaponDefinitionValue(weaponClass, "GetWeaponWorldModel")
+    if isfunction(worldModelFn) then
+        local runtime = isentity(ent.BZCNRuntimeWeapon) and IsValid(ent.BZCNRuntimeWeapon)
+            and ent.BZCNRuntimeWeapon:GetClass() == weaponClass and ent.BZCNRuntimeWeapon or nil
+        local ok, result = pcall(worldModelFn, runtime or stored)
+        if ok and isstring(result) and result ~= "" then model = result end
+    elseif istable(stored) and isfunction(stored.GetWeaponWorldModel) then
         local ok, result = pcall(stored.GetWeaponWorldModel, stored)
         if ok and isstring(result) and result ~= "" then model = result end
     end
@@ -1400,8 +1428,12 @@ if SERVER then
             and ent.BZCNRuntimeWeapon or nil
         local definition = isstring(weaponClass) and weapons and weapons.GetStored
             and weapons.GetStored(weaponClass) or nil
-        local worldPos = runtime and runtime.WorldPos or (istable(definition) and definition.WorldPos)
-        local worldAng = runtime and runtime.WorldAng or (istable(definition) and definition.WorldAng)
+        local worldPos = runtime and runtime.WorldPos
+            or BZCN.GetWeaponDefinitionValue(weaponClass, "WorldPos")
+            or (istable(definition) and definition.WorldPos)
+        local worldAng = runtime and runtime.WorldAng
+            or BZCN.GetWeaponDefinitionValue(weaponClass, "WorldAng")
+            or (istable(definition) and definition.WorldAng)
         if not isvector(worldPos) then worldPos = vector_origin end
         if not isangle(worldAng) then worldAng = angle_zero end
 
