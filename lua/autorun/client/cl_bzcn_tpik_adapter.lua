@@ -328,25 +328,19 @@ local function ApplyNPCBonePose(ent, weapon, key, vec, ang, layer, lerp)
     local boneID = isnumber(key) and key or ent:LookupBone(boneName)
     if not isnumber(boneID) or boneID < 0 then return end
 
-    -- These are small additive animation layers, not absolute replacements:
-    -- preserve the animation pose and combine Homigrad weapon layers with it.
+    -- Store the current desired value for the named Homigrad animation layer.
     ent.BZCNWeaponAnimLayers = ent.BZCNWeaponAnimLayers or {}
     local entLayers = ent.BZCNWeaponAnimLayers
     local layerName = tostring(layer or "weapon")
     entLayers[boneID] = entLayers[boneID] or {}
     local state = entLayers[boneID][layerName]
     if not state then
-        state = {pos = vector_origin, ang = angle_zero, last = 0}
+        state = {pos = vector_origin, ang = angle_zero, last = 0, targetPos = vector_origin, targetAng = angle_zero}
         entLayers[boneID][layerName] = state
     end
-    local dt = math.min(FrameTime(), 0.1)
-    if isnumber(lerp) then
-        local rate = math.Clamp(1 - math.pow(math.Clamp(lerp, 0, 1), dt), 0, 1)
-        state.pos = LerpVector(rate, state.pos, vec)
-        state.ang = LerpAngle(rate, state.ang, ang)
-    else
-        state.pos, state.ang = vec, ang
-    end
+    state.targetPos = Vector(vec.x, vec.y, vec.z)
+    state.targetAng = Angle(ang.p, ang.y, ang.r)
+    state.lerp = isnumber(lerp) and math.Clamp(lerp, 0, 1) or nil
     state.last = FrameNumber()
 end
 
@@ -425,8 +419,14 @@ local function ApplyQueuedNPCWeaponBones(ent)
         local active = false
         for layerName, state in pairs(boneLayers) do
             if state.last ~= frame then
-                state.pos = LerpVector(math.Clamp(FrameTime() * 12, 0, 1), state.pos, vector_origin)
-                state.ang = LerpAngle(math.Clamp(FrameTime() * 12, 0, 1), state.ang, angle_zero)
+                state.targetPos = vector_origin
+                state.targetAng = angle_zero
+            end
+            local smoothing = state.lerp
+                and math.Clamp(1 - math.pow(state.lerp, math.min(FrameTime(), 0.1)), 0, 1)
+                or math.Clamp(FrameTime() * 12, 0, 1)
+            state.pos = LerpVector(smoothing, state.pos, state.targetPos)
+            state.ang = LerpAngle(smoothing, state.ang, state.targetAng)
             end
             pos = pos + state.pos
             ang = ang + state.ang
