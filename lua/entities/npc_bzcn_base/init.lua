@@ -458,7 +458,9 @@ function ENT:Initialize()
                 -- Publish a per-NPC accessory payload even when the appearance
                 -- has no attachments; never let a previous spawn's value leak
                 -- through a shared appearance/netvar cache.
-                pcall(self.SetNetVar, self, "Accessories", table.Copy(appearance.AAttachments or {}))
+                local accessoryList = table.Copy(appearance.AAttachments or {})
+                local ok = pcall(self.SetNetVar, self, "Accessories", accessoryList)
+                if not ok then BZCN.SetNetVar(self, "Accessories", accessoryList) end
             end
         end
         self.BZCNClassProfile.Model = self:GetModel()
@@ -473,6 +475,13 @@ function ENT:Initialize()
         self.PlayerName = displayName
         self:SetNW2String("BZCNDisplayName", displayName)
         if self.SetNWString then self:SetNWString("PlayerName", displayName) end
+        -- Make the chosen identity available through the same GetNetVar path
+        -- used by Z-City's look-at HUD, with NW2 fallback for managed NextBots.
+        if isfunction(self.SetNetVar) then
+            pcall(self.SetNetVar, self, "PlayerName", displayName)
+        else
+            BZCN.SetNetVar(self, "PlayerName", displayName)
+        end
     end
 
     -- Every managed NPC needs an identifier even when it uses a custom
