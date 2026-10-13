@@ -120,16 +120,6 @@ local function RenderNPCAccessories(ent)
         ent.BZCNFancyAccessoryModel = modelPath
     end
 
-    -- Keep the cache tidy when an NPC receives a new appearance at runtime.
-    if istable(ent.modelAccess) then
-        for name, model in pairs(ent.modelAccess) do
-            if not active[name] then
-                if IsValid(model) then model:Remove() end
-                ent.modelAccess[name] = nil
-            end
-        end
-    end
-
     if not istable(hg) or not istable(hg.Accessories) then return end
     if not isfunction(RenderAccessories) then return end
 
@@ -140,6 +130,29 @@ local function RenderNPCAccessories(ent)
         or (IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll)
         or (ent.GetNW2Entity and IsValid(ent:GetNW2Entity("FakeRagdoll"))
             and ent:GetNW2Entity("FakeRagdoll")) or ent
+
+    -- Accessory models are cached on the NPC but parented to its current body.
+    -- When a fake ragdoll is replaced, keeping that cache leaves hats/glasses
+    -- attached to the stale ragdoll (or invisible at its old bone transforms).
+    -- Invalidate on body changes as well as model changes.
+    if ent.BZCNFancyAccessoryBody ~= body then
+        ClearAccessoryModels(ent)
+        ent.BZCNFancyAccessoryBody = body
+    end
+
+    -- Keep the cache tidy when an NPC receives a new appearance at runtime.
+    if istable(ent.modelAccess) then
+        for name, model in pairs(ent.modelAccess) do
+            if not active[name] then
+                if IsValid(model) then model:Remove() end
+                ent.modelAccess[name] = nil
+            end
+        end
+    end
+
+    -- The proxy can be hidden from the normal draw path, so ensure its bone
+    -- matrices are current before Z-City's attachment code queries them.
+    if IsValid(body) and body.SetupBones then body:SetupBones() end
 
     -- Z-City's renderer only knows the Player-style FakeRagdoll field. BZCN
     -- stores the actual proxy as BZCNNPCRagdoll, so temporarily expose the same
@@ -251,7 +264,10 @@ local function RenderAttachedHeadcrab(ent)
         return
     end
 
-    local body = IsValid(ent.FakeRagdoll) and ent.FakeRagdoll or ent
+    local body = IsValid(ent.FakeRagdoll) and ent.FakeRagdoll
+        or (IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll)
+        or (ent.GetNW2Entity and IsValid(ent:GetNW2Entity("FakeRagdoll"))
+            and ent:GetNW2Entity("FakeRagdoll")) or ent
     if not IsValid(body) then return end
     if ent.BZCNHeadcrabModelPath ~= modelPath or not IsValid(ent.BZCNHeadcrabModel) then
         if IsValid(ent.BZCNHeadcrabModel) then ent.BZCNHeadcrabModel:Remove() end
