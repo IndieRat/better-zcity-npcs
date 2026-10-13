@@ -363,6 +363,86 @@ function FakeActor:UpdateUpperPose()
     end
 end
 
+
+-- Player-like weapon pose for a conscious managed NPC's fake body.
+-- Aim comes from the same combat solution that drives the actual shot; firing
+-- is a short replicated state, not a simulated Player key press.
+function FakeActor:UpdateWeaponAim(dt)
+    local owner, rag = self.owner, self.ragdoll
+    if not IsValid(owner) or not IsValid(rag) then return end
+
+    local now = CurTime()
+    local solution = owner.BZCNCombatAimSolution
+    local aimUntil = owner.GetNW2Float and owner:GetNW2Float("BZCNCombatAimUntil", 0) or 0
+    local weapon = owner.BZCNRuntimeWeapon
+    local weaponClass = owner.BZCN_SelectedWeapon or (IsValid(weapon) and weapon:GetClass()) or ""
+    local physiology = self.physiology or {}
+    local injury = self.injury or {}
+    local rightWorks = (tonumber(injury.rightarm) or 0) < 92 and injury.rightArmAmputated ~= true
+    local leftWorks = (tonumber(injury.leftarm) or 0) < 92 and injury.leftArmAmputated ~= true
+    local hasWeapon = weaponClass ~= "" and IsValid(weapon)
+    local hasAim = hasWeapon and physiology.conscious and (rightWorks or leftWorks)
+        and istable(solution) and isangle(solution.angle) and aimUntil > now
+        and not (owner.BZCNDeathHandled or owner.BZCNNPCUnconscious)
+    local firing = hasAim and (tonumber(owner.BZCNActorFiringUntil) or 0) > now or false
+
+    self.weaponAiming = hasAim == true
+    self.weaponFiring = firing == true
+    if owner.SetNW2Bool then owner:SetNW2Bool("BZCNFakeFiring", self.weaponFiring) end
+    if not hasAim then return end
+
+    local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+        or GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis")
+    if not IsValid(spine) then return end
+
+    local aim = Angle(solution.angle.p, solution.angle.y, 0)
+    local hold = owner.BZCNCombatHoldType or "smg"
+    local pistol = hold == "pistol" or hold == "revolver" or hold == "duel"
+    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.05, 1)
+    local basis = Angle(0, aim.y, 0)
+    local forward, right = basis:Forward(), basis:Right()
+    local center = spine:GetPos()
+    local pitch = math.Clamp(aim.p, -45, 45)
+    local weaponAngle = Angle(pitch, aim.y, 0)
+    weaponAngle:RotateAroundAxis(weaponAngle:Forward(), 90)
+    weaponAngle:RotateAroundAxis(weaponAngle:Up(), 90)
+    weaponAngle:RotateAroundAxis(weaponAngle:Forward(), pistol and 180 or 120)
+
+    local arms = {
+        {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand", works = leftWorks},
+        {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand", works = rightWorks}
+    }
+    for _, arm in ipairs(arms) do
+        if arm.works then
+            local side = arm.side
+            local shoulder = center + forward * 3 + right * (side * 9) + Vector(0, 0, 7)
+            local wrist = center + forward * (pistol and 24 or 29)
+                + right * (side * (pistol and 5 or 8)) + Vector(0, 0, 1)
+            local elbow = LerpVector(0.52, shoulder, wrist) + right * (side * 7) - Vector(0, 0, 3)
+            local upperAngle = Angle(weaponAngle.p, weaponAngle.y, side * (pistol and 4 or 10))
+            upperAngle:RotateAroundAxis(upperAngle:Forward(), -45)
+            if not pistol and side < 0 then upperAngle:RotateAroundAxis(upperAngle:Up(), 15) end
+
+            self:ShadowBone(arm.upper, upperAngle, 0.12, 62 * power, 44,
+                shoulder, 72, 48)
+            self:ShadowBone(arm.forearm, weaponAngle, 0.10, 72 * power, 48,
+                elbow, 82, 52)
+            self:ShadowBone(arm.hand, weaponAngle, 0.085, 78 * power, 50,
+                wrist, 90, 55)
+        end
+    end
+
+    -- Recoil is an animation/control state only. Keep it bounded so the fake
+    -- actor preserves impacts and momentum instead of launching itself.
+    if firing and (self.nextFakeRecoil or 0) <= now then
+        self.nextFakeRecoil = now + 0.12
+        local hand = GetPhysicsForBone(rag, rightWorks and "ValveBiped.Bip01_R_Hand" or "ValveBiped.Bip01_L_Hand")
+        if IsValid(hand) then
+            hand:ApplyForceCenter(-forward * math.Clamp(tonumber(owner.BZCNFakeRecoilScale) or 18, 8, 26))
+        end
+    end
+end
+
 function FakeActor:UpdateSit(dt)
     local rag = self.ragdoll
     if not IsValid(rag) or not (self.physiology and self.physiology.canMove) then return end
@@ -678,17 +758,21 @@ function FakeActor:Update(dt)
 
     if self.mode == "sit" then
         self:UpdateSit(dt)
+        self:UpdateWeaponAim(dt)
         return
     elseif self.mode == "crawl" then
         self:UpdateCrawl(dt)
+        self:UpdateWeaponAim(dt)
         return
     elseif self.mode == "pounce" then
         self:UpdatePounce(dt)
         return
     end
 
-    -- Aim controls the gaze only; impacts, gravity and inherited momentum remain
-    -- physical. The pounce pose assist above affects limbs, never the whole body.
+    -- Aim controls gaze and articulated arms; impacts, gravity and inherited
+    -- momentum remain physical. Weapon control is deliberately last so it wins
+    -- over idle/crawl arm targets while the NPC is actually aiming.
+    self:UpdateWeaponAim(dt)
     if self.mode == "loose" or self.mode == "aim" then return end
 end
 
