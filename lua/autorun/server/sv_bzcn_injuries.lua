@@ -1334,16 +1334,23 @@ local function EnterDownedState(owner, reason)
         if actor and isfunction(actor.SetInjuryState) then actor:SetInjuryState(state) end
     end
 
-    local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
-    state.recoverTimer = timerName
-    local duration = math.Clamp(2.8 + state.pain / 85, 2.8, 5.8)
-    if reason == "legs" then duration = math.max(duration, 3.2) end
+    -- A seated fake actor must remain a live, physics-backed ragdoll for as
+    -- long as the vehicle is moving. Glide's seat adapter explicitly schedules
+    -- recovery when the NPC exits; ordinary knockdowns retain their normal timer.
+    if reason ~= "glide_seat" then
+        local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
+        state.recoverTimer = timerName
+        local duration = math.Clamp(2.8 + state.pain / 85, 2.8, 5.8)
+        if reason == "legs" then duration = math.max(duration, 3.2) end
 
-    timer.Create(timerName, duration, 1, function()
-        if not IsAlive(owner) then return end
-        if not owner.BZCNNPCOrg or not owner.BZCNNPCOrg.downed then return end
-        Recover(owner, owner.BZCNNPCRagdoll)
-    end)
+        timer.Create(timerName, duration, 1, function()
+            if not IsAlive(owner) then return end
+            if not owner.BZCNNPCOrg or not owner.BZCNNPCOrg.downed then return end
+            Recover(owner, owner.BZCNNPCRagdoll)
+        end)
+    else
+        state.recoverTimer = nil
+    end
 
     SyncEntity(owner, state)
 end
