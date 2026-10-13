@@ -377,23 +377,24 @@ local function RunNativeWeaponAnimation(ent, weapon, definition)
     local class = weapon:GetClass()
     if IsHomigradWeaponClass(class) then
         local owner = weapon:GetOwner()
+        if not IsValid(owner) then return end
         local oldPosture = owner.posture
         local oldWeight = weapon.weight
-        local oldIsNPC = owner.IsNPC
-        -- Some base methods query these values as if the owner were a player.
-        -- Supply harmless defaults only while each native method executes.
+        -- Some base methods query Player-style posture/weight. Supply defaults
+        -- only around these calls, without overriding IsNPC or IsPlayer.
         if owner.posture == nil then owner.posture = 0 end
         if weapon.weight == nil then weapon.weight = 5 end
-        local function restore()
-            owner.posture = oldPosture
-            weapon.weight = oldWeight
-            owner.IsNPC = oldIsNPC
+        local ok, err = xpcall(function()
+            SafeWeaponCall(weapon, "AnimHold")
+            SafeWeaponCall(weapon, "AnimApply_ShootRecoil",
+                isfunction(weapon.LastShootTime) and weapon:LastShootTime() or 0)
+            SafeWeaponCall(weapon, "AnimZoom")
+        end, debug.traceback)
+        owner.posture = oldPosture
+        weapon.weight = oldWeight
+        if not ok then
+            ErrorNoHalt("[BZCN weapon animation] " .. tostring(class) .. ": " .. tostring(err) .. "\n")
         end
-        local okHold = SafeWeaponCall(weapon, "AnimHold")
-        local okRecoil = SafeWeaponCall(weapon, "AnimApply_ShootRecoil",
-            isfunction(weapon.LastShootTime) and weapon:LastShootTime() or 0)
-        local okZoom = SafeWeaponCall(weapon, "AnimZoom")
-        restore()
     else
         SafeWeaponCall(weapon, "Animation", ent)
     end
