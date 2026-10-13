@@ -377,10 +377,18 @@ local function RunNativeWeaponAnimation(ent, weapon, definition)
     if not IsValid(ent) or not IsValid(weapon) then return end
     InstallWeaponBoneSetAdapter(ent, weapon)
 
-    -- Keep the custom SWEP Animation override: weapons can implement their own
-    -- attack/inspect/recoil poses. Then apply base idle/aim/recoil if present.
-    local ok = SafeWeaponCall(weapon, "Animation", ent)
-    if not ok then return end
+    -- Base Homigrad Animation() depends on Player-only posture, organism and
+    -- IK state. Its BoneSet method is bridged above; call safe animation phases
+    -- individually so one missing Player-only field cannot suppress all posing.
+    local class = weapon:GetClass()
+    if IsHomigradWeaponClass(class) then
+        SafeWeaponCall(weapon, "AnimHold")
+        SafeWeaponCall(weapon, "AnimApply_ShootRecoil",
+            isfunction(weapon.LastShootTime) and weapon:LastShootTime() or 0)
+        SafeWeaponCall(weapon, "AnimZoom")
+    else
+        SafeWeaponCall(weapon, "Animation", ent)
+    end
 end
 
 local function ResolveNPCWeaponHold(ent, weapon, definition)
