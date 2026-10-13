@@ -1040,15 +1040,14 @@ function Tasks.RunIdleTask(ent)
         if ent.SetNW2Entity then ent:SetNW2Entity("BZCNMetrocopAlertFocus", NULL) end
     end
 
-    local task = PickTask(ent)
-
-    -- Squad travel gets a turn only when the existing idle task pool selects
-    -- cohesion/regroup. Other choices such as medical rescue and scavenging
-    -- remain reachable instead of being masked by a permanent squad override.
-    if (kind == "combine" and task == "squad")
-        or (kind == "rebel" and (task == "squad" or task == "regroup")) then
+    -- Keep combat fireteams together while they patrol and explore. The
+    -- RunBehaviour loop has already yielded to active enemies, so this only
+    -- owns idle movement; healing/help and Metrocop alert states still win first.
+    if kind == "combine" or kind == "rebel" then
         if RunSquadIdleTask(ent, kind) then return true end
     end
+
+    local task = PickTask(ent)
 
     if task == "pickup" then
         if Tasks.TryPickupWeapon(ent) then coroutine.wait(0.25) return true end
