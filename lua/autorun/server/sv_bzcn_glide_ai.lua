@@ -67,6 +67,25 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
+-- Some Glide models expose a chassis forward axis opposite to the driver seat.
+-- Steering against that axis makes the AI pursue goals by driving backward.
+local function GetDrivingForward(vehicle)
+    local forward = vehicle:GetForward()
+    forward.z = 0
+    local seat = GetDriverSeat(vehicle)
+    if IsValid(seat) then
+        local seatForward = seat:GetForward()
+        seatForward.z = 0
+        if seatForward:LengthSqr() > 0.01 and forward:LengthSqr() > 0.01 then
+            seatForward:Normalize()
+            forward:Normalize()
+            if forward:Dot(seatForward) < -0.15 then forward = seatForward end
+        end
+    end
+    if forward:LengthSqr() > 0.01 then forward:Normalize() end
+    return forward
+end
+
 -- Some Glide models expose a chassis forward axis opposite to the actual
 -- driver-seat facing. Steering against the chassis axis makes the AI pursue
 -- goals by driving backward; use the seat's forward axis when the two disagree.
