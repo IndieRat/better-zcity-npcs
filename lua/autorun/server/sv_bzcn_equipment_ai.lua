@@ -336,6 +336,30 @@ hook.Add("BZCN_InventorySet", "BZCN_RuntimeWeaponInventorySync", function(ent, i
     end)
 end)
 
+-- Z-City's native loot path mutates ent.inventory in place and calls its own
+-- SetNetVar, so BZCN_InventorySet is not guaranteed to fire when a player
+-- pickpockets the live SWEP entity from a managed NPC. Reconcile after the
+-- pickup hook has completed, once the SWEP's owner is authoritative.
+hook.Add("PlayerCanPickupWeapon", "BZCN_RuntimeWeaponPickpocketSync", function(ply, weapon)
+    if not IsValid(ply) or not IsValid(weapon) then return end
+    local owner = weapon.BZCNRuntimeOwner
+    if not IsValid(owner) or not BZCN.IsManaged(owner) then return end
+    if owner.BZCNRuntimeWeapon ~= weapon and owner.BZCNRuntimeMeleeWeapon ~= weapon then return end
+
+    timer.Simple(0, function()
+        if not IsValid(owner) or not BZCN.IsManaged(owner) or not IsValid(weapon) then return end
+        local transferred = weapon:GetOwner() == ply
+            or (isfunction(ply.HasWeapon) and ply:HasWeapon(weapon:GetClass()))
+        if not transferred then return end
+
+        local inventory = GetInventory(owner)
+        -- Reuse the existing transfer handler so the actor clears its stale
+        -- runtime pointer and chooses another inventory weapon without
+        -- deleting the weapon now owned by the player.
+        hook.Run("BZCN_InventorySet", owner, inventory)
+    end)
+end)
+
 local function GetDamageFromWeapon(weapon, profile, weaponClass)
     local stored = IsValid(weapon) and GetStored(weapon:GetClass()) or GetStored(weaponClass)
     local primary = IsValid(weapon) and istable(weapon.Primary) and weapon.Primary
