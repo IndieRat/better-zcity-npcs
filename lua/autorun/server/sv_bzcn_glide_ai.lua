@@ -10,9 +10,9 @@ local AI = BZCNGlideAI
 
 local SCAN_INTERVAL = 2.0
 local THINK_INTERVAL = 0.12
-local CIVILIAN_SPEED = 360
-local COMBAT_SPEED = 760
-local AVOID_RADIUS = 190
+local CIVILIAN_SPEED = 300
+local COMBAT_SPEED = 620
+local AVOID_RADIUS = 260
 local CLAIM_RADIUS = 1450
 
 local function IsManaged(ent)
@@ -102,13 +102,24 @@ local function SeatNPC(npc, vehicle, seat, role)
     npc:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
     -- Use a seated/driver loop when the model provides one; otherwise retain
     -- its current sequence rather than forcing an invalid activity.
-    local sitSequence = npc:LookupSequence(role == "driver" and "drive_jeep" or "sit")
-    if not isnumber(sitSequence) or sitSequence < 0 then
-        sitSequence = npc:LookupSequence("sit_rollercoaster")
+    -- Glide's player animation hooks do not run for NextBots, so explicitly
+    -- pick a seated sequence that actually exists on this model. Prefer a
+    -- looping vehicle/passenger pose over a generic standing fallback.
+    local sitSequence = -1
+    local candidates = role == "driver"
+        and {"drive_jeep", "sit_rollercoaster", "sit_passive", "sit"}
+        or {"sit_rollercoaster", "sit_passive", "sit", "drive_jeep"}
+    for _, sequenceName in ipairs(candidates) do
+        local candidate = npc:LookupSequence(sequenceName)
+        if isnumber(candidate) and candidate >= 0 then
+            sitSequence = candidate
+            break
+        end
     end
-    if isnumber(sitSequence) and sitSequence >= 0 then
+    if sitSequence >= 0 then
         npc:ResetSequence(sitSequence)
         npc:SetCycle(0)
+        npc:SetPlaybackRate(1)
     end
     npc:SetNW2Bool("BZCNGlideRiding", true)
     npc:SetNW2String("BZCNGlideSeatRole", role or "passenger")
@@ -172,18 +183,27 @@ local function FindCombatTarget(driver, radius)
     return best
 end
 
-local function FindNavPoint(origin, minDist, maxDist)
+local function FindNavPoint(vehicle, minDist, maxDist)
     if not navmesh or not navmesh.GetAllNavAreas then return nil end
     local areas = navmesh.GetAllNavAreas()
     if not istable(areas) or #areas == 0 then return nil end
+    local origin = vehicle:GetPos()
+    local forward = vehicle:GetForward()
+    forward.z = 0
+    if forward:LengthSqr() > 0 then forward:Normalize() end
     local candidates = {}
     for _, area in ipairs(areas) do
         if area and not area:IsUnderwater() then
             local center = area:GetCenter()
-            local distance = center:Distance(origin)
-            if distance >= minDist and distance <= maxDist then
+            local offset = center - origin
+            local distance = offset:Length()
+            offset.z = 0
+            if distance >= minDist and distance <= maxDist and offset:LengthSqr() > 1 then
+                offset:Normalize()
                 local sizeX, sizeY = area:GetSizeX(), area:GetSizeY()
-                if sizeX >= 100 and sizeY >= 100 then
+                -- Navmesh is only a hint, not a road graph. Never select a
+                -- destination behind the car: that caused tight reverse loops.
+                if sizeX >= 100 and sizeY >= 100 and forward:Dot(offset) > 0.15 then
                     candidates[#candidates + 1] = center
                 end
             end
@@ -191,6 +211,51 @@ local function FindNavPoint(origin, minDist, maxDist)
     end
     if #candidates == 0 then return nil end
     return candidates[math.random(#candidates)]
+end
+
+local function FindWanderGoal(vehicle)
+    local origin = vehicle:GetPos()
+    local forward = vehicle:GetForward()
+    forward.z = 0
+    if forward:LengthSqr() < 1 then return origin + Vector(1000, 0, 0) end
+    forward:Normalize()
+
+    -- With no useful navmesh, wander in broad, forward-biased arcs like a
+    -- walking civilian with a much larger turning radius. Check several
+    -- forward sectors and ground ahead; do not pick arbitrary points behind.
+    local candidates = {}
+    for _, yaw in ipairs({0, -18, 18, -34, 34, -52, 52}) do
+        local direction = forward:Angle()
+        direction:RotateAroundAxis(Vector(0, 0, 1), yaw)
+        local dir = direction:Forward()
+        local startPos = vehicle:WorldSpaceCenter()
+        local trace = util.TraceHull({
+            start = startPos,
+            endpos = startPos + dir * 900,
+            mins = Vector(-36, -36, -8),
+            maxs = Vector(36, 36, 36),
+            filter = {vehicle, unpack(vehicle:GetChildren())},
+            mask = MASK_SOLID
+        })
+        local ground = util.TraceLine({
+            start = origin + dir * 650 + Vector(0, 0, 100),
+            endpos = origin + dir * 650 - Vector(0, 0, 260),
+            filter = {vehicle, unpack(vehicle:GetChildren())},
+            mask = MASK_SOLID
+        })
+        if not trace.Hit and ground.Hit and not ground.HitSky then
+            candidates[#candidates + 1] = {pos = origin + dir * math.Rand(900, 1500), score = 1 - math.abs(yaw) / 100}
+        end
+    end
+    if #candidates == 0 then
+        -- Fully blocked: choose a broad turn target ahead rather than reversing.
+        local direction = forward:Angle()
+        direction:RotateAroundAxis(Vector(0, 0, 1), math.random(2) == 1 and -60 or 60)
+        return origin + direction:Forward() * 700
+    end
+    table.sort(candidates, function(a, b) return a.score > b.score end)
+    local pickCount = math.min(3, #candidates)
+    return candidates[math.random(pickCount)].pos
 end
 
 local function HasClearForward(vehicle, distance)
@@ -364,9 +429,9 @@ local function UpdateVehicleAI(vehicle, now)
         if vehicle.BZCNGlideAIMode == "combat" and IsValid(target) then
             goal = target:GetPos()
         else
-            goal = FindNavPoint(vehicle:GetPos(), 500, 2600)
+            goal = FindNavPoint(vehicle, 650, 2200)
             if not isvector(goal) then
-                goal = vehicle:GetPos() + vehicle:GetForward() * math.Rand(600, 1300)
+                goal = FindWanderGoal(vehicle)
             end
         end
         vehicle.BZCNGlideAITarget = goal
@@ -393,16 +458,26 @@ local function UpdateVehicleAI(vehicle, now)
     -- Civilians brake and wait whenever the road ahead is occupied. Combat
     -- drivers pursue hostile targets, but still avoid pedestrians and friendlies.
     local hazard = NearbyHazard(vehicle, combat and 105 or AVOID_RADIUS)
-    local clearAhead = HasClearForward(vehicle, combat and 260 or 430)
+    local clearAhead = HasClearForward(vehicle, combat and 300 or 520)
     local throttle = 0.45
     local brake = 0
     if speed > desiredSpeed then throttle = 0.08 end
     if speed < desiredSpeed and alignment > 0.35 then throttle = combat and 0.82 or 0.36 end
-    if alignment < -0.15 then throttle = 0.08 brake = 0.45 end
+    if alignment < 0.10 then
+        -- Never accelerate into a goal behind the vehicle. Brake and let the
+        -- wide steering arc turn the car around; reverse is not a navigation tool.
+        throttle = 0
+        brake = math.max(brake, speed > 80 and 0.65 or 0.15)
+    end
     if math.abs(steer) > 0.55 then throttle = math.min(throttle, combat and 0.55 or 0.25) end
     if not clearAhead or hazard then
         throttle = 0
-        brake = combat and 0.55 or 0.85
+        brake = combat and 0.7 or 0.9
+        if not combat then
+            -- Retarget to an open forward sector once the obstruction is found.
+            vehicle.BZCNGlideAITarget = FindWanderGoal(vehicle)
+            vehicle.BZCNGlideAINextTargetAt = now + math.Rand(2.5, 4.5)
+        end
     end
 
     -- Do not ram a non-hostile player/NPC to reach a combat target.
