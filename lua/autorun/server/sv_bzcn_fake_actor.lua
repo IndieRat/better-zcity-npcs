@@ -779,10 +779,9 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 
     local seatAng = seat:GetAngles()
-    -- Keep the body's facing aligned with the seat entity. The extra 180-degree
-    -- flip made the NPC look toward the rear on Glide's driver-seat setup.
-    -- Driving direction is resolved independently by the vehicle AI.
-    local yaw = seatAng.y
+    -- Glide's driver seat is mounted facing opposite the vehicle's nose.
+    -- Rotate the occupant 180 degrees so the NPC looks through the windshield.
+    local yaw = math.NormalizeAngle(seatAng.y + 180)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
