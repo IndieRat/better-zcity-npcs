@@ -2171,6 +2171,19 @@ end
 
 function ENT:RunBehaviour()
     while true do
+        -- Glide owns movement while this NextBot is parented to a vehicle seat.
+        -- Without this guard, the old Follow/Wander coroutine keeps issuing
+        -- locomotion commands and can pull the NPC out of the vehicle.
+        if self:GetNW2Bool("BZCNGlideRiding", false)
+            and IsValid(self.BZCNGlideVehicle) then
+            if self.loco then
+                self.loco:SetDesiredSpeed(0)
+                self.loco:SetVelocity(vector_origin)
+            end
+            coroutine.wait(0.05)
+            continue
+        end
+
         -- A sit sequence can be started by external Z-City interaction code.
         -- The NextBot's still-running Follow path otherwise keeps applying
         -- horizontal movement underneath the seated pose, making it slide.
