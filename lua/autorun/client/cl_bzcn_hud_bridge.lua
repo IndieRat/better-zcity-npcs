@@ -196,7 +196,9 @@ hook.Add("HUDPaint", "BZCN_ClientHUDBridge", function()
     local screen = trace.HitPos:ToScreen()
     local size = math.max(math.min(1 - (trace.Fraction or 1), 1), 0.1)
     local alpha = math.floor(255 * math.Clamp(size * 1.5, 0.15, 1))
-    local colorVector = npc:GetNWVector("PlayerColor", Vector(0.65, 0.78, 0.9))
+    local colorVector = npc.GetNW2Vector and npc:GetNW2Vector("PlayerColor", Vector(0.65, 0.78, 0.9))
+        or (npc.GetNWVector and npc:GetNWVector("PlayerColor", Vector(0.65, 0.78, 0.9)))
+        or Vector(0.65, 0.78, 0.9)
     local nameColor = Color(
         math.Clamp(colorVector.x * 255, 0, 255),
         math.Clamp(colorVector.y * 255, 0, 255),
