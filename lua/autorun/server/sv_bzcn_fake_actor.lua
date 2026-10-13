@@ -779,7 +779,11 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 
     local seatAng = seat:GetAngles()
-    local yaw = seatAng.y
+    -- The Glide seat's yaw is reversed relative to the vehicle's forward-facing
+    -- driver pose. Flip the *body orientation only*; keep all seat-local bone
+    -- targets unchanged so the ragdoll stays seated and the vehicle's driving
+    -- direction/physics are not altered.
+    local yaw = math.NormalizeAngle(seatAng.y + 180)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
