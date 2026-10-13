@@ -1178,11 +1178,20 @@ function BZCN.GetWeaponAnimationHoldType(owner, weaponClass, weaponEntity)
 
     local rawHold
     if isentity(weaponEntity) and IsValid(weaponEntity) then
+        -- Homigrad writes its current stance to .holdtype and mirrors it via
+        -- SetHoldType(). Prefer that runtime field, then a non-default engine
+        -- value, and finally the inherited SWEP declaration if the engine still
+        -- reports its generic default for a freshly spawned NextBot weapon.
+        rawHold = weaponEntity.holdtype
+        local engineHold
         if isfunction(weaponEntity.GetHoldType) then
             local ok, value = pcall(weaponEntity.GetHoldType, weaponEntity)
-            if ok and isstring(value) and value ~= "" then rawHold = value end
+            if ok and isstring(value) and value ~= "" then engineHold = value end
         end
-        rawHold = rawHold or weaponEntity.holdtype or weaponEntity.HoldType
+        if (not isstring(rawHold) or rawHold == "") and engineHold and string.lower(engineHold) ~= "normal" then
+            rawHold = engineHold
+        end
+        rawHold = rawHold or weaponEntity.HoldType or configuredHold or engineHold
     end
     rawHold = (isstring(rawHold) and rawHold ~= "" and rawHold) or configuredHold
         or (istable(definition) and (definition.HoldType or definition.holdtype)) or nil
