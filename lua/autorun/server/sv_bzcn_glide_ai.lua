@@ -67,13 +67,11 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
--- Use the vehicle entity's forward axis consistently for steering,
--- target selection, and signed velocity checks. Negating this axis makes the
--- controller choose goals behind the chassis and can look like permanent
--- reverse driving on standard Glide cars.
+-- Glide's chassis model axis is opposite its actual driving direction.
+-- Keep the inverse axis consistently for AI steering and signed speed checks.
 local function GetDrivingForward(vehicle)
     if not IsValid(vehicle) then return vector_origin end
-    local forward = vehicle:GetForward()
+    local forward = -vehicle:GetForward()
     forward.z = 0
     if forward:LengthSqr() > 0.01 then forward:Normalize() end
     return forward
