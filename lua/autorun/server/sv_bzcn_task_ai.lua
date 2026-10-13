@@ -1026,22 +1026,6 @@ function Tasks.RunIdleTask(ent)
     local kind = GetKind(ent)
     local home = EnsureHome(ent)
 
-    -- Passive H scavenging is needs-driven and throttled. Civilians don't
-    -- instantly become armed; they collect nearby ammunition and supplies,
-    -- while weapons remain a deliberate task or threat-driven choice.
-    if (kind == "civilian" or kind == "metrocop" or kind == "rebel")
-        and CurTime() >= (ent.BZCNNextPassiveScavengeAt or 0) then
-        ent.BZCNNextPassiveScavengeAt = CurTime() + math.Rand(5, 9)
-        local profile = ent.BZCNClassProfile or {}
-        local selected = tostring(ent.BZCN_SelectedWeapon or "")
-        local cravingAmmo = profile.Ranged == true or selected ~= ""
-            or ent.BZCNLastDamageTime and CurTime() - ent.BZCNLastDamageTime < 20
-        if cravingAmmo and Tasks.TryPickupAmmo then Tasks.TryPickupAmmo(ent) end
-        if (profile.CanScavengeWeapons == true or kind == "metrocop" or kind == "rebel")
-            and (profile.Ranged == true or selected ~= "")
-            and Tasks.TryPickupWeapon then Tasks.TryPickupWeapon(ent) end
-    end
-
     -- Alertness is a stationary observation state, not a target-acquisition or
     -- attack order. Existing NPC combat behavior remains in its own layer.
     if kind == "metrocop" and (ent.BZCNMetrocopAlertUntil or 0) > CurTime() then
