@@ -259,20 +259,30 @@ local function EscalateNativeMetro(npc, attacker)
     if isfunction(npc.UpdateEnemyMemory) then pcall(npc.UpdateEnemyMemory, npc, attacker, attacker:GetPos()) end
 end
 
+local function IsHumanFaction(faction)
+    return faction == "civilian" or faction == "Combine" or faction == "Rebel"
+end
+
 local function CivilianMurderResponse(victim, attacker)
-    if not IsCombatEntity(victim) or not IsValid(attacker) or not attacker:IsPlayer()
-        or victim == attacker or not IsCivilianVictim(victim) then return end
+    -- Treat the death of any human-aligned class as a witnessed violent event.
+    -- Only actual civilian kills by players increment the legacy crime counter;
+    -- NPC-on-NPC and faction-on-faction killings still trigger nearby civilians.
+    if not IsCombatEntity(victim) or not IsValid(attacker) or not IsCombatActor(attacker)
+        or victim == attacker or not IsHumanFaction(FactionOf(victim)) then return end
     if BZCN.RuleEnabled and not BZCN.RuleEnabled("civilian_crime_response") then return end
 
     local now = CurTime()
     local handledAt = tonumber(victim.BZCNCrimeResponseHandledAt)
     if handledAt and handledAt > now - 3 then return end
     victim.BZCNCrimeResponseHandledAt = now
-    attacker.BZCNCivilianKillCount = (tonumber(attacker.BZCNCivilianKillCount) or 0) + 1
-    attacker.BZCNCivilianKillerUntil = now + 60
-    if attacker.SetNW2Int then attacker:SetNW2Int("BZCNCivilianKillCount", attacker.BZCNCivilianKillCount) end
-    if attacker.SetNW2Float then attacker:SetNW2Float("BZCNCivilianKillerUntil", attacker.BZCNCivilianKillerUntil) end
-    hook.Run("BZCN_PlayerKilledCivilian", attacker, victim, attacker.BZCNCivilianKillCount)
+
+    if attacker:IsPlayer() and IsCivilianVictim(victim) then
+        attacker.BZCNCivilianKillCount = (tonumber(attacker.BZCNCivilianKillCount) or 0) + 1
+        attacker.BZCNCivilianKillerUntil = now + 60
+        if attacker.SetNW2Int then attacker:SetNW2Int("BZCNCivilianKillCount", attacker.BZCNCivilianKillCount) end
+        if attacker.SetNW2Float then attacker:SetNW2Float("BZCNCivilianKillerUntil", attacker.BZCNCivilianKillerUntil) end
+        hook.Run("BZCN_PlayerKilledCivilian", attacker, victim, attacker.BZCNCivilianKillCount)
+    end
 
     local victimPosition = victim:WorldSpaceCenter()
     local radius = 1450
