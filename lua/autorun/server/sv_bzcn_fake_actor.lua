@@ -850,13 +850,16 @@ function FakeActor:Update(dt)
 
     dt = math.Clamp(tonumber(dt) or FrameTime(), 0, 0.05)
     self:RefreshPhysiology()
+    if self.mode == "vehicle" then
+        -- Seat pose must be the only controller writing these bones this frame.
+        -- Running the normal head/spine aim first makes the seated body fight itself.
+        self:UpdateVehicleSeat(dt)
+        return
+    end
     self:UpdateLookTarget()
     self:UpdateUpperPose()
 
-    if self.mode == "vehicle" then
-        self:UpdateVehicleSeat(dt)
-        return
-    elseif self.mode == "sit" then
+    if self.mode == "sit" then
         self:UpdateSit(dt)
         self:UpdateWeaponAim(dt)
         return
