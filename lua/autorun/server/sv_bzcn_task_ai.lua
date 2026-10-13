@@ -102,7 +102,14 @@ local function PickTask(ent)
         if pick <= 0 then selected = item[1] break end
     end
     ent.BZCNCurrentTask = selected
-    ent.BZCNTaskUntil = now + math.Rand(5, 13)
+    -- Keep a goal long enough for an NPC to commit to it. The coroutine may
+    -- revisit this director several times per second, so 5-13 second leases
+    -- caused frequent task swaps that looked like a two-second attention span.
+    local kind = GetKind(ent)
+    local taskDuration = kind == "civilian" and math.Rand(24, 42)
+        or kind == "furry" and math.Rand(12, 24)
+        or math.Rand(18, 34)
+    ent.BZCNTaskUntil = now + taskDuration
     if ent.SetNW2String then ent:SetNW2String("BZCNCurrentTask", selected) end
     hook.Run("BZCN_NPCTaskSelected", ent, selected, GetKind(ent))
     return selected
@@ -351,10 +358,10 @@ local function MoveTo(ent, destination, duration, speedScale)
     ent.BZCNTaskPathFailures = 0
     local startPos = ent:GetPos()
     local lastProgressAt = CurTime()
-    -- Task callers request short slices, but 1.0-second slices are too
-    -- short to enter buildings or traverse multi-area routes. Keep a useful
-    -- minimum while still honoring longer task-specific movement windows.
-    local stopAt = CurTime() + math.max(tonumber(duration) or 1.8, 2.4)
+    -- Keep movement commitments long enough to make visible progress instead
+    -- of selecting a new nearby destination every couple of seconds. Combat,
+    -- medical, and incapacitation checks below can still interrupt immediately.
+    local stopAt = CurTime() + math.max(tonumber(duration) or 1.8, 4.8)
     local repaths = 0
     ent.loco:SetDesiredSpeed(speed * (speedScale or 0.58))
 
