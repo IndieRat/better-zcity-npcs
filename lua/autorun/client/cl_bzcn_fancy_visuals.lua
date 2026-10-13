@@ -17,9 +17,22 @@ local function GetAccessories(ent)
         local ok, value = pcall(ent.GetNetVar, ent, "Accessories")
         if ok then accessories = value end
     end
-    if accessories == nil and istable(ent.CurAppearance) then
-        accessories = ent.CurAppearance.AAttachments
+
+    -- The network var can arrive as an empty sentinel before/without the
+    -- appearance table. Prefer actual appearance data whenever the netvar has
+    -- no selected accessories instead of letting an empty value mask it.
+    local hasAccessories = accessories ~= nil and accessories ~= "" and accessories ~= "none"
+    if istable(accessories) then hasAccessories = next(accessories) ~= nil end
+    if not hasAccessories and istable(ent.CurAppearance) then
+        local appearanceAccessories = ent.CurAppearance.AAttachments
+        local appearanceHasAccessories = appearanceAccessories ~= nil
+            and appearanceAccessories ~= "" and appearanceAccessories ~= "none"
+        if istable(appearanceAccessories) then
+            appearanceHasAccessories = next(appearanceAccessories) ~= nil
+        end
+        if appearanceHasAccessories then accessories = appearanceAccessories end
     end
+
     if accessories == nil then accessories = "none" end
     return accessories
 end
