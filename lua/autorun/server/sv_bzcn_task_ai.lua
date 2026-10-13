@@ -8,25 +8,27 @@ local Tasks = BZCNTaskAI
 
 local TASK_POOLS = {
     civilian = {
-        {"stay", 3}, {"crowd", 4}, {"talk", 4}, {"wander", 2}, {"look", 2}, {"sit", 1}
+        {"stay", 3}, {"crowd", 4}, {"talk", 4}, {"wander", 2}, {"look", 2}, {"sit", 1},
+        {"drive", 1}
     },
     furry = {
         {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"comfort", 2}, {"hold", 1}
     },
     combine = {
-        {"squad", 4}, {"hold", 4}, {"cover", 4}, {"pickup", 2}, {"rescue", 2}, {"sit", 1}
+        {"squad", 4}, {"hold", 4}, {"cover", 4}, {"pickup", 2}, {"rescue", 2}, {"sit", 1},
+        {"drive", 1}
     },
     metrocop = {
         -- Civil Protection mostly holds an observation post. Small patrols and
         -- errands exist, but should be the exception rather than its default.
         {"guard", 12}, {"observe", 7}, {"hold", 5}, {"talk", 1},
-        {"patrol", 1}, {"pickup", 1}, {"rescue", 1}, {"sit", 2}
+        {"patrol", 1}, {"pickup", 1}, {"rescue", 1}, {"sit", 2}, {"drive", 1}
     },
     rebel = {
         -- Resistance fighters default to cohesion and cover. Rescue/scavenging
         -- remain possible, but idle social tasks should not split a nearby squad.
         {"guard", 2}, {"squad", 6}, {"regroup", 5}, {"cover", 5},
-        {"pickup", 3}, {"rescue", 4}, {"talk", 1}, {"hold", 2}, {"sit", 1}
+        {"pickup", 3}, {"rescue", 4}, {"talk", 1}, {"hold", 2}, {"sit", 1}, {"drive", 1}
     },
     headcrab = {
         {"hunt", 6}, {"patrol", 2}, {"climb", 3}, {"hold", 1}
@@ -106,7 +108,8 @@ local function PickTask(ent)
     -- revisit this director several times per second, so 5-13 second leases
     -- caused frequent task swaps that looked like a two-second attention span.
     local kind = GetKind(ent)
-    local taskDuration = kind == "civilian" and math.Rand(24, 42)
+    local taskDuration = selected == "drive" and math.Rand(42, 70)
+        or kind == "civilian" and math.Rand(24, 42)
         or kind == "furry" and math.Rand(12, 24)
         or math.Rand(18, 34)
     ent.BZCNTaskUntil = now + taskDuration
@@ -1055,6 +1058,24 @@ function Tasks.RunIdleTask(ent)
     end
 
     local task = PickTask(ent)
+
+    if task == "drive" then
+        local driveAI = BZCNGlideAI
+        if driveAI and isfunction(driveAI.RequestDrive) and driveAI.RequestDrive(ent) then
+            -- The vehicle adapter owns movement and the seat pose from this
+            -- point; the normal NextBot task must not issue a competing path.
+            coroutine.wait(0.65)
+            return true
+        end
+
+        -- Do not idle indefinitely for a car that is absent, occupied, or not
+        -- a supported Glide ground vehicle. Return to ordinary faction behavior.
+        task = kind == "civilian" and "wander" or "patrol"
+        ent.BZCNCurrentTask = task
+        ent.BZCNTaskUntil = CurTime() + math.Rand(12, 22)
+        if ent.SetNW2String then ent:SetNW2String("BZCNCurrentTask", task) end
+        hook.Run("BZCN_NPCTaskSelected", ent, task, kind)
+    end
 
     if task == "pickup" then
         if Tasks.TryPickupWeapon(ent) then coroutine.wait(0.25) return true end
