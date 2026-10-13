@@ -340,7 +340,10 @@ function ENT:Initialize()
             and isfunction(hg.Appearance.ForceApplyAppearance) then
             local ok, result = pcall(hg.Appearance.GetRandomAppearance)
             if ok and istable(result) then
-                appearance = result
+                -- GetRandomAppearance may hand back a table backed by shared
+                -- appearance state. Always isolate it before assigning a name,
+                -- mixed clothing themes, or accessory choices for this NPC.
+                appearance = table.Copy(result)
 
                 -- Keep names consistent across human classes, and deliberately mix
                 -- clothing channels so civilians do not all wear a matching set.
@@ -395,10 +398,11 @@ function ENT:Initialize()
                 -- PlayerName and Accessories, so later civilians lose both.
                 local savedMethods = {}
                 local function InstallShim(name, fn)
-                    if not isfunction(self[name]) then
-                        savedMethods[#savedMethods + 1] = {name, self[name]}
-                        self[name] = fn
-                    end
+                    -- Entity metatables can expose Player-only methods on some
+                    -- server builds even though they throw for NextBots. Shadow
+                    -- them temporarily, then restore the exact previous value.
+                    savedMethods[#savedMethods + 1] = {name, self[name]}
+                    self[name] = fn
                 end
                 InstallShim("SetPlayerColor", function(ent, color)
                     if not isvector(color) then return end
@@ -450,8 +454,11 @@ function ENT:Initialize()
             -- ForceApplyAppearance is player-oriented in some Z-City builds;
             -- explicitly replicate the chosen accessory list so every spawned
             -- NextBot has its own stable data instead of relying on renderer state.
-            if isfunction(self.SetNetVar) and appearance.AAttachments ~= nil then
-                pcall(self.SetNetVar, self, "Accessories", table.Copy(appearance.AAttachments))
+            if isfunction(self.SetNetVar) then
+                -- Publish a per-NPC accessory payload even when the appearance
+                -- has no attachments; never let a previous spawn's value leak
+                -- through a shared appearance/netvar cache.
+                pcall(self.SetNetVar, self, "Accessories", table.Copy(appearance.AAttachments or {}))
             end
         end
         self.BZCNClassProfile.Model = self:GetModel()
