@@ -80,6 +80,22 @@ local function IsAlive(ent)
     return IsValid(ent) and ent:Health() > 0
 end
 
+-- Appearance/animation addons can call SetNoDraw(false) while the living
+-- NextBot is represented by its physical ragdoll. Reassert the hidden-owner
+-- invariant while downed; otherwise the upright source entity renders as a
+-- standing duplicate beside the real ragdoll. Recovery restores the saved
+-- draw state through Recover().
+hook.Add("Think", "BZCNNPCSupport_HideDownedOwner", function()
+    for owner, state in pairs(tracked) do
+        if not IsValid(owner) then
+            tracked[owner] = nil
+        elseif state and state.downed and IsValid(owner.BZCNNPCRagdoll)
+            and owner:Health() > 0 and not owner:GetNoDraw() then
+            owner:SetNoDraw(true)
+        end
+    end
+end)
+
 local function IsAssimilationLocked(ent)
     -- Assimilation locking is NPC-only. Never let a stale custom field on a
     -- real player suppress a native player knockdown/get-up operation.
