@@ -760,9 +760,24 @@ local function UpdateVehicleAI(vehicle, now)
         toInterest.z = 0
         if toInterest:LengthSqr() < 260 * 260 then
             -- Stop beside the interested person; don't block them or pull into
-            -- their exact position. A managed civilian may then board freely.
+            -- their exact position. A managed civilian may board automatically.
+            -- Players get a short, visible boarding window but are never forced
+            -- into the car; the normal vehicle-use interaction remains theirs.
             SetControls(vehicle, 0, 0, 0.85)
-            if not interest:IsPlayer() and not interest.BZCNGlideVehicle then
+            if interest:IsPlayer() then
+                if interest:GetVehicle() == vehicle then
+                    vehicle.BZCNGlideAIInterestTarget = nil
+                    vehicle.BZCNGlideAIInterestUntil = nil
+                    vehicle.BZCNGlideAIPickupWaitUntil = nil
+                    vehicle.BZCNGlideAITarget = nil
+                    vehicle.BZCNGlideAINextTargetAt = now + math.Rand(2.0, 3.5)
+                    return
+                end
+                vehicle.BZCNGlideAIPickupWaitUntil = vehicle.BZCNGlideAIPickupWaitUntil
+                    or (now + 6)
+                if now < vehicle.BZCNGlideAIPickupWaitUntil then return end
+                vehicle.BZCNGlideAIPickupWaitUntil = nil
+            elseif not interest.BZCNGlideVehicle then
                 local freeSeat
                 for seatIndex = 2, #(vehicle.seats or {}) do
                     local seat = vehicle.seats[seatIndex]
