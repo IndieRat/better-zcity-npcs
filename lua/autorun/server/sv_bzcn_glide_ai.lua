@@ -67,11 +67,11 @@ local function GetDriverSeat(vehicle)
     return vehicle.seats[1]
 end
 
--- Glide's chassis model axis is opposite its actual driving direction.
--- Keep the inverse axis consistently for AI steering and signed speed checks.
+-- Glide computes forwardSpeed from the chassis-local +X velocity component.
+-- Use the same +X axis for steering, obstacle traces and signed speed checks.
 local function GetDrivingForward(vehicle)
     if not IsValid(vehicle) then return vector_origin end
-    local forward = -vehicle:GetForward()
+    local forward = vehicle:GetForward()
     forward.z = 0
     if forward:LengthSqr() > 0.01 then forward:Normalize() end
     return forward
@@ -492,7 +492,17 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
     if not IsValid(vehicle) then return end
     SetControls(vehicle, 0, 0, 1)
     local driver = vehicle.BZCNAIDriver
-    if IsValid(driver) then UnseatNPC(driver, reason or "vehicle_release", keepDowned == true) end
+    if IsValid(driver) then
+        UnseatNPC(driver, reason or "vehicle_release", keepDowned == true)
+        -- A completed, parked, or interrupted drive is one finished task.
+        -- Do not immediately re-claim another car from the same stale task lease.
+        if driver.BZCNCurrentTask == "drive" then
+            driver.BZCNCurrentTask = "hold"
+            driver.BZCNTaskUntil = CurTime() + math.Rand(8, 14)
+            if driver.SetNW2String then driver:SetNW2String("BZCNCurrentTask", "hold") end
+            hook.Run("BZCN_NPCTaskSelected", driver, "hold", ClassInfo(driver).faction)
+        end
+    end
     for _, passenger in ipairs(vehicle.BZCNAIPassengers or {}) do
         if IsValid(passenger) then UnseatNPC(passenger, reason or "vehicle_release", keepDowned == true) end
     end
@@ -608,6 +618,7 @@ end
 local function FindDriverForVehicle(vehicle)
     local best, bestScore
     for _, npc in ipairs(ents.FindInSphere(vehicle:GetPos(), CLAIM_RADIUS)) do
+        if npc.BZCNCurrentTask ~= "drive" or (npc.BZCNTaskUntil or 0) <= CurTime() then continue end
         if not CanDrive(npc) or npc.BZCNGlideVehicle or (npc.BZCNGlideExitAt or 0) > CurTime() then continue end
         local info = ClassInfo(npc)
         if not info.civilian and not info.combat then continue end
@@ -624,6 +635,7 @@ end
 local function BeginVehicleAI(vehicle, driver)
     local seat = GetDriverSeat(vehicle)
     if not IsCar(vehicle) or not IsValid(driver) or not IsSeatFree(seat) then return false end
+    if driver.BZCNCurrentTask ~= "drive" or (driver.BZCNTaskUntil or 0) <= CurTime() then return false end
     local info = ClassInfo(driver)
     if not info.civilian and not info.combat then return false end
     if not SeatNPC(driver, vehicle, seat, "driver") then return false end
@@ -653,6 +665,11 @@ end
 
 local function UpdateVehicleAI(vehicle, now)
     local driver = vehicle.BZCNAIDriver
+    if IsValid(driver) and (driver.BZCNCurrentTask ~= "drive"
+        or (driver.BZCNTaskUntil or 0) <= now) then
+        ReleaseVehicle(vehicle, "drive_task_finished")
+        return
+    end
     if not IsValid(driver) or not CanDrive(driver) or driver.BZCNGlideVehicle ~= vehicle
         or not IsValid(vehicle.seats[1]) then
         ReleaseVehicle(vehicle, "driver_invalid")
@@ -1053,6 +1070,31 @@ hook.Add("PlayerLeaveVehicle", "BZCN_GlidePlayerPickupLeave", function(ply, vehi
         vehicle.BZCNPlayerPickupPassengers = nil
     end)
 end)
+
+function AI.RequestDrive(driver)
+    if not IsManaged(driver) or driver.BZCNCurrentTask ~= "drive"
+        or (driver.BZCNTaskUntil or 0) <= CurTime() then return false end
+
+    if IsValid(driver.BZCNGlideVehicle) then
+        return driver.BZCNGlideVehicle.BZCNAIDriver == driver
+    end
+
+    local best, bestDistance
+    local limit = CLAIM_RADIUS * CLAIM_RADIUS
+    for _, vehicle in ipairs(ents.FindInSphere(driver:GetPos(), CLAIM_RADIUS)) do
+        if not IsCar(vehicle) or IsValid(vehicle.BZCNAIDriver)
+            or IsValid(vehicle:GetDriver()) then continue end
+        local seat = GetDriverSeat(vehicle)
+        if not IsSeatFree(seat) then continue end
+
+        local distance = driver:GetPos():DistToSqr(vehicle:GetPos())
+        if distance <= limit and (not bestDistance or distance < bestDistance) then
+            best, bestDistance = vehicle, distance
+        end
+    end
+
+    return IsValid(best) and BeginVehicleAI(best, driver) or false
+end
 
 function AI.GetVehicle(ent)
     return IsValid(ent) and ent.BZCNGlideVehicle or nil
