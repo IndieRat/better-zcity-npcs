@@ -376,10 +376,24 @@ local function RunNativeWeaponAnimation(ent, weapon, definition)
     -- individually so one missing Player-only field cannot suppress all posing.
     local class = weapon:GetClass()
     if IsHomigradWeaponClass(class) then
-        SafeWeaponCall(weapon, "AnimHold")
-        SafeWeaponCall(weapon, "AnimApply_ShootRecoil",
+        local owner = weapon:GetOwner()
+        local oldPosture = owner.posture
+        local oldWeight = weapon.weight
+        local oldIsNPC = owner.IsNPC
+        -- Some base methods query these values as if the owner were a player.
+        -- Supply harmless defaults only while each native method executes.
+        if owner.posture == nil then owner.posture = 0 end
+        if weapon.weight == nil then weapon.weight = 5 end
+        local function restore()
+            owner.posture = oldPosture
+            weapon.weight = oldWeight
+            owner.IsNPC = oldIsNPC
+        end
+        local okHold = SafeWeaponCall(weapon, "AnimHold")
+        local okRecoil = SafeWeaponCall(weapon, "AnimApply_ShootRecoil",
             isfunction(weapon.LastShootTime) and weapon:LastShootTime() or 0)
-        SafeWeaponCall(weapon, "AnimZoom")
+        local okZoom = SafeWeaponCall(weapon, "AnimZoom")
+        restore()
     else
         SafeWeaponCall(weapon, "Animation", ent)
     end
