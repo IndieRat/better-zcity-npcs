@@ -238,9 +238,13 @@ function FakeActor:RefreshPhysiology()
     end
 
     local crawlDelay = math.Clamp(tonumber(self.config.autoCrawlDelay) or 1.45, 0.65, 3.0)
-    local wantsCrawl = injury.crawling == true
+    -- Z-City's crawling flag can survive a posture transition. Treat it as a
+    -- request, not permission to crawl while supine: the hand-pull controller
+    -- assumes the chest faces the floor and otherwise drags the body sideways.
+    local faceDown = self:IsFaceDown()
+    local wantsCrawl = faceDown and (injury.crawling == true
         or (downed and canCrawl and self.posture == "crawl"
-            and (now - (self.downSince or now)) >= crawlDelay)
+            and (now - (self.downSince or now)) >= crawlDelay))
     self.autoCrawl = wantsCrawl and canCrawl or false
 
     -- Pounce is a short flight posture, not a permanent mode. Once its window
@@ -561,6 +565,7 @@ function FakeActor:UpdateCrawl(dt)
             self.crawlGrip.constraint:Remove()
         end
         self.crawlGrip = nil
+        self.autoCrawl = false
         -- A supine body should not be forcibly rolled into a seated pose.
         self.mode = "loose"
         self.posture = "rest"
