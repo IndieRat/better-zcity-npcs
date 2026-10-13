@@ -455,6 +455,13 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
     vehicle.BZCNGlideAINextAvoidAt = nil
     vehicle.BZCNGlideAINextThink = nil
     vehicle.BZCNGlideAIMode = nil
+    vehicle.BZCNGlideAIBeganAt = nil
+    vehicle.BZCNGlideAIParkAt = nil
+    vehicle.BZCNGlideAIParkWaitUntil = nil
+    vehicle.BZCNGlideAIInterestTarget = nil
+    vehicle.BZCNGlideAIInterestUntil = nil
+    vehicle.BZCNVehicleOwner = nil
+    if vehicle.SetNW2Entity then vehicle:SetNW2Entity("BZCNVehicleOwner", NULL) end
     vehicle.BZCNGlideAIPreviousVelocity = nil
     vehicle.BZCNGlideAIPreviousVelocityAt = nil
 end
@@ -578,7 +585,12 @@ local function BeginVehicleAI(vehicle, driver)
     vehicle.BZCNAIDriver = driver
     vehicle.BZCNGlideAIMode = info.combat and "combat" or "wander"
     vehicle.BZCNGlideAITarget = nil
+    vehicle.BZCNGlideAIBeganAt = CurTime()
     vehicle.BZCNGlideAINextTargetAt = 0
+    vehicle.BZCNGlideAIParkAt = not info.combat and (CurTime() + math.Rand(38, 72)) or nil
+    vehicle.BZCNGlideAIParkWaitUntil = nil
+    vehicle.BZCNGlideAIInterestTarget = nil
+    vehicle.BZCNGlideAIInterestUntil = nil
     vehicle.BZCNGlideAINextAvoidAt = 0
     vehicle.BZCNGlideAINextThink = 0
     vehicle.BZCNGlideAIPreviousVelocity = vehicle:GetVelocity()
@@ -627,6 +639,32 @@ local function UpdateVehicleAI(vehicle, now)
     vehicle.BZCNGlideAINextThink = now + THINK_INTERVAL
 
     local info = ClassInfo(driver)
+
+    -- Human drivers occasionally make a social stop. A positive phrase from a
+    -- nearby player or a civilian who has already shown interest gives the AI
+    -- a short-lived target; it approaches slowly and never forces a player into
+    -- a seat. Players can use the normal vehicle interaction to board.
+    local interest = vehicle.BZCNGlideAIInterestTarget
+    if not IsValid(interest) or (vehicle.BZCNGlideAIInterestUntil or 0) <= now
+        or interest:Health() <= 0 then
+        interest = nil
+        vehicle.BZCNGlideAIInterestTarget = nil
+        vehicle.BZCNGlideAIInterestUntil = nil
+    end
+    if not info.combat and not interest then
+        for _, candidate in ipairs(ents.FindInSphere(vehicle:GetPos(), 850)) do
+            if candidate ~= driver and IsManaged(candidate)
+                and candidate.BZCNHumanInterestTarget == driver
+                and (candidate.BZCNHumanInterestUntil or 0) > now
+                and not IsHostile(driver, candidate) then
+                interest = candidate
+                vehicle.BZCNGlideAIInterestTarget = candidate
+                vehicle.BZCNGlideAIInterestUntil = now + 12
+                break
+            end
+        end
+    end
+
     local target
     local targetAhead = false
     if info.combat then target = FindCombatTarget(driver, 2200) end
@@ -668,18 +706,73 @@ local function UpdateVehicleAI(vehicle, now)
     vehicle.BZCNGlideAIPreviousVelocityAt = now
 
     local goal = vehicle.BZCNGlideAITarget
+    local parkMode = not info.combat and vehicle.BZCNGlideAIMode == "park_approach"
+    if interest and not info.combat then
+        local toInterest = interest:WorldSpaceCenter() - vehicle:GetPos()
+        toInterest.z = 0
+        if toInterest:LengthSqr() < 260 * 260 then
+            -- Stop beside the interested person; don't block them or pull into
+            -- their exact position. A managed civilian may then board freely.
+            SetControls(vehicle, 0, 0, 0.85)
+            if not interest:IsPlayer() and not interest.BZCNGlideVehicle then
+                local freeSeat
+                for seatIndex = 2, #(vehicle.seats or {}) do
+                    local seat = vehicle.seats[seatIndex]
+                    if IsValid(seat) and IsSeatFree(seat) then freeSeat = seat break end
+                end
+                if IsValid(freeSeat) and SeatNPC(interest, vehicle, freeSeat, "passenger") then
+                    vehicle.BZCNAIPassengers = vehicle.BZCNAIPassengers or {}
+                    vehicle.BZCNAIPassengers[#vehicle.BZCNAIPassengers + 1] = interest
+                    interest.BZCNHumanInterestTarget = nil
+                    interest.BZCNHumanInterestUntil = nil
+                end
+            end
+            vehicle.BZCNGlideAIInterestTarget = nil
+            vehicle.BZCNGlideAIInterestUntil = nil
+            vehicle.BZCNGlideAITarget = nil
+            vehicle.BZCNGlideAINextTargetAt = now + math.Rand(2.0, 3.5)
+            vehicle.BZCNGlideAIParkAt = math.max(vehicle.BZCNGlideAIParkAt or 0, now + 25)
+            return
+        end
+        if not isvector(goal) or now >= (vehicle.BZCNGlideAINextTargetAt or 0)
+            or vehicle:GetPos():DistToSqr(goal) < 240 * 240 then
+            local direction = interest:GetPos() - vehicle:GetPos()
+            direction.z = 0
+            if direction:LengthSqr() > 1 then direction:Normalize() end
+            local side = Vector(-direction.y, direction.x, 0)
+            goal = interest:GetPos() - direction * 190 + side * (math.random(2) == 1 and 110 or -110)
+            vehicle.BZCNGlideAITarget = goal
+            vehicle.BZCNGlideAINextTargetAt = now + 2.5
+        end
+    elseif not info.combat and not parkMode and (vehicle.BZCNGlideAIParkAt or math.huge) <= now then
+        vehicle.BZCNGlideAIMode = "park_approach"
+        parkMode = true
+        goal = FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
+        vehicle.BZCNGlideAITarget = goal
+        vehicle.BZCNGlideAINextTargetAt = now + 20
+    elseif parkMode and isvector(goal) and vehicle:GetPos():DistToSqr(goal) < 220 * 220 then
+        SetControls(vehicle, 0, 0, 1)
+        vehicle.BZCNGlideAIParkWaitUntil = vehicle.BZCNGlideAIParkWaitUntil or (now + math.Rand(2.5, 5.0))
+        if now >= vehicle.BZCNGlideAIParkWaitUntil then
+            -- Parking is a complete behavior: release the NPC crew, let them
+            -- stand up, and leave the parked vehicle available to players.
+            ReleaseVehicle(vehicle, "npc_parked_and_left")
+        end
+        return
+    end
+
     if not isvector(goal) or now >= (vehicle.BZCNGlideAINextTargetAt or 0)
         or vehicle:GetPos():DistToSqr(goal) < 220 * 220 then
         if vehicle.BZCNGlideAIMode == "combat" and IsValid(target) and targetAhead then
             goal = target:GetPos()
+        elseif parkMode then
+            goal = FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
         else
             goal = FindNavPoint(vehicle, 650, 2200)
-            if not isvector(goal) then
-                goal = FindWanderGoal(vehicle)
-            end
+            if not isvector(goal) then goal = FindWanderGoal(vehicle) end
         end
         vehicle.BZCNGlideAITarget = goal
-        vehicle.BZCNGlideAINextTargetAt = now + math.Rand(5, 10)
+        vehicle.BZCNGlideAINextTargetAt = now + (parkMode and math.Rand(8, 13) or math.Rand(5, 10))
     end
 
     local direction = goal - vehicle:GetPos()
@@ -699,7 +792,9 @@ local function UpdateVehicleAI(vehicle, now)
     local steerGain = alignment < -0.15 and 1.15 or 1.65
     local steer = math.Clamp(lateral * steerGain, -1, 1)
     local combat = vehicle.BZCNGlideAIMode == "combat"
-    local desiredSpeed = combat and COMBAT_SPEED or CIVILIAN_SPEED
+    local socialApproach = IsValid(interest) and not combat
+    local parkingApproach = vehicle.BZCNGlideAIMode == "park_approach" and not combat
+    local desiredSpeed = combat and COMBAT_SPEED or (socialApproach and 145 or parkingApproach and 165 or CIVILIAN_SPEED)
 
     -- Civilians brake and wait whenever the road ahead is occupied. Combat
     -- drivers pursue hostile targets, but still avoid pedestrians and friendlies.
