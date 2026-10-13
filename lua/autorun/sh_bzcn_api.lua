@@ -1379,6 +1379,10 @@ function BZCN.ChangeClass(ent, className, heal)
 end
 function BZCN.GiveWeapon(ent, weaponClass)
     if not IsValid(ent) or not isstring(weaponClass) or weaponClass == "" then return false end
+    weaponClass = BZCN.ResolveInventoryWeaponAlias(weaponClass) or weaponClass
+    if not (weaponClass == "hg_sling" or weaponClass == "hg_brassknuckles"
+        or weaponClass == "hg_flashlight" or (weapons and weapons.GetStored
+            and istable(weapons.GetStored(weaponClass)))) then return false end
     local inventory = ent:GetNetVar("Inventory", {Weapons = {}, Items = {}, Armor = {}})
     inventory.Weapons = inventory.Weapons or {}
     inventory.Weapons[weaponClass] = true
@@ -1393,7 +1397,8 @@ function BZCN.GiveWeapon(ent, weaponClass)
 end
 
 function BZCN.SelectWeapon(ent, weaponClass)
-    if not IsValid(ent) then return false end
+    if not IsValid(ent) or not isstring(weaponClass) then return false end
+    weaponClass = BZCN.ResolveInventoryWeaponAlias(weaponClass) or weaponClass
     local inventory = ent:GetNetVar("Inventory", {})
     if not istable(inventory.Weapons) or inventory.Weapons[weaponClass] == nil then return false end
     ent.BZCN_SelectedWeapon = weaponClass
