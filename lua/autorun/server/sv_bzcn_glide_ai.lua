@@ -460,8 +460,6 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
     vehicle.BZCNGlideAIParkWaitUntil = nil
     vehicle.BZCNGlideAIInterestTarget = nil
     vehicle.BZCNGlideAIInterestUntil = nil
-    vehicle.BZCNVehicleOwner = nil
-    if vehicle.SetNW2Entity then vehicle:SetNW2Entity("BZCNVehicleOwner", NULL) end
     vehicle.BZCNGlideAIPreviousVelocity = nil
     vehicle.BZCNGlideAIPreviousVelocityAt = nil
 end
@@ -906,6 +904,52 @@ hook.Add("BZCN_NPCMovementStateChanged", "BZCN_GlideExitOnDowned", function(ent,
         else
             UnseatNPC(ent, "passenger_incapacitated")
         end
+    end
+end)
+
+-- Ownership is a persistent social tag, not the current driver's seat
+-- occupant. The first player who enters an unclaimed vehicle becomes its owner;
+-- later passengers/drivers do not silently steal that relationship.
+local function SetVehicleOwner(vehicle, owner)
+    if not IsValid(vehicle) or not IsValid(owner) or not owner:IsPlayer() then return false end
+    if IsValid(vehicle.BZCNVehicleOwner) then return vehicle.BZCNVehicleOwner == owner end
+    vehicle.BZCNVehicleOwner = owner
+    if vehicle.SetNW2Entity then vehicle:SetNW2Entity("BZCNVehicleOwner", owner) end
+    hook.Run("BZCN_VehicleOwnerAssigned", vehicle, owner)
+    return true
+end
+
+hook.Add("PlayerEnteredVehicle", "BZCN_GlideVehicleOwnership", function(ply, vehicle)
+    if not IsValid(ply) or not IsValid(vehicle) then return end
+    SetVehicleOwner(vehicle, ply)
+end)
+
+hook.Add("BZCN_PlayerPhrase", "BZCN_GlidePositivePickupCall", function(ply, signal, soundPath)
+    if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return end
+    local vehicle = ply:GetVehicle()
+    if not IsValid(vehicle) then return end
+    local phrase = string.lower(tostring(signal or "") .. " " .. tostring(soundPath or ""))
+    local positive = string.find(phrase, "satisfied", 1, true)
+        or string.find(phrase, "cheer", 1, true)
+        or string.find(phrase, "greet", 1, true)
+        or string.find(phrase, "question", 1, true)
+        or string.find(phrase, "squad_affirm", 1, true)
+        or string.find(phrase, "agree", 1, true)
+        or string.find(phrase, "/hi", 1, true)
+    if not positive then return end
+
+    -- A friendly call from a player in a car is a social invitation, not a
+    -- command to commandeer their vehicle. Nearby civilian drivers may pull
+    -- over beside them; boarding remains the player's choice.
+    for _, otherVehicle in ipairs(ents.FindInSphere(vehicle:GetPos(), 900)) do
+        if otherVehicle == vehicle or not IsCar(otherVehicle)
+            or not IsValid(otherVehicle.BZCNAIDriver) then continue end
+        local driver = otherVehicle.BZCNAIDriver
+        if ClassInfo(driver).combat then continue end
+        otherVehicle.BZCNGlideAIInterestTarget = ply
+        otherVehicle.BZCNGlideAIInterestUntil = CurTime() + 12
+        otherVehicle.BZCNGlideAITarget = nil
+        otherVehicle.BZCNGlideAINextTargetAt = 0
     end
 end)
 
