@@ -541,7 +541,7 @@ function TOOL.BuildCPanel(panel)
 
     panel:Help("Choose a live ammo family below to add a pool alias, or enter an exact SWEP class.")
     local familyPicker = panel:ComboBox("Weapon pool / ammo family", "bzcn_inventory_giver_weapon_pool_picker")
-    local familyChoices, poolCounts = {}, {}
+    local poolCounts = {}
     if weapons and weapons.GetList and weapons.GetStored then
         for _, listed in ipairs(weapons.GetList() or {}) do
             local class = istable(listed) and (listed.ClassName or listed.Class or listed.Classname) or nil
@@ -561,10 +561,8 @@ function TOOL.BuildCPanel(panel)
     for _, ammo in ipairs(ammoNames) do
         local alias = "Ammo:" .. ammo
         familyPicker:AddChoice("Ammo family: " .. ammo .. " (" .. poolCounts[ammo] .. " weapons)", alias)
-        familyChoices[alias] = true
     end
     familyPicker:AddChoice("Pistol family: 9mm", "Pistol:9mm")
-    familyChoices["Pistol:9mm"] = true
     local selectedAlias
     familyPicker.OnSelect = function(_, _, value, data) selectedAlias = isstring(data) and data or value end
     local appendAlias = vgui.Create("DButton", panel)
