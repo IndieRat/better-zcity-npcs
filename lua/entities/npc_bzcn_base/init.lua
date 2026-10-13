@@ -1806,7 +1806,25 @@ function ENT:ChaseEnemy(target)
         local gettingUp = hg and hg.BZCNNPCSupport and hg.BZCNNPCSupport.IsGettingUp
             and hg.BZCNNPCSupport.IsGettingUp(self)
         local swimming = UpdateSwimState(self)
-        if downed or gettingUp then
+        if downed then
+            self.loco:SetDesiredSpeed(0)
+
+            -- A conscious, armed NPC may keep fighting from its fake body.
+            -- Do not run pathing/stand-up logic while downed: just refresh the
+            -- same target solution and let FakeActor pose the weapon arms.
+            local canFightDowned = hasRangedWeapon and not gettingUp
+                and not (BZCNCombatActor and BZCNCombatActor.IsIncapacitated
+                    and BZCNCombatActor.IsIncapacitated(self))
+            if canFightDowned and visible then
+                self.BZCNEnemy = target
+                self:AttackTarget(target)
+                coroutine.wait(0.1)
+                continue
+            end
+
+            coroutine.wait(0.1)
+            return
+        elseif gettingUp then
             self.loco:SetDesiredSpeed(0)
             coroutine.wait(0.1)
             return
