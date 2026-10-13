@@ -361,10 +361,28 @@ local function CanUseSocialEmote(ent)
         and not istable(ent.BZCNFurryGrab)
 end
 
+local function IsKnownCivilianKiller(ent)
+    return IsValid(ent) and (tonumber(ent.BZCNCivilianKillerUntil) or 0) > CurTime()
+end
+
 local function FleeFromFurry(civilian, furry)
-    if not IsCivilianNPC(civilian) or not IsFurryThreat(furry)
+    local criminalThreat = IsKnownCivilianKiller(furry)
+    if not IsCivilianNPC(civilian) or (not IsFurryThreat(furry) and not criminalThreat)
         or civilian == furry or not CanUseSocialEmote(civilian) then return false end
     if civilian.BZCNFleeUntil and civilian.BZCNFleeUntil > CurTime() then return true end
+
+    -- Murder witnesses do not investigate or become curious: they immediately
+    -- flee and can pass that panic to nearby civilians.
+    if criminalThreat then
+        civilian.BZCNFleeThreat = furry
+        civilian.BZCNFleeUntil = CurTime() + math.Rand(6, 10)
+        civilian.BZCNFleeNextCallout = CurTime() + 1
+        civilian.BZCNNextSocialReactionAt = CurTime() + 2
+        PlayNPCGesture(civilian, "disagree")
+        PlayNPCPhrase(civilian, "answer", "Scared")
+        hook.Run("BZCN_CivilianPanickedByMurder", civilian, furry)
+        return true
+    end
     if civilian.BZCNCuriousUntil and civilian.BZCNCuriousUntil > CurTime() then return true end
 
     if civilian.BZCNCuriosity == nil then civilian.BZCNCuriosity = math.random(1, 4) == 1 end
@@ -663,6 +681,7 @@ end)
 BZCN.Social = BZCN.Social or {}
 BZCN.Social.PlayGesture = PlayNPCGesture
 BZCN.Social.PlayPhrase = PlayNPCPhrase
+BZCN.Social.PanicFromThreat = FleeFromFurry
 
 local function ResolveManagedNPCTarget(target)
     if IsManagedNPC(target) then return target end
@@ -757,7 +776,8 @@ timer.Create("BZCN_CivilianPanicSpread", 0.7, 0, function()
     for _, source in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if not IsCivilianNPC(source) or not IsValid(source.BZCNFleeThreat)
             or (source.BZCNFleeUntil or 0) <= now
-            or not IsFurryThreat(source.BZCNFleeThreat)
+            or (not IsFurryThreat(source.BZCNFleeThreat)
+                and not IsKnownCivilianKiller(source.BZCNFleeThreat))
             or now < (source.BZCNNextPanicSpreadAt or 0) then continue end
 
         source.BZCNNextPanicSpreadAt = now + math.Rand(0.8, 1.6)
