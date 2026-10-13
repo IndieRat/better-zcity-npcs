@@ -1016,6 +1016,44 @@ hook.Add("BZCN_PlayerPhrase", "BZCN_GlidePositivePickupCall", function(ply, sign
         otherVehicle.BZCNGlideAITarget = nil
         otherVehicle.BZCNGlideAINextTargetAt = 0
     end
+
+    -- A friendly call from a player already driving can invite a nearby human
+    -- NPC into an open passenger seat. Only board when physically close and
+    -- socially safe; never teleport a distant NPC or force the player to stop.
+    local freeSeat
+    for seatIndex = 2, #(vehicle.seats or {}) do
+        local seat = vehicle.seats[seatIndex]
+        if IsValid(seat) and IsSeatFree(seat) then freeSeat = seat break end
+    end
+    if not IsValid(freeSeat) then return end
+    for _, npc in ipairs(ents.FindInSphere(vehicle:GetPos(), 260)) do
+        if not IsManaged(npc) or npc.BZCNGlideVehicle or not CanDrive(npc)
+            or IsHostile(npc, ply) then continue end
+        local info = ClassInfo(npc)
+        if not info.civilian then continue end
+        if SeatNPC(npc, vehicle, freeSeat, "passenger") then
+            vehicle.BZCNAIPassengers = vehicle.BZCNAIPassengers or {}
+            vehicle.BZCNAIPassengers[#vehicle.BZCNAIPassengers + 1] = npc
+            vehicle.BZCNPlayerPickupPassengers = true
+            npc.BZCNHumanInterestTarget = nil
+            npc.BZCNHumanInterestUntil = nil
+            break
+        end
+    end
+end)
+
+hook.Add("PlayerLeaveVehicle", "BZCN_GlidePlayerPickupLeave", function(ply, vehicle)
+    if not IsValid(vehicle) or vehicle.BZCNPlayerPickupPassengers ~= true then return end
+    timer.Simple(0.15, function()
+        if not IsValid(vehicle) then return end
+        local driver = vehicle.GetDriver and vehicle:GetDriver() or nil
+        if IsValid(driver) and driver:IsPlayer() then return end
+        for _, passenger in ipairs(vehicle.BZCNAIPassengers or {}) do
+            if IsValid(passenger) then UnseatNPC(passenger, "player_left_vehicle") end
+        end
+        vehicle.BZCNAIPassengers = {}
+        vehicle.BZCNPlayerPickupPassengers = nil
+    end)
 end)
 
 function AI.GetVehicle(ent)
