@@ -7,17 +7,58 @@ local function GetProfile(self)
         or {Name = "ZCity NPC", Health = 100, Speed = 175, Faction = "civilian", Ranged = false}
 end
 
-local function HasSenseRecord(self, target, requireHostile)
-    if not BZCN or not BZCN.GetLastAdapterContext then return true end
-    local context = BZCN.GetLastAdapterContext(self)
-    local sense = context and context.sense
-    if not sense then return false end
-    for _, record in ipairs(sense.Targets or {}) do
-        if record.Entity == target then
-            return not requireHostile or record.Hostile == true
-        end
+local function HasDirectTargetSight(self, target)
+    if not IsValid(self) or not IsValid(target) then return false end
+    local source = isfunction(self.EyePos) and self:EyePos() or self:WorldSpaceCenter()
+    local destination = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
+        and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+    if not isvector(source) or not isvector(destination) then return false end
+
+    local filter = {self}
+    if IsValid(self.BZCNHeldWeaponProxy) then filter[#filter + 1] = self.BZCNHeldWeaponProxy end
+    if IsValid(self.BZCNNPCRagdoll) then filter[#filter + 1] = self.BZCNNPCRagdoll end
+    local trace = util.TraceLine({
+        start = source,
+        endpos = destination,
+        filter = filter,
+        mask = MASK_SHOT
+    })
+    if not trace.Hit or trace.Entity == target then return true end
+    if IsValid(trace.Entity) and BZCNCombatActor and isfunction(BZCNCombatActor.ResolveTarget) then
+        local ok, resolved = pcall(BZCNCombatActor.ResolveTarget, trace.Entity)
+        if ok and resolved == target then return true end
+    end
+    if IsValid(trace.Entity) and hg and isfunction(hg.RagdollOwner) then
+        local ok, owner = pcall(hg.RagdollOwner, trace.Entity)
+        if ok and owner == target then return true end
     end
     return false
+end
+
+local function HasSenseRecord(self, target, requireHostile)
+    if not IsValid(self) or not IsValid(target) then return false end
+    local context = BZCN and BZCN.GetLastAdapterContext and BZCN.GetLastAdapterContext(self) or nil
+    local sense = context and context.sense
+    if sense then
+        for _, record in ipairs(sense.Targets or {}) do
+            if record.Entity == target then
+                if not requireHostile or record.Hostile == true then return true end
+                -- Some adapter builds mislabel or omit hostility for scripted
+                -- NextBots. Never override faction rules; only supplement a
+                -- visible record with the NPC's own current enemy test.
+                return HasDirectTargetSight(self, target)
+                    and isfunction(self.IsBZCNEnemy) and self:IsBZCNEnemy(target)
+            end
+        end
+    end
+
+    -- Scripted combatants may not land in Z-City's Player-only sense table at
+    -- all. Use a throttled LOS check as a fallback so ranged Rebels/Combine can
+    -- complete an engagement rather than chase forever without ever firing.
+    local visible = HasDirectTargetSight(self, target)
+    if not visible then return false end
+    return not requireHostile
+        or (isfunction(self.IsBZCNEnemy) and self:IsBZCNEnemy(target))
 end
 
 local function GetWaterSurfacePosition(self)
