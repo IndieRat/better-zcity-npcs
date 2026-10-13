@@ -368,28 +368,43 @@ function Actor.GetFireDelay(owner, weapon)
     return math.Clamp(delay, 0.12, 1.8)
 end
 
--- A target that is already incapacitated is no longer a combat target. Keep
--- this centralized so aiming, firing, and the NextBot's target selector agree.
+-- Combat incapacity is not the same as being physically downed.
+-- Z-City players and our managed NPCs can remain conscious in fake-ragdoll,
+-- crawl, or near-death states and may still aim/fire with their arms.
 function Actor.IsIncapacitated(target)
     if not IsValidEntity(target) or target:Health() <= 0 then return true end
     if target.IsPlayer and target:IsPlayer() and target.Alive and not target:Alive() then return true end
 
-    local nwFlags = {"BZCNNPCDowned", "BZCNNPCGettingUp", "IsDowned", "Downed", "KnockedDown", "IsKnockedDown"}
-    for _, key in ipairs(nwFlags) do
+    -- Only explicit unconscious/dead/recovery-lock flags count here. In
+    -- particular, BZCNNPCDowned and generic "Downed" flags describe posture,
+    -- not whether the character can still fight.
+    local unconsciousFlags = {
+        "BZCNNPCUnconscious", "BZCNNPCIncapacitated",
+        "Unconscious", "IsUnconscious", "Incapacitated",
+        "IsIncapacitated", "KnockedOut", "IsKnockedOut",
+        "BZCNNPCGettingUpLocked"
+    }
+    for _, key in ipairs(unconsciousFlags) do
         if target.GetNW2Bool and target:GetNW2Bool(key, false) then return true end
         if target.GetNWBool and target:GetNWBool(key, false) then return true end
     end
 
     local state = target.BZCNNPCOrg or target.BZCN_Organism or target.organism
-    if istable(state) and (state.downed == true or state.gettingUp == true
-        or state.incapacitated == true or state.unconscious == true
-        or state.otrub == true or state.needotrub == true) then
-        return true
+    if istable(state) then
+        if state.dead == true or state.incapacitated == true or state.unconscious == true
+            or state.otrub == true or state.needotrub == true then
+            return true
+        end
+
+        -- Z-City organism consciousness is numeric; low health, blood loss,
+        -- pain, shock, or fake-ragdoll posture alone must not disable combat.
+        local consciousness = tonumber(state.consciousness)
+        if consciousness and consciousness <= 0.05 then return true end
     end
 
     local support = hg and hg.BZCNNPCSupport
     if support then
-        for _, method in ipairs({"IsDowned", "IsGettingUp"}) do
+        for _, method in ipairs({"IsUnconscious", "IsIncapacitated"}) do
             if isfunction(support[method]) then
                 local ok, result = pcall(support[method], target)
                 if ok and result == true then return true end
