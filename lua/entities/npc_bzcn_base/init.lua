@@ -803,6 +803,70 @@ function ENT:FindEnemy()
         end
     end
 
+    -- Some Z-City builds omit scripted NextBots from the adapter's Hostiles
+    -- list. Combat factions therefore get a throttled, line-of-sight scan as a
+    -- second acquisition path; this is not a wallhack and still checks faction.
+    local classKey = string.lower(tostring(self.BZCNClass or self.PlayerClassName or ""))
+    local isCombatSearcher = profile.Ranged == true
+        or classKey == "combine" or classKey == "rebel" or classKey == "metrocop"
+        or (IsValid(self.BZCNHostileOffender)
+            and (self.BZCNHostileOffenderUntil or 0) > CurTime())
+    if not IsValid(best) and isCombatSearcher
+        and CurTime() >= (self.BZCNNextDirectEnemyScan or 0) then
+        self.BZCNNextDirectEnemyScan = CurTime() + 0.3
+        local scanRadius = math.Clamp(math.max(
+            tonumber(self.LoseTargetDist) or 1400,
+            tonumber(profile.WeaponRange) or 900
+        ), 900, 2200)
+        local scanRadiusSqr = scanRadius * scanRadius
+        local eye = isfunction(self.EyePos) and self:EyePos() or self:WorldSpaceCenter()
+
+        local function HasDirectSight(candidate)
+            local point = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint)
+                and BZCNCombatActor.GetTargetAimPoint(candidate) or candidate:WorldSpaceCenter()
+            local trace = util.TraceLine({
+                start = eye,
+                endpos = point,
+                filter = {self, IsValid(self.BZCNHeldWeaponProxy) and self.BZCNHeldWeaponProxy or NULL},
+                mask = MASK_SHOT
+            })
+            if not trace.Hit or trace.Entity == candidate
+                or (IsValid(candidate.FakeRagdoll) and trace.Entity == candidate.FakeRagdoll)
+                or (IsValid(candidate.BZCNNPCRagdoll) and trace.Entity == candidate.BZCNNPCRagdoll) then
+                return true
+            end
+            if hg and isfunction(hg.RagdollOwner) and IsValid(trace.Entity) then
+                local ok, owner = pcall(hg.RagdollOwner, trace.Entity)
+                if ok and owner == candidate then return true end
+            end
+            return false
+        end
+
+        local offender = self.BZCNHostileOffender
+        if IsValid(offender) and (self.BZCNHostileOffenderUntil or 0) > CurTime()
+            and self:IsBZCNEnemy(offender)
+            and self:GetPos():DistToSqr(offender:GetPos()) <= scanRadiusSqr
+            and HasDirectSight(offender) then
+            best = offender
+            bestDistance = self:GetPos():DistToSqr(offender:GetPos())
+            priorityTarget = true
+        else
+            for _, candidate in ipairs(ents.FindInSphere(self:GetPos(), scanRadius)) do
+                if not IsValid(candidate) or candidate == self or candidate:Health() <= 0
+                    or (candidate:IsPlayer() and not candidate:Alive())
+                    or not (candidate:IsPlayer() or candidate:IsNPC() or BZCN.IsManaged(candidate))
+                    or not self:IsBZCNEnemy(candidate) then
+                    continue
+                end
+                local distance = self:GetPos():DistToSqr(candidate:GetPos())
+                if distance <= scanRadiusSqr and (not bestDistance or distance < bestDistance)
+                    and HasDirectSight(candidate) then
+                    best, bestDistance = candidate, distance
+                end
+            end
+        end
+    end
+
     -- An unseen squad target is only the fallback when this NPC has no
     -- immediate visible threat or higher-priority ally-defense target.
     if not IsValid(best) and IsValid(rememberedSquadTarget)
