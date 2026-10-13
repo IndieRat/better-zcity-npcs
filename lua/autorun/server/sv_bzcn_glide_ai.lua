@@ -88,7 +88,9 @@ local function SeatNPC(npc, vehicle, seat, role)
             moveType = npc:GetMoveType(),
             solid = npc:GetSolid(),
             collisionGroup = npc:GetCollisionGroup(),
-            noDraw = npc:GetNoDraw()
+            noDraw = npc:GetNoDraw(),
+            sequence = npc:GetSequence(),
+            cycle = npc:GetCycle()
         }
     end
     local localPos, localAng = SeatLocalPosition(vehicle, seat)
@@ -98,6 +100,16 @@ local function SeatNPC(npc, vehicle, seat, role)
     npc:SetMoveType(MOVETYPE_NONE)
     npc:SetSolid(SOLID_NONE)
     npc:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
+    -- Use a seated/driver loop when the model provides one; otherwise retain
+    -- its current sequence rather than forcing an invalid activity.
+    local sitSequence = npc:LookupSequence(role == "driver" and "drive_jeep" or "sit")
+    if not isnumber(sitSequence) or sitSequence < 0 then
+        sitSequence = npc:LookupSequence("sit_rollercoaster")
+    end
+    if isnumber(sitSequence) and sitSequence >= 0 then
+        npc:ResetSequence(sitSequence)
+        npc:SetCycle(0)
+    end
     npc:SetNW2Bool("BZCNGlideRiding", true)
     npc:SetNW2String("BZCNGlideSeatRole", role or "passenger")
     npc.BZCNGlideVehicle = vehicle
@@ -119,6 +131,10 @@ local function UnseatNPC(npc, reason)
         npc:SetSolid(saved.solid or SOLID_BBOX)
         npc:SetCollisionGroup(saved.collisionGroup or COLLISION_GROUP_NPC)
         npc:SetNoDraw(saved.noDraw or false)
+        if isnumber(saved.sequence) and saved.sequence >= 0 then
+            npc:ResetSequence(saved.sequence)
+            if isnumber(saved.cycle) then npc:SetCycle(saved.cycle) end
+        end
     end
     npc:SetNW2Bool("BZCNGlideRiding", false)
     npc:SetNW2String("BZCNGlideSeatRole", "")
@@ -313,6 +329,12 @@ local function UpdateVehicleAI(vehicle, now)
         return
     end
 
+    local seatDriver = vehicle.seats[1]:GetDriver()
+    if IsValid(seatDriver) and seatDriver ~= driver then
+        ReleaseVehicle(vehicle, "seat_taken_by_player")
+        return
+    end
+
     for i = #(vehicle.BZCNAIPassengers or {}), 1, -1 do
         local passenger = vehicle.BZCNAIPassengers[i]
         if not IsValid(passenger) or passenger.BZCNGlideVehicle ~= vehicle then
@@ -417,7 +439,14 @@ hook.Add("Think", "BZCN_GlideVehicleAI", function()
 end)
 
 hook.Add("EntityRemoved", "BZCN_GlideVehicleCleanup", function(ent)
-    if ent.BZCNAIDriver then ReleaseVehicle(ent, "vehicle_removed") end
+    -- EntityRemoved fires after the vehicle may no longer pass IsValid checks.
+    -- Restore occupants directly instead of depending on ReleaseVehicle's guard.
+    if ent.BZCNAIDriver and IsValid(ent.BZCNAIDriver) then
+        UnseatNPC(ent.BZCNAIDriver, "vehicle_removed")
+    end
+    for _, passenger in ipairs(ent.BZCNAIPassengers or {}) do
+        if IsValid(passenger) then UnseatNPC(passenger, "vehicle_removed") end
+    end
     if ent.BZCNGlideVehicle then
         local vehicle = ent.BZCNGlideVehicle
         UnseatNPC(ent, "npc_removed_or_reparented")
