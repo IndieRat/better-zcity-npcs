@@ -25,32 +25,37 @@ local function GetAccessories(ent)
 end
 
 local function NormalizeAccessoryList(accessories)
-    local names, active = {}, {}
+    local names, active, visited = {}, {}, {}
+    local definitions = istable(hg) and istable(hg.Accessories) and hg.Accessories or nil
     local function Add(name)
         if not isstring(name) or name == "" or name == "none" or active[name] then return end
+        if definitions and not istable(definitions[name]) then return end
         active[name] = true
         names[#names + 1] = name
     end
-
+    local function Visit(value, key, depth)
+        if depth > 5 then return end
+        if isstring(value) then
+            Add(value)
+            if isstring(key) then Add(key) end
+            return
+        end
+        if value == true and isstring(key) then Add(key) return end
+        if not istable(value) or visited[value] then return end
+        visited[value] = true
+        Add(value.accessory)
+        Add(value.name)
+        Add(value.id)
+        if isstring(key) then Add(key) end
+        for childKey, childValue in pairs(value) do
+            Visit(childValue, childKey, depth + 1)
+        end
+    end
     if isstring(accessories) then
         Add(accessories)
     elseif istable(accessories) then
-        -- The stock generator uses an array, but inventory/appearance adapters
-        -- may send keyed slot maps such as head = "fedora" or [name] = true.
-        for i = 1, #accessories do Add(accessories[i]) end
-        for key, value in pairs(accessories) do
-            if isstring(value) then
-                Add(value)
-            elseif istable(value) then
-                Add(value.accessory or value.name or value.id)
-                if isstring(key) and istable(hg) and istable(hg.Accessories)
-                    and istable(hg.Accessories[key]) then
-                    Add(key)
-                end
-            elseif value == true and isstring(key) then
-                Add(key)
-            end
-        end
+        for i = 1, #accessories do Visit(accessories[i], i, 1) end
+        for key, value in pairs(accessories) do Visit(value, key, 1) end
     end
     return names, active
 end
