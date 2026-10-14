@@ -7,6 +7,7 @@ if not SERVER then return end
 BZCN = BZCN or {}
 BZCNCombatActor = BZCNCombatActor or {}
 local Actor = BZCNCombatActor
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("combat", Actor) end
 
 Actor.Version = 1
 Actor.DefaultLeadTime = 0.10
