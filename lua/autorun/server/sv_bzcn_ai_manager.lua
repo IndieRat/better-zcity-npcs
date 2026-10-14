@@ -97,6 +97,7 @@ function Manager.AddConnection(ent, key, cleanup)
     if not IsManaged(ent) or not isstring(key) or key == "" or not isfunction(cleanup) then return false end
     local brain = Manager.Get(ent)
     if not brain then return false end
+    brain.connections = brain.connections or {}
     local previous = brain.connections[key]
     if isfunction(previous) then pcall(previous, ent, "replaced") end
     brain.connections[key] = cleanup
