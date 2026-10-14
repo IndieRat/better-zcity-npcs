@@ -277,6 +277,21 @@ end
 function FakeActor:UpdateLookTarget()
     if not self.autoLookTarget or not IsValid(self.owner) or not IsValid(self.ragdoll) then return end
     local now = CurTime()
+    -- While the body is actively crawling, locomotion owns gaze. Don't keep
+    -- snapping the head back toward the last attacker/combat target, which makes
+    -- the prone recovery look like the NPC is still fighting while incapacitated.
+    if self.autoCrawl then
+        local pelvis = GetPhysicsForBone(self.ragdoll, "ValveBiped.Bip01_Pelvis")
+        local velocity = IsValid(pelvis) and pelvis:GetVelocity() or self.ragdoll:GetVelocity()
+        local horizontal = Vector(velocity.x, velocity.y, 0)
+        local direction = horizontal:LengthSqr() > 12 * 12
+            and horizontal:GetNormalized() or self.ragdoll:GetForward()
+        direction.z = 0
+        if direction:LengthSqr() < 0.01 then direction = Vector(1, 0, 0) end
+        direction:Normalize()
+        self.lookTarget = self.ragdoll:WorldSpaceCenter() + direction * 500
+        return
+    end
     local attacker = self.owner.BZCNLastAttacker
     local damageAt = tonumber(self.owner.BZCNLastDamageTime) or 0
     if IsValid(attacker) and attacker ~= self.owner and now - damageAt <= 5.5 then
