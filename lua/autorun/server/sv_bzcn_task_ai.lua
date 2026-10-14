@@ -398,7 +398,10 @@ local function MoveTo(ent, destination, duration, speedScale)
             -- route toward a nearby reachable nav area around the destination.
             TryOpenTaskDoor(ent, destination)
             local climbed = ent.TryBZCNClimb and ent:TryBZCNClimb()
-            if not climbed then
+            local crawling = not climbed and BZCN.MovementQOL
+                and BZCN.MovementQOL.RequestCrawl
+                and BZCN.MovementQOL.RequestCrawl(ent, 1.1)
+            if not climbed and not crawling then
                 ent.loco:Jump()
                 ent.loco:SetVelocity(ent:GetForward() * 65 + Vector(0, 0, 70))
             end
