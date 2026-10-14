@@ -391,8 +391,8 @@ local function FindParkingPoint(vehicle)
             local sx, sy = area:GetSizeX(), area:GetSizeY()
             -- Smaller walkable nav areas are a better proxy for a pull-off,
             -- driveway, or lot than the broad areas used for ordinary driving.
-            if distance >= 280 and distance <= 900 and sx >= 45 and sy >= 45
-                and sx <= 190 and sy <= 190 and offset:LengthSqr() > 1 then
+            if distance >= 280 and distance <= 1350 and sx >= 35 and sy >= 35
+                and sx <= 250 and sy <= 250 and offset:LengthSqr() > 1 then
                 offset:Normalize()
                 if forward:Dot(offset) > -0.15 then
                     local trace = util.TraceHull({
@@ -732,6 +732,11 @@ local function UpdateVehicleAI(vehicle, now)
         return
     end
 
+    -- The vehicle controller owns the task while seated. Keep its lease alive
+    -- until a real park/exit decision releases it; otherwise ordinary task
+    -- expiry interrupts long routes and looks like reverse-then-abandon behavior.
+    driver.BZCNTaskUntil = math.max(driver.BZCNTaskUntil or 0, now + 24)
+
     local seatDriver = vehicle.seats[1]:GetDriver()
     if IsValid(seatDriver) and seatDriver ~= driver then
         ReleaseVehicle(vehicle, "seat_taken_by_player")
@@ -879,11 +884,23 @@ local function UpdateVehicleAI(vehicle, now)
             vehicle.BZCNGlideAINextTargetAt = now + 2.5
         end
     elseif not info.combat and not parkMode and (vehicle.BZCNGlideAIParkAt or math.huge) <= now then
-        vehicle.BZCNGlideAIMode = "park_approach"
-        parkMode = true
-        goal = FindParkingPoint(vehicle) or FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
-        vehicle.BZCNGlideAITarget = goal
-        vehicle.BZCNGlideAINextTargetAt = now + 20
+        -- Only enter the parking state when an actual pull-off/parking-sized
+        -- nav area was found. A generic road/wander point is not a parking spot:
+        -- treating it as one made civilians stop on the road and immediately leave.
+        local parkingPoint = FindParkingPoint(vehicle)
+        if isvector(parkingPoint) then
+            vehicle.BZCNGlideAIMode = "park_approach"
+            parkMode = true
+            goal = parkingPoint
+            vehicle.BZCNGlideAITarget = goal
+            vehicle.BZCNGlideAINextTargetAt = now + 60
+        else
+            -- Keep driving if this map has no suitable parking-sized nav area.
+            vehicle.BZCNGlideAIParkAt = now + 22
+            goal = FindNavPoint(vehicle, 800, 1800) or FindWanderGoal(vehicle)
+            vehicle.BZCNGlideAITarget = goal
+            vehicle.BZCNGlideAINextTargetAt = now + 12
+        end
     elseif parkMode and isvector(goal) and vehicle:GetPos():DistToSqr(goal) < 220 * 220 then
         SetControls(vehicle, 0, 0, 1)
         vehicle.BZCNGlideAIParkWaitUntil = vehicle.BZCNGlideAIParkWaitUntil or (now + math.Rand(2.5, 5.0))
@@ -1020,6 +1037,9 @@ local function ProcessBoardingApproaches(now)
             npc.BZCNGlideApproachRole = nil
             npc.BZCNGlideApproachUntil = nil
             continue
+        end
+        if npc.BZCNGlideApproachRole == "driver" and npc.BZCNCurrentTask == "drive" then
+            npc.BZCNTaskUntil = math.max(npc.BZCNTaskUntil or 0, now + 18)
         end
         if npc:GetPos():DistToSqr(seat:GetPos()) > 72 * 72 then
             npc.BZCNGlideInteractAt = nil
