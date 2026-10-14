@@ -5,6 +5,8 @@
 if not SERVER then return end
 
 BZCN = BZCN or {}
+BZCN.SquadDirector = BZCN.SquadDirector or {}
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("squads", BZCN.SquadDirector) end
 
 local THINK_INTERVAL = 1.75
 local SQUAD_RADIUS = 1050
