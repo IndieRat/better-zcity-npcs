@@ -59,6 +59,7 @@ function Manager.Attach(ent)
         intent = nil,
         requests = {},
         subsystems = {},
+        connections = {},
         decisionSerial = 0
     }
     Manager.Brains[ent] = brain
@@ -88,6 +89,29 @@ end
 
 function Manager.Get(ent)
     return Manager.Brains[ent] or Manager.Attach(ent)
+end
+
+-- Register a per-NPC disconnect/cleanup callback. Replacing a connection first
+-- disconnects the previous one, and entity teardown always drains the registry.
+function Manager.AddConnection(ent, key, cleanup)
+    if not IsManaged(ent) or not isstring(key) or key == "" or not isfunction(cleanup) then return false end
+    local brain = Manager.Get(ent)
+    if not brain then return false end
+    local previous = brain.connections[key]
+    if isfunction(previous) then pcall(previous, ent, "replaced") end
+    brain.connections[key] = cleanup
+    return true
+end
+
+function Manager.RemoveConnection(ent, key, runCleanup, reason)
+    local brain = Manager.Brains[ent]
+    if not brain or not isstring(key) then return false end
+    local cleanup = brain.connections[key]
+    brain.connections[key] = nil
+    if runCleanup ~= false and isfunction(cleanup) then
+        pcall(cleanup, ent, reason or "disconnected")
+    end
+    return cleanup ~= nil
 end
 
 -- A request expires automatically. Higher priorities win; equal priorities
@@ -193,6 +217,15 @@ function Manager.Cleanup(ent, reason)
     brain.active = false
     hook.Run("BZCN_AIManagerDetaching", ent, brain, reason or "cleanup")
     for source in pairs(brain.requests or {}) do brain.requests[source] = nil end
+    for key, cleanup in pairs(brain.connections or {}) do
+        brain.connections[key] = nil
+        if isfunction(cleanup) then
+            local ok, err = pcall(cleanup, ent, reason or "cleanup")
+            if not ok then
+                ErrorNoHalt("[BZCN AI] cleanup failed for " .. tostring(key) .. ": " .. tostring(err) .. "\n")
+            end
+        end
+    end
     for name in pairs(brain.subsystems or {}) do brain.subsystems[name] = nil end
     brain.owner = nil
     brain.intent = nil
