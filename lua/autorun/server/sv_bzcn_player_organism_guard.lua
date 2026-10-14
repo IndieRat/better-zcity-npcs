@@ -109,33 +109,6 @@ hook.Add("PlayerSpawn", "BZCN_PlayerOrganismWatchdog_Spawn", function(ply)
     end)
 end)
 
--- Record and block an accidental organism Remove while the player is still
--- connected. Z-City's own disconnect cleanup remains allowed.
-local function InstallRemoveGuard()
-    local api = NativeAPI()
-    if not api or not isfunction(api.Remove) or api.BZCNPlayerRemoveGuard then return end
-    local nativeRemove = api.Remove
-    api.Remove = function(ent, ...)
-        if IsRealPlayer(ent) and isfunction(ent.IsConnected) and ent:IsConnected() then
-            if not ent.BZCNOrganismRemoveWarning then
-                ent.BZCNOrganismRemoveWarning = true
-                local trace = debug and debug.traceback and debug.traceback("", 2) or "(no Lua traceback available)"
-                ErrorNoHalt("[BZCN] Blocked hg.organism.Remove(player) while connected: "
-                    .. tostring(ent) .. ". Call site:" .. trace .. "\n")
-            end
-            -- If a table exists, keep its registry identity intact. If it is
-            -- already missing, the watchdog restores it from backup/list.
-            if istable(ent.organism) and istable(api.list) then
-                api.list[ent] = ent.organism
-            end
-            return
-        end
-        return nativeRemove(ent, ...)
-    end
-    api.BZCNPlayerRemoveGuard = true
-end
+-- Do not wrap or replace hg.organism.Remove. Z-City owns the native
+-- disconnect/death lifecycle, and this addon must not intercept its cleanup.
 
-hook.Add("Initialize", "BZCN_PlayerOrganismRemoveGuard_Init", InstallRemoveGuard)
-hook.Add("InitPostEntity", "BZCN_PlayerOrganismRemoveGuard_PostInit", InstallRemoveGuard)
-hook.Add("OnReloaded", "BZCN_PlayerOrganismRemoveGuard_Reload", InstallRemoveGuard)
-timer.Create("BZCN_PlayerOrganismRemoveGuard_Retry", 0.5, 20, InstallRemoveGuard)
