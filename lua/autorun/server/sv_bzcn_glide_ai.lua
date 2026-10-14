@@ -1077,6 +1077,14 @@ local function UpdateVehicleAI(vehicle, now)
         throttle = math.min(throttle, 0.32)
         brake = 0
     end
+    if obstacleDistance < 190 and not combat
+        and now >= (vehicle.BZCNGlideAINextAvoidAt or 0) then
+        -- A close obstruction should prompt a broad route change, not a permanent
+        -- standstill. Debounce the retarget so the vehicle doesn't zigzag.
+        vehicle.BZCNGlideAITarget = FindWanderGoal(vehicle)
+        vehicle.BZCNGlideAINextTargetAt = now + math.Rand(3.0, 5.0)
+        vehicle.BZCNGlideAINextAvoidAt = now + 1.4
+    end
 
     -- Nearby pedestrians beside the car should not force a stop; only a very
     -- close hazard can request a cautious crawl, while the forward hull handles
