@@ -94,6 +94,26 @@ local function IsSeatFree(seat)
     return not IsValid(driver)
 end
 
+-- Approach is a locomotion operation, not a NextBot entity method. Keep a
+-- fallback for environments where the locomotion wrapper lacks Approach().
+local function ApproachPosition(npc, destination)
+    if not IsValid(npc) or not npc.loco or not isvector(destination) then return false end
+    local loco = npc.loco
+    loco:SetDesiredSpeed(105)
+    if isfunction(loco.Approach) then
+        loco:Approach(destination, 1)
+        return true
+    end
+    local direction = destination - npc:GetPos()
+    direction.z = 0
+    if direction:LengthSqr() > 1 and isfunction(loco.SetVelocity) then
+        direction:Normalize()
+        loco:SetVelocity(direction * 105)
+        return true
+    end
+    return false
+end
+
 local function SeatLocalPosition(vehicle, seat)
     local pos = vehicle:WorldToLocal(seat:GetPos())
     local ang = vehicle:WorldToLocalAngles(seat:GetAngles())
@@ -642,10 +662,7 @@ local function BoardSquad(vehicle, driver)
             mate.BZCNGlideApproachRole = "passenger"
             mate.BZCNGlideApproachUntil = CurTime() + 24
             mate.BZCNGlideExitAt = nil
-            if mate.loco then
-                mate.loco:SetDesiredSpeed(105)
-                mate:Approach(seat:GetPos(), 1)
-            end
+            ApproachPosition(mate, seat:GetPos())
         end
     end
 end
@@ -684,10 +701,7 @@ local function BeginVehicleAI(vehicle, driver)
         driver.BZCNGlideApproachSeat = seat
         driver.BZCNGlideApproachRole = "driver"
         driver.BZCNGlideApproachUntil = CurTime() + 24
-        if driver.loco then
-            driver.loco:SetDesiredSpeed(105)
-            driver:Approach(seat:GetPos(), 1)
-        end
+        ApproachPosition(driver, seat:GetPos())
         return true
     end
     if not SeatNPC(driver, vehicle, seat, "driver") then return false end
@@ -1043,10 +1057,7 @@ local function ProcessBoardingApproaches(now)
         end
         if npc:GetPos():DistToSqr(seat:GetPos()) > 72 * 72 then
             npc.BZCNGlideInteractAt = nil
-            if npc.loco then
-                npc.loco:SetDesiredSpeed(105)
-                npc:Approach(seat:GetPos(), 1)
-            end
+            ApproachPosition(npc, seat:GetPos())
             continue
         end
 
@@ -1207,10 +1218,7 @@ hook.Add("BZCN_PlayerPhrase", "BZCN_GlidePositivePickupCall", function(ply, sign
         vehicle.BZCNPlayerPickupPassengers = true
         npc.BZCNHumanInterestTarget = nil
         npc.BZCNHumanInterestUntil = nil
-        if npc.loco then
-            npc.loco:SetDesiredSpeed(105)
-            npc:Approach(freeSeat:GetPos(), 1)
-        end
+        ApproachPosition(npc, freeSeat:GetPos())
         break
     end
 end)
