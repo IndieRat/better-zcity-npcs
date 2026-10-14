@@ -840,9 +840,12 @@ function FakeActor:UpdateVehicleSeat(dt)
     -- rotates the entire posed body sideways/backward relative to the wheel.
     -- Keep the seat's actual anchor position, but express pose offsets in the
     -- chassis frame (the same frame used by driving controls).
-    local vehicleSeatOrigin = ownerVehicle:WorldToLocal(seat:GetPos())
+    local vehicleSeatOrigin = IsValid(ownerVehicle) and ownerVehicle:WorldToLocal(seat:GetPos()) or nil
     local function SeatPoint(offset)
-        return ownerVehicle:LocalToWorld(vehicleSeatOrigin + offset)
+        if IsValid(ownerVehicle) and isvector(vehicleSeatOrigin) then
+            return ownerVehicle:LocalToWorld(vehicleSeatOrigin + offset)
+        end
+        return seat:LocalToWorld(offset)
     end
     local pelvisPos = SeatPoint(Vector(0, 0, 14))
     local spinePos = SeatPoint(Vector(0, 0, 36))
