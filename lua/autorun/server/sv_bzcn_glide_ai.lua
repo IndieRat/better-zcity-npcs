@@ -955,6 +955,18 @@ local function UpdateVehicleAI(vehicle, now)
             brake = 0.7
         end
     end
+
+    -- Avoidance may have requested a stop after the first momentum check.
+    -- A car travelling backward cannot stop with a strong brake input (Glide
+    -- interprets that as reverse); give it a brief forward-gear counter-throttle.
+    if signedForwardSpeed < -45 then
+        if isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
+            and vehicle:GetGear() < 0 then
+            vehicle:SwitchGear(1, 0)
+        end
+        throttle = math.Clamp(0.22 + math.abs(signedForwardSpeed) / 300, 0.22, 0.55)
+        brake = 0
+    end
     SetControls(vehicle, throttle, steer, brake)
 end
 
