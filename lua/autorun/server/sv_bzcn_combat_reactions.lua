@@ -4,6 +4,8 @@
 if not SERVER then return end
 
 BZCN = BZCN or {}
+BZCN.CombatReactions = BZCN.CombatReactions or {}
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("combatReactions", BZCN.CombatReactions) end
 
 local NATIVE_FACTIONS = {
     npc_citizen = "civilian",
