@@ -1528,6 +1528,16 @@ function ENT:AttackTarget(target)
     if now < (self.LastAttack or 0) then return end
 
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
+    -- Treat a valid Homigrad firearm as ranged even if a class profile omitted Ranged=true.
+    local rangedWeapon = false
+    if weaponClass ~= "" and not IsBZCNNonCombatWeapon(weaponClass)
+        and weapons and weapons.GetStored then
+        local stored = weapons.GetStored(weaponClass)
+        local primary = istable(stored) and istable(stored.Primary) and stored.Primary or nil
+        rangedWeapon = primary ~= nil and isstring(primary.Ammo)
+            and primary.Ammo ~= "" and string.lower(primary.Ammo) ~= "none"
+            and math.max(tonumber(primary.ClipSize) or 0, tonumber(primary.DefaultClip) or 0) > 0
+    end
     local meleeOnlyWeapon = IsBZCNNonCombatWeapon(weaponClass)
 
     local kickSupport = hg and hg.BZCNNPCSupport
@@ -1568,8 +1578,8 @@ function ENT:AttackTarget(target)
 
     -- Firearms remain the default at range. At point-blank distance the
     -- optional kick above lets a human-like NPC create space or knock a threat down.
-    local ranged = profile.Ranged == true and not meleeOnlyWeapon
-        and distance <= (tonumber(profile.WeaponRange) or 1100)
+    local ranged = (profile.Ranged == true or rangedWeapon) and not meleeOnlyWeapon
+        and distance <= (tonumber(profile.WeaponRange) or 1400)
     if ranged then
         -- This is the decision/aim refresh cadence, not the weapon's shot
         -- cadence. GetFireDelay mutates burst/recoil state and must only run
@@ -2416,6 +2426,21 @@ function ENT:OnInjured(damageInfo)
     local attacker = damageInfo:GetAttacker()
     if IsValid(attacker) and attacker ~= self and not attacker:IsWorld() then
         self.BZCNLastAttacker = attacker
+        local profile = self:GetBZCNProfile()
+        local faction = string.lower(tostring(profile.Faction or self.BZCN_Faction or ""))
+        local className = string.lower(tostring(profile.ClassName or self.BZCNClass or ""))
+        local civilian = profile.CivilianStyle == true or faction == "civilian"
+            or faction == "default" or className == "civilian" or className == "default"
+        if civilian and attacker:Health() > 0 then
+            -- A gunshot is an immediate survival threat, not a minor grievance.
+            self.BZCNFleeThreat = attacker
+            self.BZCNFleeUntil = CurTime() + math.Rand(9, 16)
+            self.BZCNFearAttacker = attacker
+            self.BZCNFearUntil = self.BZCNFleeUntil
+            self.BZCNCurrentTask = "flee"
+            self.BZCNTaskUntil = self.BZCNFleeUntil
+            if self.SetNW2String then self:SetNW2String("BZCNCurrentTask", "flee") end
+        end
         hook.Run("BZCN_EntityDamaged", self, attacker, damageInfo, true)
     end
     hook.Run("BZCN_NPCInjured", self, damageInfo)
