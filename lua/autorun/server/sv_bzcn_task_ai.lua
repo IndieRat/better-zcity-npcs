@@ -85,10 +85,19 @@ end
 
 local function PickTask(ent)
     local now = CurTime()
+    local currentKind = GetKind(ent)
     if isstring(ent.BZCNCurrentTask) and (ent.BZCNTaskUntil or 0) > now then
-        return ent.BZCNCurrentTask
+        -- Old versions could leave civilians in long "stay" leases. Expire
+        -- those promptly after this update so existing NPCs start using the
+        -- exploration-heavy pool without requiring a respawn.
+        if not (currentKind == "civilian" and ent.BZCNCurrentTask == "stay"
+            and now - (ent.BZCNTaskSelectedAt or 0) >= 7) then
+            return ent.BZCNCurrentTask
+        end
+        ent.BZCNCurrentTask = nil
+        ent.BZCNTaskUntil = 0
     end
-    local basePool = TASK_POOLS[GetKind(ent)] or TASK_POOLS.civilian
+    local basePool = TASK_POOLS[currentKind] or TASK_POOLS.civilian
     local pool = basePool
     if ent.BZCNClassProfile and ent.BZCNClassProfile.SmartFurry == true then
         pool = table.Copy(basePool)
@@ -108,6 +117,7 @@ local function PickTask(ent)
         if pick <= 0 then selected = item[1] break end
     end
     ent.BZCNCurrentTask = selected
+    ent.BZCNTaskSelectedAt = now
     -- Keep a goal long enough for an NPC to commit to it. The coroutine may
     -- revisit this director several times per second, so 5-13 second leases
     -- caused frequent task swaps that looked like a two-second attention span.
