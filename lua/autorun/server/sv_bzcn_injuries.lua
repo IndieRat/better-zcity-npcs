@@ -124,6 +124,13 @@ end
 
 Support.IsAssimilationLocked = IsAssimilationLocked
 
+-- Clean up hooks from the retired player-organism watchdog. Older BZCN installs
+-- may have hot-reloaded this file after the watchdog was removed, leaving its
+-- Think/PlayerSpawn callbacks registered for the rest of the server session.
+hook.Remove("Think", "BZCN_PlayerOrganismWatchdog")
+hook.Remove("PlayerInitialSpawn", "BZCN_PlayerOrganismWatchdog_InitialSpawn")
+hook.Remove("PlayerSpawn", "BZCN_PlayerOrganismWatchdog_Spawn")
+
 -- Player fake-state recovery is deliberately left to Z-City. This bridge only
 -- owns managed NPC recovery; repairing real Player flags here can race the
 -- native organism/fake lifecycle and leave Player-only state inconsistent.
