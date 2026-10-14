@@ -515,7 +515,10 @@ local function SyncNetVar(ent, key, value)
 end
 
 function BZCN.SetNetVar(ent, key, value)
-    if not IsValid(ent) or not isstring(key) then return end
+    -- This API is the NPC-side compatibility store, not a replacement for
+    -- Z-City's native Player:SetNetVar. Never let an accidental caller route a
+    -- real player's live inventory/organism-adjacent netvars through BZCN.
+    if not IsValid(ent) or ent:IsPlayer() or not isstring(key) then return end
     if key == "Inventory" and istable(value) then
         NormalizeInventoryWeaponValues(value)
     end
@@ -552,7 +555,10 @@ function BZCN.GetNetVar(ent, key, default)
     local vars = data.BZCN_NetVars
     if vars and vars[key] ~= nil then
         local value = vars[key]
-        if key == "Inventory" and istable(value) then
+        -- Reading a player inventory must be observational only. The normalizer
+        -- rewrites class-only markers for NPC loot compatibility, which is not
+        -- permitted to mutate Homigrad's authoritative live Player inventory.
+        if not ent:IsPlayer() and key == "Inventory" and istable(value) then
             NormalizeInventoryWeaponValues(value)
         end
         return value
