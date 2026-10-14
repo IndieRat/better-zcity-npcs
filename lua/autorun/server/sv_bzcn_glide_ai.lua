@@ -159,6 +159,10 @@ local function SeatNPC(npc, vehicle, seat, role)
         npc.BZCNGlideVehicle = nil
         npc.BZCNGlideSeat = nil
         npc.BZCNGlideRole = nil
+        npc.BZCNGlideApproachVehicle = nil
+        npc.BZCNGlideApproachSeat = nil
+        npc.BZCNGlideApproachRole = nil
+        npc.BZCNGlideApproachUntil = nil
         npc:SetNW2Bool("BZCNGlideRiding", false)
         npc:SetNW2Bool("BZCNGlideState", false)
         npc:SetNW2String("BZCNGlideSeatRole", "")
@@ -632,9 +636,16 @@ local function BoardSquad(vehicle, driver)
             end
         end
         if not mate then break end
-        if SeatNPC(mate, vehicle, seat, "passenger") then
-            vehicle.BZCNAIPassengers[#vehicle.BZCNAIPassengers + 1] = mate
+        if not IsValid(mate.BZCNGlideApproachVehicle) then
+            mate.BZCNGlideApproachVehicle = vehicle
+            mate.BZCNGlideApproachSeat = seat
+            mate.BZCNGlideApproachRole = "passenger"
+            mate.BZCNGlideApproachUntil = CurTime() + 24
             mate.BZCNGlideExitAt = nil
+            if mate.loco then
+                mate.loco:SetDesiredSpeed(105)
+                mate:Approach(seat:GetPos(), 1)
+            end
         end
     end
 end
@@ -643,7 +654,8 @@ local function FindDriverForVehicle(vehicle)
     local best, bestScore
     for _, npc in ipairs(ents.FindInSphere(vehicle:GetPos(), CLAIM_RADIUS)) do
         if npc.BZCNCurrentTask ~= "drive" or (npc.BZCNTaskUntil or 0) <= CurTime() then continue end
-        if not CanDrive(npc) or npc.BZCNGlideVehicle or (npc.BZCNGlideExitAt or 0) > CurTime() then continue end
+        if not CanDrive(npc) or npc.BZCNGlideVehicle or IsValid(npc.BZCNGlideApproachVehicle)
+            or (npc.BZCNGlideExitAt or 0) > CurTime() then continue end
         local info = ClassInfo(npc)
         if not info.civilian and not info.combat then continue end
         local dist = npc:GetPos():DistToSqr(vehicle:GetPos())
@@ -662,7 +674,27 @@ local function BeginVehicleAI(vehicle, driver)
     if driver.BZCNCurrentTask ~= "drive" or (driver.BZCNTaskUntil or 0) <= CurTime() then return false end
     local info = ClassInfo(driver)
     if not info.civilian and not info.combat then return false end
+
+    -- Walking to the vehicle is part of boarding; never snap a distant NPC into a seat.
+    local distanceSqr = driver:GetPos():DistToSqr(seat:GetPos())
+    if distanceSqr > 105 * 105 then
+        if IsValid(driver.BZCNGlideApproachVehicle)
+            and driver.BZCNGlideApproachVehicle ~= vehicle then return false end
+        driver.BZCNGlideApproachVehicle = vehicle
+        driver.BZCNGlideApproachSeat = seat
+        driver.BZCNGlideApproachRole = "driver"
+        driver.BZCNGlideApproachUntil = CurTime() + 24
+        if driver.loco then
+            driver.loco:SetDesiredSpeed(105)
+            driver:Approach(seat:GetPos(), 1)
+        end
+        return true
+    end
     if not SeatNPC(driver, vehicle, seat, "driver") then return false end
+    driver.BZCNGlideApproachVehicle = nil
+    driver.BZCNGlideApproachSeat = nil
+    driver.BZCNGlideApproachRole = nil
+    driver.BZCNGlideApproachUntil = nil
 
     vehicle.BZCNAIDriver = driver
     vehicle.BZCNGlideAIMode = info.combat and "combat" or "wander"
@@ -970,6 +1002,48 @@ local function UpdateVehicleAI(vehicle, now)
     SetControls(vehicle, throttle, steer, brake)
 end
 
+local function ProcessBoardingApproaches(now)
+    for _, npc in ipairs(ents.GetAll()) do
+        local vehicle = npc.BZCNGlideApproachVehicle
+        local seat = npc.BZCNGlideApproachSeat
+        if not IsValid(vehicle) or not IsValid(seat) or not IsManaged(npc) then
+            npc.BZCNGlideApproachVehicle = nil
+            npc.BZCNGlideApproachSeat = nil
+            npc.BZCNGlideApproachRole = nil
+            npc.BZCNGlideApproachUntil = nil
+            continue
+        end
+        if (npc.BZCNGlideApproachUntil or 0) <= now or not CanDrive(npc)
+            or not IsSeatFree(seat) then
+            npc.BZCNGlideApproachVehicle = nil
+            npc.BZCNGlideApproachSeat = nil
+            npc.BZCNGlideApproachRole = nil
+            npc.BZCNGlideApproachUntil = nil
+            continue
+        end
+        if npc:GetPos():DistToSqr(seat:GetPos()) > 95 * 95 then
+            if npc.loco then
+                npc.loco:SetDesiredSpeed(105)
+                npc:Approach(seat:GetPos(), 1)
+            end
+            continue
+        end
+
+        local role = npc.BZCNGlideApproachRole or "passenger"
+        npc.BZCNGlideApproachVehicle = nil
+        npc.BZCNGlideApproachSeat = nil
+        npc.BZCNGlideApproachRole = nil
+        npc.BZCNGlideApproachUntil = nil
+        if role == "driver" then
+            BeginVehicleAI(vehicle, npc)
+        elseif SeatNPC(npc, vehicle, seat, role) then
+            vehicle.BZCNAIPassengers = vehicle.BZCNAIPassengers or {}
+            vehicle.BZCNAIPassengers[#vehicle.BZCNAIPassengers + 1] = npc
+            hook.Run("BZCN_NPCEnteredGlideVehicle", npc, vehicle, "passenger")
+        end
+    end
+end
+
 local function ScanVehicles(now)
     for _, vehicle in ipairs(ents.GetAll()) do
         if IsCar(vehicle) then
@@ -990,6 +1064,7 @@ hook.Add("Think", "BZCN_GlideVehicleAI", function()
     local now = CurTime()
     if now < (AI.nextScan or 0) then return end
     AI.nextScan = now + 0.25
+    ProcessBoardingApproaches(now)
     ScanVehicles(now)
 end)
 
@@ -1090,14 +1165,18 @@ hook.Add("BZCN_PlayerPhrase", "BZCN_GlidePositivePickupCall", function(ply, sign
             or IsHostile(npc, ply) then continue end
         local info = ClassInfo(npc)
         if not info.civilian then continue end
-        if SeatNPC(npc, vehicle, freeSeat, "passenger") then
-            vehicle.BZCNAIPassengers = vehicle.BZCNAIPassengers or {}
-            vehicle.BZCNAIPassengers[#vehicle.BZCNAIPassengers + 1] = npc
-            vehicle.BZCNPlayerPickupPassengers = true
-            npc.BZCNHumanInterestTarget = nil
-            npc.BZCNHumanInterestUntil = nil
-            break
+        npc.BZCNGlideApproachVehicle = vehicle
+        npc.BZCNGlideApproachSeat = freeSeat
+        npc.BZCNGlideApproachRole = "passenger"
+        npc.BZCNGlideApproachUntil = CurTime() + 24
+        vehicle.BZCNPlayerPickupPassengers = true
+        npc.BZCNHumanInterestTarget = nil
+        npc.BZCNHumanInterestUntil = nil
+        if npc.loco then
+            npc.loco:SetDesiredSpeed(105)
+            npc:Approach(freeSeat:GetPos(), 1)
         end
+        break
     end
 end)
 
