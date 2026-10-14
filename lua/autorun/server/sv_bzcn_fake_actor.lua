@@ -830,7 +830,9 @@ end
 -- controller as crawling and combat. The owner stays hidden for AI/state, while
 -- the visible body remains a real physics ragdoll and can be ejected on impact.
 function FakeActor:SetVehicleSeat(seat)
-    self.vehicleSeat = IsValid(seat) and seat or nil
+    local nextSeat = IsValid(seat) and seat or nil
+    if self.vehicleSeat ~= nextSeat then self.vehiclePoseInitialized = nil end
+    self.vehicleSeat = nextSeat
     if self.vehicleSeat then
         self.manualMode = "vehicle"
         self.manualModeUntil = nil
@@ -838,6 +840,7 @@ function FakeActor:SetVehicleSeat(seat)
     elseif self.manualMode == "vehicle" then
         self.manualMode = nil
         self.mode = "loose"
+        self.vehiclePoseInitialized = nil
     end
 end
 
@@ -889,27 +892,33 @@ function FakeActor:UpdateVehicleSeat(dt)
     local spinePos = SeatPoint(Vector(0, 0, 36))
     local headPos = SeatPoint(Vector(0, 0, 57))
 
-    -- Soft position control keeps the pelvis/torso in the seat without welding
-    -- the ragdoll to the chassis; impacts can still overcome the shadow control.
-    self:ShadowBone("ValveBiped.Bip01_Pelvis", upright, 0.16, 48 * power, 34,
-        pelvisPos, 90, 55)
-    self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.14, 52 * power, 36,
-        spinePos, 90, 55)
+    -- Establish the Glide seated body pose once. Reapplying pelvis/spine/leg
+    -- yaw every frame makes the ragdoll slowly rotate away from the windshield
+    -- as the vehicle turns. After the initial pose, torso and legs remain physical;
+    -- only the head and arms receive ongoing articulation.
+    if not self.vehiclePoseInitialized then
+        self:ShadowBone("ValveBiped.Bip01_Pelvis", upright, 0.16, 48 * power, 34,
+            pelvisPos, 90, 55)
+        self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.14, 52 * power, 36,
+            spinePos, 90, 55)
+
+        local legs = {
+            {thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf", side = -1},
+            {thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf", side = 1}
+        }
+        for _, leg in ipairs(legs) do
+            local thighPos = SeatPoint(Vector(18, leg.side * 7, 7))
+            local calfPos = SeatPoint(Vector(30, leg.side * 7, -5))
+            self:ShadowBone(leg.thigh, upright, 0.18, 40 * power, 34,
+                thighPos, 85, 50)
+            self:ShadowBone(leg.calf, upright, 0.18, 34 * power, 30,
+                calfPos, 85, 50)
+        end
+        self.vehiclePoseInitialized = true
+    end
+
     self:ShadowBone("ValveBiped.Bip01_Head1", Angle(-8, yaw, 0), 0.13, 60 * power, 40,
         headPos, 95, 55)
-
-    local legs = {
-        {thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf", side = -1},
-        {thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf", side = 1}
-    }
-    for _, leg in ipairs(legs) do
-        local thighPos = SeatPoint(Vector(18, leg.side * 7, 7))
-        local calfPos = SeatPoint(Vector(30, leg.side * 7, -5))
-        self:ShadowBone(leg.thigh, upright, 0.18, 40 * power, 34,
-            thighPos, 85, 50)
-        self:ShadowBone(leg.calf, upright, 0.18, 34 * power, 30,
-            calfPos, 85, 50)
-    end
 
     for _, arm in ipairs({
         {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand"},
