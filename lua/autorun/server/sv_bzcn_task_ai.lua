@@ -23,10 +23,10 @@ local TASK_POOLS = {
         {"drive", 1}
     },
     metrocop = {
-        -- Civil Protection mostly holds an observation post. Small patrols and
-        -- errands exist, but should be the exception rather than its default.
-        {"guard", 12}, {"observe", 7}, {"hold", 5}, {"talk", 1},
-        {"patrol", 1}, {"pickup", 1}, {"rescue", 1}, {"sit", 2}, {"drive", 1}
+        -- Officers still pause to observe incidents, but routine patrol must
+        -- happen often enough that an unalerted officer does not look frozen.
+        {"guard", 5}, {"observe", 3}, {"hold", 2}, {"talk", 1},
+        {"patrol", 5}, {"pickup", 1}, {"rescue", 2}, {"sit", 1}, {"drive", 1}
     },
     rebel = {
         -- Resistance fighters default to cohesion and cover. Rescue/scavenging
@@ -563,17 +563,20 @@ local function RunSquadIdleTask(ent, kind)
         if not isvector(goal) or arrived or expired then
             ent.BZCNSquadGoal = nil
             ent.BZCNSquadGoalUntil = nil
+            -- Patrol pauses are brief; long 7-13 second holds meant the squad
+            -- leader moved only occasionally and every nearby member appeared
+            -- stationary because they were still inside the follow radius.
             if (ent.BZCNNextSquadPatrolAt or 0) > now then
                 ent.loco:SetDesiredSpeed(0)
                 SetGroupTask(ent, "hold")
                 local mate = FindMate(ent, 520, false)
                 if IsValid(mate) then ent.loco:FaceTowards(mate:GetPos()) end
-                coroutine.wait(math.Rand(0.65, 1.2))
+                coroutine.wait(math.Rand(0.35, 0.7))
                 return true
             end
-            goal = ChooseHomePoint(ent, kind == "combine" and 470 or 340)
+            goal = ChooseHomePoint(ent, kind == "combine" and 760 or 620)
             ent.BZCNSquadGoal = goal
-            ent.BZCNSquadGoalUntil = now + 18
+            ent.BZCNSquadGoalUntil = now + 22
         end
 
         if isvector(goal) and ent:GetPos():DistToSqr(goal) > 105 * 105 then
@@ -584,7 +587,7 @@ local function RunSquadIdleTask(ent, kind)
             ent.loco:SetDesiredSpeed(0)
             ent.BZCNSquadGoal = nil
             ent.BZCNSquadGoalUntil = nil
-            ent.BZCNNextSquadPatrolAt = CurTime() + math.Rand(7, 13)
+            ent.BZCNNextSquadPatrolAt = CurTime() + math.Rand(2.5, 5.5)
             SetGroupTask(ent, "hold")
             coroutine.wait(math.Rand(0.8, 1.4))
         end
@@ -592,12 +595,12 @@ local function RunSquadIdleTask(ent, kind)
     end
 
     local gapSqr = ent:GetPos():DistToSqr(leader:GetPos())
-    if gapSqr > 275 * 275 then
+    if gapSqr > 185 * 185 then
         local forward = leader:GetForward()
         local side = leader:GetRight()
         local slot = math.max((tonumber(ent.BZCNSquadSlot) or 2) - 2, 0)
         local sideSign = ((tonumber(ent.BZCNSquadSlot) or 2) % 2 == 0) and 1 or -1
-        local destination = leader:GetPos() - forward * (105 + slot * 34) + side * (sideSign * 54)
+        local destination = leader:GetPos() - forward * (115 + slot * 42) + side * (sideSign * 68)
         destination = NavPoint(ent, destination, 260)
         SetGroupTask(ent, gapSqr > 560 * 560 and "regroup" or "follow")
         MoveTo(ent, destination, 2.6, kind == "combine" and 0.44 or 0.38)
