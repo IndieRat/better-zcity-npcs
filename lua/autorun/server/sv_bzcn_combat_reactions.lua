@@ -220,14 +220,20 @@ local function SetHostileGrievance(npc, attacker, duration, delay)
     if npc.SetNW2String then npc:SetNW2String("BZCNCurrentTask", "engage") end
 
     if IsMetroCop(npc) then
-        npc.BZCNMetrocopAlertUntil = 0
-        npc.BZCNMetrocopAlertness = "hostile"
+        -- Attention and combat disposition are separate state dimensions.
+        -- A confirmed assault makes this officer hostile, while alertness stays
+        -- inside its own calm/suspicious/alert vocabulary.
+        npc.BZCNMetrocopDisposition = "hostile"
+        npc.BZCNMetrocopAlertUntil = CurTime() + 18
+        npc.BZCNMetrocopAlertness = "alert"
         npc.BZCNMetrocopAlertFocus = attacker
         npc.BZCNMetrocopTask = "engage"
         if npc.SetNW2String then
-            npc:SetNW2String("BZCNMetrocopAlertness", "hostile")
+            npc:SetNW2String("BZCNMetrocopAlertness", "alert")
+            npc:SetNW2String("BZCNMetrocopDisposition", "hostile")
             npc:SetNW2String("BZCNMetrocopTask", "engage")
         end
+        if npc.SetNW2Float then npc:SetNW2Float("BZCNMetrocopAlertUntil", npc.BZCNMetrocopAlertUntil) end
         if npc.SetNW2Entity then npc:SetNW2Entity("BZCNMetrocopAlertFocus", attacker) end
     end
 
