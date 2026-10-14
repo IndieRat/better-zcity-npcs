@@ -7,6 +7,7 @@ if not SERVER then return end
 BZCN = BZCN or {}
 BZCNGlideAI = BZCNGlideAI or {}
 local AI = BZCNGlideAI
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("vehicles", AI) end
 
 local SCAN_INTERVAL = 2.0
 local THINK_INTERVAL = 0.12
