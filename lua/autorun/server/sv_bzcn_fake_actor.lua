@@ -869,7 +869,7 @@ function FakeActor:UpdateVehicleSeat(dt)
     -- direct-yaw variant visibly made NPCs look through the rear window; rotate
     -- the bone orientation half a turn while keeping all target positions in
     -- chassis coordinates so the body faces the windshield.
-    local yaw = math.NormalizeAngle(desiredForward:Angle().y)
+    local yaw = math.NormalizeAngle(desiredForward:Angle().y + 180)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
