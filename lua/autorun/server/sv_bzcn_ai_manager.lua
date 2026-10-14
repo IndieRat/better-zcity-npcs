@@ -72,12 +72,15 @@ function Manager.RefreshSubsystems(ent)
     local brain = Manager.Brains[ent] or Manager.Attach(ent)
     if not brain then return nil end
     for name, resolve in pairs(SUBSYSTEMS) do
-        local ok, api = pcall(resolve)
-        if ok and api ~= nil then
-            brain.subsystems[name] = api
-        else
-            brain.subsystems[name] = nil
+        local api = Manager.Subsystems[name]
+        if api == nil then
+            local ok, resolved = pcall(resolve)
+            if ok then api = resolved end
         end
+        brain.subsystems[name] = api
+    end
+    for name, api in pairs(Manager.Subsystems) do
+        brain.subsystems[name] = api
     end
     brain.lastSubsystemRefresh = CurTime()
     return brain.subsystems
