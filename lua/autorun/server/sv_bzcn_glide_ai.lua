@@ -571,8 +571,13 @@ local function HasClearForward(vehicle, distance)
 end
 
 local function NearbyHazard(vehicle, radius)
+    local driver = vehicle.BZCNAIDriver
     for _, ent in ipairs(ents.FindInSphere(vehicle:GetPos(), radius)) do
-        if ent ~= vehicle and (ent:IsPlayer() or IsManaged(ent)) then
+        if ent ~= vehicle and ent ~= driver and (ent:IsPlayer() or IsManaged(ent)) then
+            -- Occupants are intentionally inside the vehicle's hazard radius.
+            -- Counting them as pedestrians makes the avoidance code cut throttle
+            -- on every tick, so the wheels spin while the car never moves.
+            if ent.BZCNGlideVehicle == vehicle then continue end
             if ent:GetPos():DistToSqr(vehicle:GetPos()) < radius * radius then return true end
         end
     end
@@ -831,6 +836,9 @@ local function UpdateVehicleAI(vehicle, now)
     -- The seated ragdoll is fake-actor controlled; the standing NextBot must
     -- never render beside it. Some civilian appearance hooks re-enable drawing.
     if not driver:GetNoDraw() then driver:SetNoDraw(true) end
+    -- Appearance/animation hooks can turn drawing back on between AI updates.
+    -- Keep the original NextBot hidden for the entire seated interval.
+    driver:SetNoDraw(true)
     for _, passenger in ipairs(vehicle.BZCNAIPassengers or {}) do
         if IsValid(passenger) and not passenger:GetNoDraw() then
             passenger:SetNoDraw(true)
