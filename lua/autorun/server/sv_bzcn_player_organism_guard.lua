@@ -1,53 +1,138 @@
--- BZCN safety boundary: never let NPC integration leave a real player
--- without Z-City's organism table. This is recovery-only; it does not Clear()
--- or reset an existing organism, and never assigns NPC organism state to players.
+-- BZCN safety boundary for Z-City's native player organism.
+-- Never run NPC organism synchronization against a real player. If a player
+-- table disappears, restore the existing registered object before constructing
+-- a new one: hg.organism.Add(ent) REPLACES ent.organism with {owner = ent}.
 if not SERVER then return end
 
-local function RestorePlayerOrganism(ply, reason)
-    if not IsValid(ply) or not ply:IsPlayer() then return false end
-    if istable(ply.organism) then return true end
+local function IsRealPlayer(ply)
+    return IsValid(ply) and ply:IsPlayer()
+end
 
+local function NativeAPI()
     local api = hg and hg.organism
-    if istable(api) and isfunction(api.Add) then
-        -- Z-City owns organism initialization. Use its native constructor and
-        -- deliberately do not call hg.organism.Clear(), which would reset state.
-        local ok, err = pcall(api.Add, ply)
+    if not istable(api) then return nil end
+    return api
+end
+
+local function RestorePlayerOrganism(ply, reason)
+    if not IsRealPlayer(ply) then return false end
+
+    local current = ply.organism
+    if istable(current) then
+        local api = NativeAPI()
+        if api and istable(api.list) and api.list[ply] ~= current then
+            -- Repair registry identity without replacing or clearing the table.
+            api.list[ply] = current
+        end
+        return true
+    end
+
+    local api = NativeAPI()
+    local registered = api and istable(api.list) and api.list[ply] or nil
+    local backup = istable(ply.new_organism) and ply.new_organism
+        or (istable(ply.BZCNPlayerOrganismBackup) and ply.BZCNPlayerOrganismBackup or nil)
+
+    -- Prefer the exact live Z-City registry object. This preserves its wounds,
+    -- blood, unconsciousness, and every module-owned field.
+    local recovered = istable(registered) and registered or backup
+    if istable(recovered) then
+        ply.organism = recovered
+        recovered.owner = ply
+        if api and istable(api.list) then api.list[ply] = recovered end
+        recovered.alive = ply:Alive()
+        if not ply.BZCNOrganismRestoreWarned then
+            ply.BZCNOrganismRestoreWarned = true
+            ErrorNoHalt("[BZCN] Reattached existing player organism for "
+                .. tostring(ply) .. " (" .. tostring(reason or "watchdog")
+                .. "); no reset performed.\n")
+        end
+        return true
+    end
+
+    -- Last resort only: the native registry and backups are all missing.
+    -- Do not call Clear(), since it dispatches initialization/reset hooks.
+    if api and isfunction(api.Add) then
+        local ok, result = pcall(api.Add, ply)
         if ok and istable(ply.organism) then
-            -- Org Clear defaults alive=true; immediately re-sync the actual player lifecycle.
-            ply.organism.alive = ply:Alive()
+            local created = ply.organism
+            created.owner = ply
+            created.alive = ply:Alive()
+            if api and istable(api.list) then api.list[ply] = created end
             if not ply.BZCNOrganismRestoreWarned then
                 ply.BZCNOrganismRestoreWarned = true
-                ErrorNoHalt("[BZCN] Restored missing Z-City player organism for "
-                    .. tostring(ply) .. " (" .. tostring(reason or "watchdog") .. "). "
-                    .. "Existing player organism state was not cleared.\n")
+                ErrorNoHalt("[BZCN] Had to reconstruct a missing player organism for "
+                    .. tostring(ply) .. " (" .. tostring(reason or "watchdog")
+                    .. "). Original state was already unavailable; inspect other addons.\n")
             end
             return true
-        elseif not ok then
-            ErrorNoHalt("[BZCN] Native organism recovery failed for player "
-                .. tostring(ply) .. ": " .. tostring(err) .. "\n")
         end
+        ErrorNoHalt("[BZCN] Native organism reconstruction failed for "
+            .. tostring(ply) .. ": " .. tostring(result) .. "\n")
     end
 
     return false
 end
 
-hook.Add("PlayerSpawn", "BZCN_PlayerOrganismRestore", function(ply)
+-- Keep a lightweight backup reference while the canonical table is healthy.
+-- This is a reference, not a copy, so it does not drift from native wound data.
+hook.Add("Think", "BZCN_PlayerOrganismWatchdog", function()
+    for _, ply in ipairs(player.GetAll()) do
+        if not IsRealPlayer(ply) then continue end
+
+        if istable(ply.organism) then
+            ply.BZCNPlayerOrganismBackup = ply.organism
+            local api = NativeAPI()
+            if api and istable(api.list) and api.list[ply] ~= ply.organism then
+                -- If the canonical field survives but the registry entry vanishes,
+                -- restore the registry to the same table rather than Add/Clear.
+                api.list[ply] = ply.organism
+            end
+        else
+            RestorePlayerOrganism(ply, "Think watchdog")
+        end
+    end
+end)
+
+hook.Add("PlayerInitialSpawn", "BZCN_PlayerOrganismWatchdog_InitialSpawn", function(ply)
+    timer.Simple(0, function()
+        RestorePlayerOrganism(ply, "PlayerInitialSpawn")
+    end)
+end)
+
+hook.Add("PlayerSpawn", "BZCN_PlayerOrganismWatchdog_Spawn", function(ply)
+    -- Native Z-City's Player Spawn hook calls organism.Clear on the current
+    -- table. Defer recovery until all spawn hooks have had a chance to run.
     timer.Simple(0, function()
         RestorePlayerOrganism(ply, "PlayerSpawn")
     end)
 end)
 
--- Some addons alter player state during respawn/class transitions. If another
--- hook removes the table later, restore it before the next gameplay command.
-hook.Add("Think", "BZCN_PlayerOrganismWatchdog", function()
-    for _, ply in ipairs(player.GetAll()) do
-        if not istable(ply.organism) then
-            -- Z-City's StartCommand hook dereferences organism before checking Alive(),
-            -- so dead players need the same missing-table recovery as living players.
-            RestorePlayerOrganism(ply, "Think watchdog")
-        elseif not ply:Alive() then
-            -- Allow a later respawn loss to be logged as a new incident.
-            ply.BZCNOrganismRestoreWarned = nil
+-- Record and block an accidental organism Remove while the player is still
+-- connected. Z-City's own disconnect cleanup remains allowed.
+local function InstallRemoveGuard()
+    local api = NativeAPI()
+    if not api or not isfunction(api.Remove) or api.BZCNPlayerRemoveGuard then return end
+    local nativeRemove = api.Remove
+    api.Remove = function(ent, ...)
+        if IsRealPlayer(ent) and isfunction(ent.IsConnected) and ent:IsConnected() then
+            if not ent.BZCNOrganismRemoveWarning then
+                ent.BZCNOrganismRemoveWarning = true
+                ErrorNoHalt("[BZCN] Blocked hg.organism.Remove(player) while connected: "
+                    .. tostring(ent) .. ".\n")
+            end
+            -- If a table exists, keep its registry identity intact. If it is
+            -- already missing, the watchdog restores it from backup/list.
+            if istable(ent.organism) and istable(api.list) then
+                api.list[ent] = ent.organism
+            end
+            return
         end
+        return nativeRemove(ent, ...)
     end
-end)
+    api.BZCNPlayerRemoveGuard = true
+end
+
+hook.Add("Initialize", "BZCN_PlayerOrganismRemoveGuard_Init", InstallRemoveGuard)
+hook.Add("InitPostEntity", "BZCN_PlayerOrganismRemoveGuard_PostInit", InstallRemoveGuard)
+hook.Add("OnReloaded", "BZCN_PlayerOrganismRemoveGuard_Reload", InstallRemoveGuard)
+timer.Create("BZCN_PlayerOrganismRemoveGuard_Retry", 0.5, 20, InstallRemoveGuard)
