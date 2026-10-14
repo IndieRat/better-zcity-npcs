@@ -1187,6 +1187,17 @@ end
 
 hook.Add("Think", "BZCN_GlideVehicleAI", function()
     local now = CurTime()
+
+    -- Drawing suppression must run every frame, independently of the slower
+    -- route/AI scan. Appearance hooks can otherwise briefly resurrect the
+    -- original standing NextBot beside the seated physics ragdoll.
+    for _, npc in ipairs(ents.GetAll()) do
+        if IsManaged(npc) and IsValid(npc.BZCNGlideVehicle)
+            and npc.BZCNGlideSeatedFake == true and not npc:GetNoDraw() then
+            npc:SetNoDraw(true)
+        end
+    end
+
     if now < (AI.nextScan or 0) then return end
     AI.nextScan = now + 0.25
     ProcessBoardingApproaches(now)
