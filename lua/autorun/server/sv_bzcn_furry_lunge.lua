@@ -110,7 +110,7 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
             expires = launchTime + 0.95,
             startedAt = launchTime,
             startPos = ent:GetPos(),
-            boostUntil = launchTime + 0.16,
+            boostUntil = launchTime + 0.025,
             boostVelocity = boostVelocity
         }
         ent.BZCNFurryPounceState = pounceState
@@ -121,16 +121,13 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
         ent.BZCNFurryLungeRagdollAt = pounceState.boostUntil
         ent.loco:SetDesiredSpeed(420)
         ent.loco:FaceTowards(target:GetPos())
-        if ent.loco:IsOnGround() then ent.loco:Jump() end
-        -- Give the upright launch a clear burst first. The fake-ragdoll transition
-        -- is deliberately delayed so the leap reads as a build-up, not an instant
-        -- flop at takeoff.
-        ent.loco:SetVelocity(boostVelocity)
+        -- The run-up above supplies the anticipation. Enter fake-ragdoll before
+        -- applying the leap impulse; an upright hop made the transition happen mid-air.
         hook.Run("BZCN_FurryLungeStarted", ent, target, boostVelocity)
 
         local buildUpEnabled = not BZCN.RuleEnabled or BZCN.RuleEnabled("furry_pounce_build_up")
         if buildUpEnabled then
-            timer.Simple(0.16, function()
+            timer.Simple(0, function()
                 if not IsValid(ent) or ent.BZCNFurryPounceState ~= pounceState
                     or not ManagedFurry(ent) or ent:GetNW2Bool("BZCNNPCDowned", false) then return end
                 local support = hg and hg.BZCNNPCSupport
