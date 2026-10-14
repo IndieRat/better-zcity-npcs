@@ -833,9 +833,20 @@ function FakeActor:UpdateVehicleSeat(dt)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
     local power = math.Clamp(tonumber(self.controlPower) or 1, 0.12, 0.6)
-    local pelvisPos = seat:LocalToWorld(Vector(0, 0, 14))
-    local spinePos = seat:LocalToWorld(Vector(0, 0, 36))
-    local headPos = seat:LocalToWorld(Vector(0, 0, 57))
+
+    -- Glide's driver seat is commonly authored with a 270-degree local yaw so
+    -- the Source prisoner-pod seat works. Its LocalToWorld basis is therefore
+    -- not the car's longitudinal axis. Offsetting limbs through seat:LocalToWorld
+    -- rotates the entire posed body sideways/backward relative to the wheel.
+    -- Keep the seat's actual anchor position, but express pose offsets in the
+    -- chassis frame (the same frame used by driving controls).
+    local vehicleSeatOrigin = ownerVehicle:WorldToLocal(seat:GetPos())
+    local function SeatPoint(offset)
+        return ownerVehicle:LocalToWorld(vehicleSeatOrigin + offset)
+    end
+    local pelvisPos = SeatPoint(Vector(0, 0, 14))
+    local spinePos = SeatPoint(Vector(0, 0, 36))
+    local headPos = SeatPoint(Vector(0, 0, 57))
 
     -- Soft position control keeps the pelvis/torso in the seat without welding
     -- the ragdoll to the chassis; impacts can still overcome the shadow control.
@@ -851,8 +862,8 @@ function FakeActor:UpdateVehicleSeat(dt)
         {thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf", side = 1}
     }
     for _, leg in ipairs(legs) do
-        local thighPos = seat:LocalToWorld(Vector(18, leg.side * 7, 7))
-        local calfPos = seat:LocalToWorld(Vector(30, leg.side * 7, -5))
+        local thighPos = SeatPoint(Vector(18, leg.side * 7, 7))
+        local calfPos = SeatPoint(Vector(30, leg.side * 7, -5))
         self:ShadowBone(leg.thigh, upright, 0.18, 40 * power, 34,
             thighPos, 85, 50)
         self:ShadowBone(leg.calf, upright, 0.18, 34 * power, 30,
@@ -863,9 +874,9 @@ function FakeActor:UpdateVehicleSeat(dt)
         {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand"},
         {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand"}
     }) do
-        local upperPos = seat:LocalToWorld(Vector(-1, arm.side * 12, 33))
-        local forearmPos = seat:LocalToWorld(Vector(10, arm.side * 13, 25))
-        local handPos = seat:LocalToWorld(Vector(16, arm.side * 12, 19))
+        local upperPos = SeatPoint(Vector(-1, arm.side * 12, 33))
+        local forearmPos = SeatPoint(Vector(10, arm.side * 13, 25))
+        local handPos = SeatPoint(Vector(16, arm.side * 12, 19))
         self:ShadowBone(arm.upper, upright, 0.18, 38 * power, 32,
             upperPos, 78, 48)
         self:ShadowBone(arm.forearm, upright, 0.17, 36 * power, 30,
