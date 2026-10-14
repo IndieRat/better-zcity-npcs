@@ -1005,6 +1005,13 @@ end)
 timer.Create("BZCN_ExpireHelpAndCuriosity", 1, 0, function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
         if not Managed(ent) then continue end
+        -- Keep disposition independent from the officer's attention timer, but
+        -- expire the temporary hostile state when the grievance lease ends.
+        if ent.BZCNMetrocopDisposition == "hostile"
+            and (ent.BZCNHostileOffenderUntil or 0) <= CurTime() then
+            ent.BZCNMetrocopDisposition = "neutral"
+            if ent.SetNW2String then ent:SetNW2String("BZCNMetrocopDisposition", "neutral") end
+        end
         if (ent.BZCNHelpUntil or 0) <= CurTime() then
             ent.BZCNHelpTarget = nil
             ent.BZCNMedicalTarget = nil
