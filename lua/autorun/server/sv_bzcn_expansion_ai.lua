@@ -980,41 +980,9 @@ local function EliteScore(ent)
     return 0
 end
 
-timer.Create("BZCN_CombineSquadHierarchy", 5, 0, function()
-    local units, done = {}, {}
-    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
-        if IsCombineUnit(ent) and not ent.BZCNGoodCopDefected then units[#units + 1] = ent end
-    end
-    for _, seed in ipairs(units) do
-        if done[seed] then continue end
-        local squad = {}
-        for _, unit in ipairs(ents.FindInSphere(seed:GetPos(), 920)) do
-            if IsCombineUnit(unit) and not unit.BZCNGoodCopDefected and not done[unit]
-                and (string.lower(Faction(unit)) == "combine" or LineKind(unit) == "metrocop") then
-                squad[#squad + 1] = unit
-                done[unit] = true
-            end
-        end
-        if #squad == 0 then continue end
-        local bestRank, bestHealth, choices = -math.huge, -math.huge, {}
-        for _, unit in ipairs(squad) do
-            local rank = EliteScore(unit)
-            local health = unit:Health() + math.Rand(0, 0.01)
-            if rank > bestRank or (rank == bestRank and health > bestHealth) then
-                bestRank, bestHealth, choices = rank, health, {unit}
-            elseif rank == bestRank and math.abs(health - bestHealth) < 0.01 then
-                choices[#choices + 1] = unit
-            end
-        end
-        local leader = choices[math.random(#choices)]
-        for _, unit in ipairs(squad) do
-            unit.BZCNSquadLeader = leader
-            unit.BZCNSquadIsLeader = unit == leader
-            if unit.SetNW2Entity then unit:SetNW2Entity("BZCNSquadLeader", leader) end
-            if unit.SetNW2Bool then unit:SetNW2Bool("BZCNSquadIsLeader", unit == leader) end
-        end
-    end
-end)
+-- Squad membership and leadership are owned by sv_bzcn_squad_director.lua.
+-- Avoid a second timer that overwrites leader pointers without matching squad IDs
+-- and incorrectly groups solo Metrocops into tactical squads.
 
 hook.Add("BZCN_NPCGesture", "BZCN_CombineLeaderSignals", function(leader, gesture)
     if not IsCombineUnit(leader) or leader.BZCNSquadLeader ~= leader then return end
