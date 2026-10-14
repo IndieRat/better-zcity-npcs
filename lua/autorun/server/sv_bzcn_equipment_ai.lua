@@ -4,6 +4,8 @@
 
 if not SERVER then return end
 BZCN = BZCN or {}
+BZCN.EquipmentAI = BZCN.EquipmentAI or {}
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("equipment", BZCN.EquipmentAI) end
 
 local MEDICAL_WEAPONS = {
     weapon_medkit_sh = true,
