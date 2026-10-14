@@ -95,17 +95,41 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     if not IsValid(weapon) then return nil end
 
     -- Z-City's medicine SWEPs auto-treat vanilla NPCs from OwnerChanged().
-    -- Suppress that equip-time side effect; BZCN invokes their real Heal method
-    -- only when the AI decides to treat someone.
+    -- Suppress that equip-time side effect for managed NextBots, but preserve
+    -- native player behavior if this instance is later transferred/given away.
     if MEDICAL_WEAPONS[class] then
-        weapon.OwnerChanged = function() end
-        -- This hidden weapon is consumed only through BZCN's explicit Heal call.
-        -- Don't let its Player input/Think loops run for a NextBot owner; the
-        -- stock bandage Think indexes modeValues directly and assumes a Player UI.
-        weapon.Think = function() end
-        weapon.PrimaryAttack = function() end
-        weapon.SecondaryAttack = function() end
-        weapon.Reload = function() end
+        local nativeOwnerChanged = weapon.OwnerChanged
+        local nativeThink = weapon.Think
+        local nativePrimary = weapon.PrimaryAttack
+        local nativeSecondary = weapon.SecondaryAttack
+        local nativeReload = weapon.Reload
+        weapon.OwnerChanged = function(self, ...)
+            local owner = self:GetOwner()
+            if IsValid(owner) and BZCN.IsManaged(owner) then return end
+            if isfunction(nativeOwnerChanged) then return nativeOwnerChanged(self, ...) end
+        end
+        -- Stock Think/Reload expect Player input and mode UI. Keep those paths
+        -- inert only while a managed NextBot owns this hidden runtime instance.
+        weapon.Think = function(self, ...)
+            local owner = self:GetOwner()
+            if IsValid(owner) and BZCN.IsManaged(owner) then return end
+            if isfunction(nativeThink) then return nativeThink(self, ...) end
+        end
+        weapon.PrimaryAttack = function(self, ...)
+            local owner = self:GetOwner()
+            if IsValid(owner) and BZCN.IsManaged(owner) then return end
+            if isfunction(nativePrimary) then return nativePrimary(self, ...) end
+        end
+        weapon.SecondaryAttack = function(self, ...)
+            local owner = self:GetOwner()
+            if IsValid(owner) and BZCN.IsManaged(owner) then return end
+            if isfunction(nativeSecondary) then return nativeSecondary(self, ...) end
+        end
+        weapon.Reload = function(self, ...)
+            local owner = self:GetOwner()
+            if IsValid(owner) and BZCN.IsManaged(owner) then return end
+            if isfunction(nativeReload) then return nativeReload(self, ...) end
+        end
     end
 
     weapon:SetPos(owner:GetPos())
@@ -1985,9 +2009,15 @@ local function UseMedicalItem(healer, target, class)
     -- 3 tranexamic/internal-bleed treatment, and 4 tourniquet.
     PlaceRuntimeWeapon(healer, med)
     local org = target.organism or target.BZCN_Organism or {}
-    -- Legacy/partially initialized organism tables can lose their owner
-    -- pointer. Native Z-City medicine publishes wound state through org.owner.
-    if istable(org) and not IsValid(org.owner) then org.owner = target end
+    -- Z-City's native Heal methods read target.organism directly. Some BZCN
+    -- support paths expose the same table only as BZCN_Organism, which made a
+    -- medkit appear to activate while applying no treatment. Restore the native
+    -- alias before invoking Heal and keep both references on the same table.
+    if istable(org) then
+        if not istable(target.organism) then target.organism = org end
+        target.BZCN_Organism = org
+        if not IsValid(org.owner) then org.owner = target end
+    end
     local actions = {}
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
     local woundCount = WoundCount(org.wounds)
