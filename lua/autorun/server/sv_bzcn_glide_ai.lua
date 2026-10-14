@@ -369,6 +369,70 @@ local function FindCombatTarget(driver, radius)
     return best
 end
 
+-- Prefer authored Source road paths when the map provides them. path_track
+-- nodes follow GetNext(); path_corner nodes use their target keyvalue. Navmesh
+-- remains the fallback for maps without an authored vehicle route.
+local function GetRoadNodes()
+    local nodes = {}
+    for _, class in ipairs({"path_track", "path_corner", "bzcn_road_node", "bzcn_roadnode"}) do
+        for _, node in ipairs(ents.FindByClass(class)) do
+            if IsValid(node) then nodes[#nodes + 1] = node end
+        end
+    end
+    return nodes
+end
+
+local function GetNextRoadNode(node)
+    if not IsValid(node) then return nil end
+    if isfunction(node.GetNext) then
+        local ok, nextNode = pcall(node.GetNext, node)
+        if ok and IsValid(nextNode) and nextNode ~= node then return nextNode end
+    end
+    if isfunction(node.GetKeyValues) then
+        local values = node:GetKeyValues() or {}
+        local targetName = values.target
+        if isstring(targetName) and targetName ~= "" then
+            for _, target in ipairs(ents.FindByName(targetName)) do
+                if IsValid(target) and target ~= node then return target end
+            end
+        end
+    end
+    return nil
+end
+
+local function FindRoadNodeGoal(vehicle)
+    if not IsValid(vehicle) then return nil end
+    local nodes = GetRoadNodes()
+    if #nodes == 0 then return nil end
+    local origin = vehicle:GetPos()
+    local forward = GetDrivingForward(vehicle)
+    local best, bestScore
+    for _, node in ipairs(nodes) do
+        local delta = node:GetPos() - origin
+        local distance = delta:Length()
+        delta.z = 0
+        if distance > 180 and distance < 2400 and delta:LengthSqr() > 1 then
+            delta:Normalize()
+            local facing = forward:Dot(delta)
+            if facing > -0.05 then
+                local score = distance + (1 - facing) * 700
+                if not bestScore or score < bestScore then
+                    best, bestScore = node, score
+                end
+            end
+        end
+    end
+    if not IsValid(best) then return nil end
+
+    local nextNode = GetNextRoadNode(best)
+    if IsValid(nextNode) and nextNode:GetPos():DistToSqr(origin) > 180 * 180 then
+        -- Aim one node ahead when possible so the car begins turning smoothly
+        -- instead of repeatedly stopping on each node.
+        return nextNode:GetPos()
+    end
+    return best:GetPos()
+end
+
 local function FindNavPoint(vehicle, minDist, maxDist)
     if not navmesh or not navmesh.GetAllNavAreas then return nil end
     local areas = navmesh.GetAllNavAreas()
@@ -523,8 +587,14 @@ local function SetControls(vehicle, throttle, steer, brake)
     -- target turns, and the old reverse-momentum recovery all used 0.7-0.9,
     -- so ordinary braking repeatedly put the car in reverse. Keep AI braking
     -- below that gear-selection threshold and explicitly restore forward gear.
+    -- NPCs do not trigger Glide's real OnDriverEnter callback, so the
+    -- engine can remain off and the gearbox can remain in neutral forever.
+    if isfunction(vehicle.IsEngineOn) and not vehicle:IsEngineOn()
+        and isfunction(vehicle.TurnOn) then
+        vehicle:TurnOn()
+    end
     if isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
-        and vehicle:GetGear() < 0 then
+        and vehicle:GetGear() <= 0 then
         vehicle:SwitchGear(1, 0)
     end
 
@@ -709,6 +779,14 @@ local function BeginVehicleAI(vehicle, driver)
     driver.BZCNGlideApproachSeat = nil
     driver.BZCNGlideApproachRole = nil
     driver.BZCNGlideApproachUntil = nil
+
+    -- Fake actors do not enter a real Glide seat, so explicitly wake the engine
+    -- and put the transmission in first gear before the first AI control tick.
+    if isfunction(vehicle.TurnOn) then vehicle:TurnOn() end
+    if isfunction(vehicle.SwitchGear) and isfunction(vehicle.GetGear)
+        and vehicle:GetGear() <= 0 then
+        vehicle:SwitchGear(1, 0)
+    end
 
     vehicle.BZCNAIDriver = driver
     vehicle.BZCNGlideAIMode = info.combat and "combat" or "wander"
@@ -911,7 +989,7 @@ local function UpdateVehicleAI(vehicle, now)
         else
             -- Keep driving if this map has no suitable parking-sized nav area.
             vehicle.BZCNGlideAIParkAt = now + 22
-            goal = FindNavPoint(vehicle, 800, 1800) or FindWanderGoal(vehicle)
+            goal = FindRoadNodeGoal(vehicle) or FindNavPoint(vehicle, 800, 1800) or FindWanderGoal(vehicle)
             vehicle.BZCNGlideAITarget = goal
             vehicle.BZCNGlideAINextTargetAt = now + 12
         end
@@ -931,9 +1009,9 @@ local function UpdateVehicleAI(vehicle, now)
         if vehicle.BZCNGlideAIMode == "combat" and IsValid(target) and targetAhead then
             goal = target:GetPos()
         elseif parkMode then
-            goal = FindParkingPoint(vehicle) or FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
+            goal = FindParkingPoint(vehicle) or FindRoadNodeGoal(vehicle) or FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
         else
-            goal = FindNavPoint(vehicle, 650, 2200)
+            goal = FindRoadNodeGoal(vehicle) or FindNavPoint(vehicle, 650, 2200)
             if not isvector(goal) then goal = FindWanderGoal(vehicle) end
         end
         vehicle.BZCNGlideAITarget = goal
