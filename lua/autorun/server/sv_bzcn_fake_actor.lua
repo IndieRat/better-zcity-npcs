@@ -234,8 +234,12 @@ function FakeActor:RefreshPhysiology()
     -- Resolve the seated recovery quickly; don't loop every civilian through a
     -- long seated animation. Once it ends, return to loose physics.
     if downed and self.posture == "sit" and (self.sitUntil or 0) <= now then
-        self.posture = "rest"
+        -- Sitting is only a short recovery beat. If physiology permits crawling
+        -- and the chest is already facing the floor, transition into crawling
+        -- rather than leaving the NPC motionless for the rest of the knockdown.
+        self.posture = (self:IsFaceDown() and canCrawl) and "crawl" or "rest"
         self.sitUntil = nil
+        self.nextCrawlStroke = now + math.Rand(0.25, 0.6)
     end
 
     local crawlDelay = math.Clamp(tonumber(self.config.autoCrawlDelay) or 1.45, 0.65, 3.0)
