@@ -102,8 +102,11 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
         -- 520-720 horizontal burst plus 275 vertical speed could carry the
         -- bot/ragdoll far beyond the target, especially when movement already
         -- had residual momentum.
-        local boostVelocity = direction * math.Clamp(groundSpeed + 150, 340, 460)
-            + Vector(0, 0, 145)
+        -- Slightly longer pounce impulse: the previous cap left the fake body
+        -- short of its intended contact point after ragdoll transition and drag.
+        -- Keep a hard cap so momentum inheritance cannot turn this into a launch.
+        local boostVelocity = direction * math.Clamp(groundSpeed + 185, 410, 535)
+            + Vector(0, 0, 165)
         local pounceState = {
             target = target,
             direction = direction,
@@ -166,11 +169,11 @@ timer.Create("BZCN_FurryLungeDirector", 0.12, 0, function()
                             - direction * inheritedHorizontal:Dot(direction)
                         local velocity = launchVelocity + inheritedSide * 0.2
                         local horizontal = Vector(velocity.x, velocity.y, 0)
-                        if horizontal:Length() > 480 then
+                        if horizontal:Length() > 555 then
                             horizontal:Normalize()
-                            horizontal = horizontal * 480
+                            horizontal = horizontal * 555
                         end
-                        velocity = Vector(horizontal.x, horizontal.y, math.Clamp(velocity.z, -120, 180))
+                        velocity = Vector(horizontal.x, horizontal.y, math.Clamp(velocity.z, -120, 195))
                         phys:SetVelocity(velocity)
                         if BZCN.FakeActor and isfunction(BZCN.FakeActor.Attach) then
                             local actor = BZCN.FakeActor.Attach(ent, rag, {
