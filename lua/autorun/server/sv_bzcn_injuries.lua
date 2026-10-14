@@ -1934,7 +1934,10 @@ local function DetachLivingRagdoll(owner, rag)
 end
 
 function Support.OnNPCDeath(owner)
-    if not IsValid(owner) then return nil end
+    -- This entry point can clear owner.organism below, so it must only accept
+    -- an actual managed NPC, never a player or a ragdoll owner alias.
+    if not IsSupportedNPC(owner) or owner:IsPlayer()
+        or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return nil end
     local state = owner.BZCNNPCOrg
     if not state then return nil end
 
