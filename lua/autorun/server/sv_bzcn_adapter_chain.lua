@@ -5,6 +5,7 @@ if not SERVER or not BZCN then return end
 
 BZCN.AdapterChain = BZCN.AdapterChain or {}
 local Chain = BZCN.AdapterChain
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("adapter", Chain) end
 local tracked = setmetatable({}, {__mode = "k"})
 local CYCLE_INTERVAL = 0.20
 local MUTABLE_FIELDS = {
