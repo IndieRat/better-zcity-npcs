@@ -828,7 +828,11 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
     if desiredForward:LengthSqr() < 0.01 then return end
     desiredForward:Normalize()
-    local yaw = math.NormalizeAngle(desiredForward:Angle().y)
+    -- The seated player-model physics-bone basis is reversed against the
+    -- Glide chassis forward axis after the pose-axis correction below. Keep
+    -- limb target positions in chassis coordinates, but compensate the bone
+    -- orientation so the visible face/torso point through the windshield.
+    local yaw = math.NormalizeAngle(desiredForward:Angle().y + 180)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
