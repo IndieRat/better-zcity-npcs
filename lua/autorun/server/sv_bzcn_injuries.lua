@@ -398,10 +398,13 @@ hook.Add("Org Think", "BZCNNPCSupport_WoundNetVarMirror", function(owner, org)
 end)
 
 local function EnsureZCityOrganism(owner)
-    -- Hard boundary: this helper exists only to initialize the managed NPC's
-    -- fake-player organism. Never pass a real player through Add/Clear here;
-    -- Z-City's Add replaces the organism table and Clear resets its state.
-    if not IsSupportedNPC(owner) or owner:IsPlayer() then return nil, false end
+    -- Hard boundary: only explicitly managed BZCN NPCs may enter the native
+    -- Add/Clear lifecycle. Never use the generic NPC fallback here: Z-City's
+    -- Add replaces the organism table and Clear resets its state.
+    if not IsValid(owner) or owner:IsPlayer()
+        or not (BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(owner)) then
+        return nil, false
+    end
 
     local current = owner.organism
     if istable(current) and current.owner == owner and current.fakePlayer == true then
