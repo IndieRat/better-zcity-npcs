@@ -629,8 +629,8 @@ local function BoardSquad(vehicle, driver)
         if not IsValid(seat) or not IsSeatFree(seat) then continue end
         local mate
         for _, candidate in ipairs(mates) do
-            if not candidate.BZCNGlideVehicle and not candidate.BZCNGlideExitAt
-                or (candidate.BZCNGlideExitAt or 0) <= CurTime() then
+            if not candidate.BZCNGlideVehicle and not IsValid(candidate.BZCNGlideApproachVehicle)
+                and ((not candidate.BZCNGlideExitAt) or (candidate.BZCNGlideExitAt or 0) <= CurTime()) then
                 mate = candidate
                 break
             end
@@ -1021,7 +1021,8 @@ local function ProcessBoardingApproaches(now)
             npc.BZCNGlideApproachUntil = nil
             continue
         end
-        if npc:GetPos():DistToSqr(seat:GetPos()) > 95 * 95 then
+        if npc:GetPos():DistToSqr(seat:GetPos()) > 72 * 72 then
+            npc.BZCNGlideInteractAt = nil
             if npc.loco then
                 npc.loco:SetDesiredSpeed(105)
                 npc:Approach(seat:GetPos(), 1)
@@ -1029,11 +1030,25 @@ local function ProcessBoardingApproaches(now)
             continue
         end
 
+        -- Briefly stop at the door/seat to perform an entry interaction before
+        -- the visible ragdoll is posed inside. This is deliberately not a teleport
+        -- from a distant point; the NPC must physically reach the vehicle first.
+        npc.BZCNGlideInteractAt = npc.BZCNGlideInteractAt or (now + 0.55)
+        if now < npc.BZCNGlideInteractAt then
+            if npc.loco then
+                npc.loco:SetDesiredSpeed(0)
+                npc.loco:SetVelocity(vector_origin)
+            end
+            continue
+        end
+
         local role = npc.BZCNGlideApproachRole or "passenger"
+        npc.BZCNGlideInteractAt = nil
         npc.BZCNGlideApproachVehicle = nil
         npc.BZCNGlideApproachSeat = nil
         npc.BZCNGlideApproachRole = nil
         npc.BZCNGlideApproachUntil = nil
+        hook.Run("BZCN_NPCInteractedWithGlideVehicle", npc, vehicle, seat, role)
         if role == "driver" then
             BeginVehicleAI(vehicle, npc)
         elseif SeatNPC(npc, vehicle, seat, role) then
