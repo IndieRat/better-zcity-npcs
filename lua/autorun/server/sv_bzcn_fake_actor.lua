@@ -815,15 +815,15 @@ function FakeActor:UpdateVehicleSeat(dt)
         return
     end
 
-    local seatAng = seat:GetAngles()
-    -- The occupant must face the seat/windshield, not the chassis model axis:
-    -- some Glide vehicle models have a reversed entity-forward basis. The seat
-    -- rotates with the vehicle and is the authoritative occupant-facing frame.
-    local desiredForward = seatAng:Forward()
+    -- The Glide seat entity's angle is a seating/attachment transform, not
+    -- guaranteed to point through the windshield. Use the vehicle chassis axis
+    -- for the occupant's heading, matching the AI steering/throttle frame. Only
+    -- fall back to the seat axis if the chassis basis is unavailable.
+    local ownerVehicle = IsValid(self.owner) and self.owner.BZCNGlideVehicle or nil
+    local desiredForward = IsValid(ownerVehicle) and ownerVehicle:GetForward() or vector_origin
     desiredForward.z = 0
     if desiredForward:LengthSqr() < 0.01 then
-        local ownerVehicle = IsValid(self.owner) and self.owner.BZCNGlideVehicle or nil
-        desiredForward = IsValid(ownerVehicle) and ownerVehicle:GetForward() or vector_origin
+        desiredForward = seat:GetForward()
         desiredForward.z = 0
     end
     if desiredForward:LengthSqr() < 0.01 then return end
