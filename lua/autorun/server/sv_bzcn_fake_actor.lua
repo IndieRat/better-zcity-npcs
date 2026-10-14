@@ -869,7 +869,7 @@ function FakeActor:UpdateVehicleSeat(dt)
     -- direct-yaw variant visibly made NPCs look through the rear window; rotate
     -- the bone orientation half a turn while keeping all target positions in
     -- chassis coordinates so the body faces the windshield.
-    local yaw = math.NormalizeAngle(desiredForward:Angle().y + 180)
+    local yaw = math.NormalizeAngle(desiredForward:Angle().y)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
@@ -905,10 +905,9 @@ function FakeActor:UpdateVehicleSeat(dt)
         {side = -1, thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf", foot = "ValveBiped.Bip01_L_Foot"},
         {side = 1, thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf", foot = "ValveBiped.Bip01_R_Foot"}
     }) do
-        -- The seated physics-bone basis is mirrored against the chassis lateral
-        -- axis; invert the lateral target so anatomical L/R land on the matching
-        -- side of the occupant instead of crossing over.
-        local lateral = -leg.side
+        -- Keep anatomical L/R aligned with the chassis lateral axis. The previous
+        -- inversion mirrored the limbs, putting left legs on the right and vice versa.
+        local lateral = leg.side
         local thighPos = SeatPoint(Vector(8, lateral * 8, 22))
         local kneePos = SeatPoint(Vector(24, lateral * 8, 12))
         local footPos = SeatPoint(Vector(17, lateral * 8, 3))
@@ -924,8 +923,8 @@ function FakeActor:UpdateVehicleSeat(dt)
         {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand"},
         {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand"}
     }) do
-        -- Match the same mirrored chassis-space correction used by the legs.
-        local lateral = -arm.side
+        -- Match the anatomical side used by the leg targets; do not mirror arms.
+        local lateral = arm.side
         local upperPos = SeatPoint(Vector(0, lateral * 13, 40))
         local forearmPos = SeatPoint(Vector(11, lateral * 12, 31))
         local handPos = SeatPoint(Vector(22, lateral * 10, 27))
