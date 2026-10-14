@@ -1037,6 +1037,21 @@ local function Recover(owner, rag, removedExternally)
         return false
     end
 
+    -- Handcuffs are a persistent restraint, not just a visual ragdoll flag.
+    -- Retry recovery while restrained so removing the restraint can resume the
+    -- normal recovery lifecycle without forcing a stand-up through the cuffs.
+    local organism = owner.organism or owner.BZCN_Organism or owner.BZCNOrganism
+    if owner.BZCNHandcuffed == true or owner:GetNW2Bool("BZCNHandcuffed", false)
+        or (istable(organism) and organism.handcuffed == true) then
+        local timerName = "BZCNNPCSupport_Recover_" .. owner:EntIndex() .. "_" .. owner:GetCreationID()
+        state.recoverTimer = timerName
+        timer.Create(timerName, 0.75, 1, function()
+            if not IsAlive(owner) or owner.BZCNNPCOrg ~= state or not state.downed then return end
+            Recover(owner, owner.BZCNNPCRagdoll, false)
+        end)
+        return false
+    end
+
     if not IsValid(rag) then rag = owner.BZCNNPCRagdoll end
 
     -- zcnpci calls out that a downed NPC must not automatically get back up
