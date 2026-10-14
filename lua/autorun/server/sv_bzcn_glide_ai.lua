@@ -772,8 +772,12 @@ local function SetControls(vehicle, throttle, steer, brake)
     end
     vehicle:SetInputFloat(1, "accelerate", math.Clamp(throttle, 0, 1))
     vehicle:SetInputFloat(1, "steer", math.Clamp(steer, -1, 1))
-    -- Do not combine throttle with Glide's low-speed brake/reverse behavior.
-    vehicle:SetInputFloat(1, "brake", throttle > 0.05 and 0 or math.Clamp(brake or 0, 0, 0.18))
+    -- Glide can interpret simultaneous throttle/brake as reverse-like input.
+    -- Permit a tiny residual throttle only when the smoothed brake is negligible.
+    local brakeInput = math.Clamp(brake or 0, 0, 0.18)
+    if brakeInput > 0.025 then throttle = math.min(throttle, 0.035) end
+    vehicle:SetInputFloat(1, "accelerate", math.Clamp(throttle, 0, 1))
+    vehicle:SetInputFloat(1, "brake", brakeInput)
 end
 
 local function ReleaseVehicle(vehicle, reason, keepDowned)
@@ -809,6 +813,8 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
     vehicle.BZCNGlideAIPreviousVelocity = nil
     vehicle.BZCNGlideAIPreviousVelocityAt = nil
     vehicle.BZCNGlideAISteer = nil
+    vehicle.BZCNGlideAIThrottle = nil
+    vehicle.BZCNGlideAIBrake = nil
     vehicle.BZCNGlideRoadCurrentID = nil
     vehicle.BZCNGlideRoadNextID = nil
 end
@@ -1220,41 +1226,48 @@ local function UpdateVehicleAI(vehicle, now)
     local combat = vehicle.BZCNGlideAIMode == "combat"
     local socialApproach = IsValid(interest) and not combat
     local parkingApproach = vehicle.BZCNGlideAIMode == "park_approach" and not combat
-    local desiredSpeed = combat and COMBAT_SPEED or (socialApproach and 145 or parkingApproach and 165 or CIVILIAN_SPEED)
+    local cruiseSpeed = combat and COMBAT_SPEED or (socialApproach and 145 or parkingApproach and 165 or CIVILIAN_SPEED)
 
-    -- Cruise control: continuously adjust throttle to the speed target instead
-    -- of alternating between a fixed throttle and full stop each AI tick.
+    -- Turn-aware cruise control: reduce the target speed before the corner
+    -- instead of reacting to steering with repeated throttle/brake toggles.
+    local turnSeverity = math.Clamp(math.abs(headingError) / 95, 0, 1)
+    local desiredSpeed = cruiseSpeed * (1 - turnSeverity * 0.38)
+    if alignment < -0.35 then desiredSpeed = math.min(desiredSpeed, 150) end
+    if alignment < 0.12 then desiredSpeed = math.min(desiredSpeed, 205) end
+
     local signedForwardSpeed = currentVelocity:Dot(forward)
     local forwardSpeed = math.max(signedForwardSpeed, 0)
     local speedError = desiredSpeed - forwardSpeed
-    local throttle = math.Clamp(0.30 + speedError / math.max(desiredSpeed, 1) * 0.62, 0.12, combat and 0.9 or 0.78)
+    local throttle = math.Clamp(0.32 + speedError / math.max(desiredSpeed, 1) * 0.58, 0.10, combat and 0.9 or 0.78)
     local brake = 0
 
-    -- Slow down for sharp turns without repeatedly stopping at every steering
-    -- correction. Keep a little drive through the turn so the chassis maintains flow.
-    if alignment < -0.35 then
-        throttle = math.min(throttle, forwardSpeed < 35 and 0.28 or 0.20)
-    elseif alignment < 0.12 then
-        throttle = math.min(throttle, 0.30)
+    -- Do not use hard braking for normal cornering. Lift throttle progressively
+    -- when already above the desired speed and let steering keep the route smooth.
+    if forwardSpeed > desiredSpeed + 85 then
+        throttle = 0.06
+    elseif forwardSpeed > desiredSpeed + 35 then
+        throttle = math.min(throttle, 0.18)
     end
-    if math.abs(steer) > 0.82 then throttle = math.min(throttle, 0.34) end
-    if forwardSpeed > desiredSpeed + 70 then throttle = 0.08 end
+    if math.abs(steer) > 0.90 then throttle = math.min(throttle, 0.28) end
 
     -- Use distance-to-obstacle, not a boolean 520-unit look-ahead that slammed
     -- the brakes for anything in the general corridor. Brake progressively and
     -- only come to a full stop for a genuinely close obstruction.
     local obstacleDistance = GetForwardObstacleDistance(vehicle, combat and 360 or 460)
-    if obstacleDistance < 85 then
+    if obstacleDistance < 52 then
         throttle = 0
-        brake = forwardSpeed > 45 and 0.16 or 0
-    elseif obstacleDistance < 145 then
-        throttle = math.min(throttle, 0.22)
-        brake = forwardSpeed > 240 and 0.08 or 0
-    elseif obstacleDistance < 260 then
-        throttle = math.min(throttle, 0.40)
+        brake = forwardSpeed > 30 and 0.15 or 0
+    elseif obstacleDistance < 105 then
+        throttle = math.min(throttle, 0.035)
+        brake = forwardSpeed > 145 and 0.11 or 0
+    elseif obstacleDistance < 185 then
+        throttle = math.min(throttle, 0.20)
+        brake = 0
+    elseif obstacleDistance < 300 then
+        throttle = math.min(throttle, 0.42)
         brake = 0
     end
-    if obstacleDistance < 145 and not combat
+    if obstacleDistance < 105 and not combat
         and now >= (vehicle.BZCNGlideAINextAvoidAt or 0) then
         -- A close obstruction should prompt a broad route change, not a permanent
         -- standstill. Debounce the retarget so the vehicle doesn't zigzag.
@@ -1267,7 +1280,9 @@ local function UpdateVehicleAI(vehicle, now)
     -- close hazard can request a cautious crawl, while the forward hull handles
     -- actual objects in the car's path.
     if NearbyHazard(vehicle, combat and 95 or 115) then
-        throttle = math.min(throttle, 0.22)
+        -- Nearby actors beside the chassis should cause a modest lift, not a
+        -- stop-start loop. The forward hull remains responsible for obstacles.
+        throttle = math.min(throttle, 0.34)
         brake = 0
     end
 
@@ -1288,6 +1303,18 @@ local function UpdateVehicleAI(vehicle, now)
     local steerAlpha = math.Clamp(FrameTime() * 5, 0.12, 0.42)
     steer = Lerp(steerAlpha, previousSteer, steer)
     vehicle.BZCNGlideAISteer = steer
+
+    -- Smooth the pedal commands at the slower AI cadence as well. Without this,
+    -- one trace fraction change could flip instantly between cruise and braking.
+    local controlAlpha = math.Clamp(FrameTime() * 4, 0.22, 0.48)
+    local previousThrottle = tonumber(vehicle.BZCNGlideAIThrottle)
+    if previousThrottle == nil then previousThrottle = throttle end
+    local previousBrake = tonumber(vehicle.BZCNGlideAIBrake) or 0
+    throttle = Lerp(controlAlpha, previousThrottle, throttle)
+    brake = Lerp(controlAlpha, previousBrake, brake)
+    if brake > 0.025 then throttle = math.min(throttle, 0.035) end
+    vehicle.BZCNGlideAIThrottle = throttle
+    vehicle.BZCNGlideAIBrake = brake
 
     -- Do not ram a non-hostile player/NPC to reach a combat target.
     if combat and IsValid(target) and IsHostile(driver, target) then
