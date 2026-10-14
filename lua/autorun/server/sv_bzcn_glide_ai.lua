@@ -524,9 +524,31 @@ local function FindRoadNodeGoal(vehicle)
             -- Aim slightly beyond the next node along the following segment so
             -- the car rounds corners smoothly instead of sawing left/right.
             local lookAhead = nextPos
-            local afterID
+
+            -- Choose the continuation that best preserves the direction of the
+            -- current road segment. Taking the first linked node is incorrect:
+            -- links are stored by ID, not in road order, so at a junction that
+            -- could aim the car across a side road while its route state still
+            -- points down the original road.
+            local incoming = nextPos - currentPos
+            incoming.z = 0
+            if incoming:LengthSqr() > 1 then incoming:Normalize() end
+            local afterID, bestContinuation
             for _, linkedID in ipairs((nextNode and nextNode.links) or {}) do
-                if linkedID ~= currentID then afterID = linkedID break end
+                if linkedID ~= currentID then
+                    local candidatePos = nodePos(graph[linkedID])
+                    if candidatePos then
+                        local continuation = candidatePos - nextPos
+                        continuation.z = 0
+                        if continuation:LengthSqr() > 1 then
+                            continuation:Normalize()
+                            local score = incoming:Dot(continuation)
+                            if not bestContinuation or score > bestContinuation then
+                                afterID, bestContinuation = linkedID, score
+                            end
+                        end
+                    end
+                end
             end
             local afterPos = nodePos(graph[afterID])
             if afterPos then
@@ -534,7 +556,9 @@ local function FindRoadNodeGoal(vehicle)
                 continuation.z = 0
                 if continuation:LengthSqr() > 1 then
                     continuation:Normalize()
-                    lookAhead = nextPos + continuation * 150
+                    -- Look only a short distance beyond the next node; long
+                    -- look-ahead cuts corners and can pull the vehicle off-road.
+                    lookAhead = nextPos + continuation * 90
                 end
             end
             return lookAhead
