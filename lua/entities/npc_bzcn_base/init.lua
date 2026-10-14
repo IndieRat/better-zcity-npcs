@@ -219,7 +219,10 @@ function ENT:Initialize()
     self:SetHealth(profile.Health or 100)
     if self.SetMaxHealth then self:SetMaxHealth(profile.Health or 100) end
     self.MaxHealthLimit = profile.Health or 100
-    self.LoseTargetDist = profile.SenseRange or profile.WeaponRange or 1400
+    -- Ranged factions should acquire visible hostiles at open-field distances;
+    -- melee/civilian profiles keep their configured sense radius.
+    self.LoseTargetDist = math.max(tonumber(profile.SenseRange) or 0,
+        tonumber(profile.WeaponRange) or 0, profile.Ranged == true and 3600 or 1400)
     self.LastAttack = 0
     self.BZCNCurrentSequence = -1
     self.BZCNStamina = 100
@@ -956,7 +959,7 @@ function ENT:FindEnemy()
         local scanRadius = math.Clamp(math.max(
             tonumber(self.LoseTargetDist) or 1400,
             tonumber(profile.WeaponRange) or 900
-        ), 900, 2200)
+        ), 900, 3600)
         local scanRadiusSqr = scanRadius * scanRadius
         local eye = isfunction(self.EyePos) and self:EyePos() or self:WorldSpaceCenter()
 
@@ -1917,19 +1920,15 @@ function ENT:ChaseEnemy(target)
         if downed then
             self.loco:SetDesiredSpeed(0)
 
-            -- A conscious, armed NPC may keep fighting from its fake body.
-            -- Do not run pathing/stand-up logic while downed: just refresh the
-            -- same target solution and let FakeActor pose the weapon arms.
-            local canFightDowned = hasRangedWeapon and not gettingUp
-                and not (BZCNCombatActor and BZCNCombatActor.IsIncapacitated
-                    and BZCNCombatActor.IsIncapacitated(self))
-            if canFightDowned and visible then
-                self.BZCNEnemy = target
-                self:AttackTarget(target)
-                coroutine.wait(0.1)
-                continue
+            -- A downed NPC can still have a visible target, but firing from a
+            -- loose physics ragdoll fights the crawl controller and leaves the
+            -- actor aiming/shooting instead of trying to get to safety. Keep
+            -- target memory; FakeActor owns posture and recovery until upright.
+            self.BZCNBodyFacingTarget = nil
+            self.BZCNBodyFacingUntil = 0
+            if BZCNCombatActor and isfunction(BZCNCombatActor.ClearAim) then
+                BZCNCombatActor.ClearAim(self)
             end
-
             coroutine.wait(0.1)
             return
         elseif gettingUp then
