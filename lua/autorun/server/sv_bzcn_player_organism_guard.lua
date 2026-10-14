@@ -29,8 +29,10 @@ local function RestorePlayerOrganism(ply, reason)
 
     local api = NativeAPI()
     local registered = api and istable(api.list) and api.list[ply] or nil
-    local backup = istable(ply.new_organism) and ply.new_organism
-        or (istable(ply.BZCNPlayerOrganismBackup) and ply.BZCNPlayerOrganismBackup or nil)
+    -- Prefer the exact last-known-good native table over legacy new_organism.
+    -- Other addons may leave new_organism as an empty/stale compatibility table.
+    local backup = istable(ply.BZCNPlayerOrganismBackup) and ply.BZCNPlayerOrganismBackup
+        or (istable(ply.new_organism) and ply.new_organism or nil)
 
     -- Prefer the exact live Z-City registry object. This preserves its wounds,
     -- blood, unconsciousness, and every module-owned field.
