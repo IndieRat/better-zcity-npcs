@@ -5,6 +5,7 @@ if not SERVER then return end
 BZCN = BZCN or {}
 BZCNTaskAI = BZCNTaskAI or {}
 local Tasks = BZCNTaskAI
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("tasks", Tasks) end
 
 local TASK_POOLS = {
     civilian = {
