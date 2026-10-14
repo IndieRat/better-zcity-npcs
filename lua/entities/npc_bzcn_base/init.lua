@@ -2244,11 +2244,13 @@ end
 
 function ENT:RunBehaviour()
     while true do
+        if BZCN.AIManager then BZCN.AIManager.BeginTick(self) end
         -- Glide owns movement while this NextBot is parented to a vehicle seat.
         -- Without this guard, the old Follow/Wander coroutine keeps issuing
         -- locomotion commands and can pull the NPC out of the vehicle.
         if self:GetNW2Bool("BZCNGlideRiding", false)
             and IsValid(self.BZCNGlideVehicle) then
+            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "vehicle", 100, "Glide owns movement", self.BZCNGlideVehicle, 0.35, "behavior-loop") end
             if self.loco then
                 self.loco:SetDesiredSpeed(0)
                 self.loco:SetVelocity(vector_origin)
@@ -2261,6 +2263,7 @@ function ENT:RunBehaviour()
         -- The NextBot's still-running Follow path otherwise keeps applying
         -- horizontal movement underneath the seated pose, making it slide.
         if IsBZCNSitSequence(self) and self:OnGround() then
+            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "external_sit", 95, "External sitting animation", nil, 0.35, "behavior-loop") end
             if self.loco then
                 self.loco:SetDesiredSpeed(0)
                 local velocity = self.loco:GetVelocity()
@@ -2277,9 +2280,11 @@ function ENT:RunBehaviour()
             and hg.BZCNNPCSupport.IsGettingUp(self)
         local swimming = UpdateSwimState(self)
         if downed or gettingUp then
+            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, gettingUp and "recovering" or "downed", 100, "Z-City organism lifecycle", nil, 0.35, "behavior-loop") end
             if self.loco then self.loco:SetDesiredSpeed(0) end
             coroutine.wait(0.1)
         elseif swimming then
+            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "swim", 80, "Water movement controller", nil, 0.35, "behavior-loop") end
             local enemy = self:HaveEnemy()
             local targetPoint
             if IsValid(enemy) then
@@ -2315,6 +2320,7 @@ function ENT:RunBehaviour()
             UpdatePursuitStamina(self, false)
             coroutine.wait(0.1)
         elseif CurTime() < (self.BZCNMedicalUntil or 0) then
+            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "treating", 75, "Medical action lock", self.BZCNMedicalTarget, 0.35, "behavior-loop") end
             if self.loco then
                 self.loco:SetDesiredSpeed(0)
                 if IsValid(self.BZCNMedicalTarget) then self.loco:FaceTowards(self.BZCNMedicalTarget:GetPos()) end
@@ -2329,6 +2335,7 @@ function ENT:RunBehaviour()
                     or (isstring(self.BZCN_SelectedWeapon) and self.BZCN_SelectedWeapon ~= ""
                         and not IsBZCNNonCombatWeapon(self.BZCN_SelectedWeapon)))) then
             local threat = self.BZCNFleeThreat
+            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "flee", 90, "Active fear/threat response", threat, 0.35, "behavior-loop") end
             if self.loco and IsValid(threat) then
                 local away = self:GetPos() - threat:GetPos()
                 away.z = 0
@@ -2367,6 +2374,7 @@ function ENT:RunBehaviour()
         else
             local enemy = self:HaveEnemy()
             if IsValid(enemy) then
+                if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "combat", 85, "Valid hostile target", enemy, 0.35, "behavior-loop") end
                 self:ChaseEnemy(enemy)
             else
                 local profile = self:GetBZCNProfile()
@@ -2378,6 +2386,7 @@ function ENT:RunBehaviour()
                         and BZCNCombatActor.IsIncapacitated(helpTarget))
 
                 if helping then
+                    if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "help", 65, "Active ally help request", helpTarget, 0.35, "behavior-loop") end
                     local range = tonumber(profile.MedicalRange) or 320
                     if self:GetPos():DistToSqr(helpTarget:GetPos()) <= range * range then
                         self.loco:SetDesiredSpeed(0)
@@ -2392,15 +2401,19 @@ function ENT:RunBehaviour()
                     end
                 elseif BZCNCompanionAI and isfunction(BZCNCompanionAI.RunSquadTask)
                     and BZCNCompanionAI.RunSquadTask(self) then
+                    if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "squad_order", 55, "Explicit tactical order", self.BZCNSquadLeader, 0.35, "behavior-loop") end
                     -- Tactical squad commands consumed by the expansion AI.
                 elseif profile.Companion == true and BZCNCompanionAI
                     and isfunction(BZCNCompanionAI.RunIdleTask) then
+                    if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "companion_task", 35, "Companion owner/order policy", self.BZCNCompanionOwner, 0.35, "behavior-loop") end
                     local taskHandled = BZCNCompanionAI.RunIdleTask(self)
                     if not taskHandled then
                         local ally = self:FindFollowTarget()
                         if IsValid(ally) then
+                            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "follow", 20, "No higher-priority task; follow ally", ally, 0.35, "behavior-loop") end
                             self:FollowAlly(ally)
                         else
+                            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "wander", 10, "Idle fallback", nil, 0.35, "behavior-loop") end
                             self:Wander()
                             coroutine.wait(0.2)
                         end
@@ -2408,13 +2421,16 @@ function ENT:RunBehaviour()
                 else
                     -- Faction task pools get priority; a companion's owner is
                     -- handled above so crowd/guard tasks can never pull it away.
+                    if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "faction_task", 30, "Faction weighted task director", nil, 0.35, "behavior-loop") end
                     local taskHandled = BZCNTaskAI and isfunction(BZCNTaskAI.RunIdleTask)
                         and BZCNTaskAI.RunIdleTask(self)
                     if not taskHandled then
                         local ally = self:FindFollowTarget()
                         if IsValid(ally) then
+                            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "follow", 20, "No higher-priority task; follow ally", ally, 0.35, "behavior-loop") end
                             self:FollowAlly(ally)
                         else
+                            if BZCN.AIManager then BZCN.AIManager.SetIntent(self, "wander", 10, "Idle fallback", nil, 0.35, "behavior-loop") end
                             self:Wander()
                             coroutine.wait(0.2)
                         end
