@@ -593,14 +593,21 @@ local function SetControls(vehicle, throttle, steer, brake)
         engineState = isfunction(vehicle.GetEngineState) and vehicle:GetEngineState() or engineState
     end
     if engineState == 2 and isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
-        and vehicle:GetGear() <= 0 then
+        and vehicle:GetGear() < 1 then
+        -- Reassert forward gear while the AI owns the vehicle. Neutral leaves
+        -- the engine/wheels active but produces no road speed.
         vehicle:SwitchGear(1, 0)
     end
 
+    -- A retained handbrake can let wheels spin under throttle while the chassis
+    -- stays planted. Explicitly release it while this AI owns the vehicle.
+    if isfunction(vehicle.SetInputBool) then
+        vehicle:SetInputBool(1, "handbrake", false)
+    end
     vehicle:SetInputFloat(1, "accelerate", math.Clamp(throttle, 0, 1))
     vehicle:SetInputFloat(1, "steer", math.Clamp(steer, -1, 1))
-    -- Keep ordinary braking below Glide's low-speed reverse-selection threshold.
-    vehicle:SetInputFloat(1, "brake", math.Clamp(brake or 0, 0, 0.18))
+    -- Do not combine throttle with Glide's low-speed brake/reverse behavior.
+    vehicle:SetInputFloat(1, "brake", throttle > 0.05 and 0 or math.Clamp(brake or 0, 0, 0.18))
 end
 
 local function ReleaseVehicle(vehicle, reason, keepDowned)
