@@ -4,7 +4,7 @@
 if not SERVER then return end
 
 local function RestorePlayerOrganism(ply, reason)
-    if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return false end
+    if not IsValid(ply) or not ply:IsPlayer() then return false end
     if istable(ply.organism) then return true end
 
     local api = hg and hg.organism
@@ -13,6 +13,8 @@ local function RestorePlayerOrganism(ply, reason)
         -- deliberately do not call hg.organism.Clear(), which would reset state.
         local ok, err = pcall(api.Add, ply)
         if ok and istable(ply.organism) then
+            -- Org Clear defaults alive=true; immediately re-sync the actual player lifecycle.
+            ply.organism.alive = ply:Alive()
             if not ply.BZCNOrganismRestoreWarned then
                 ply.BZCNOrganismRestoreWarned = true
                 ErrorNoHalt("[BZCN] Restored missing Z-City player organism for "
@@ -39,7 +41,9 @@ end)
 -- hook removes the table later, restore it before the next gameplay command.
 hook.Add("Think", "BZCN_PlayerOrganismWatchdog", function()
     for _, ply in ipairs(player.GetAll()) do
-        if ply:Alive() and not istable(ply.organism) then
+        if not istable(ply.organism) then
+            -- Z-City's StartCommand hook dereferences organism before checking Alive(),
+            -- so dead players need the same missing-table recovery as living players.
             RestorePlayerOrganism(ply, "Think watchdog")
         elseif not ply:Alive() then
             -- Allow a later respawn loss to be logged as a new incident.
