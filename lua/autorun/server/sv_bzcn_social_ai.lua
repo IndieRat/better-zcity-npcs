@@ -4,6 +4,8 @@
 
 if not SERVER then return end
 BZCN = BZCN or {}
+BZCN.Social = BZCN.Social or {}
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("social", BZCN.Social) end
 
 local FURRY_VOICES = {
     "zbattle/furry/cat_mrrp1.ogg",
