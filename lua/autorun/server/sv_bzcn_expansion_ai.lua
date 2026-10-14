@@ -974,13 +974,6 @@ local function IsCombineUnit(ent)
     if not Managed(ent) then return false end
     return LineKind(ent) == "combine" or LineKind(ent) == "metrocop"
 end
-local function EliteScore(ent)
-    local p = Profile(ent)
-    local rank = string.lower(tostring(ent.BZCNRank or p.Rank or ent.BZCNClass or ""))
-    if string.find(rank, "elite", 1, true) or string.find(rank, "ordinal", 1, true) then return 100000 end
-    return 0
-end
-
 -- Squad membership and leadership are owned by sv_bzcn_squad_director.lua.
 -- Avoid a second timer that overwrites leader pointers without matching squad IDs
 -- and incorrectly groups solo Metrocops into tactical squads.
