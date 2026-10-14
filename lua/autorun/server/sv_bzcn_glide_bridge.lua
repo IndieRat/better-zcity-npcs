@@ -91,16 +91,20 @@ end
 
 function Bridge.Unbind(npc, ragdoll)
     if not IsValid(npc) then return end
+    local boundRagdoll = npc.BZCNGlideBoundRagdoll
     RemoveContract(npc)
     npc.BZCNGlideSeatIndex = nil
     npc.BZCNGlideBoundRagdoll = nil
-    if IsValid(ragdoll) then
-        RemoveContract(ragdoll)
-        ragdoll.GlideVehicle = nil
-        ragdoll.GlideSeat = nil
-        ragdoll.GlideSeatIndex = nil
-        ragdoll.GlideRagdollPlayer = nil
-        ragdoll.IsGlideRagdoll = nil
+    local toClear = {}
+    if IsValid(boundRagdoll) then toClear[boundRagdoll] = true end
+    if IsValid(ragdoll) then toClear[ragdoll] = true end
+    for entity in pairs(toClear) do
+        RemoveContract(entity)
+        entity.GlideVehicle = nil
+        entity.GlideSeat = nil
+        entity.GlideSeatIndex = nil
+        entity.GlideRagdollPlayer = nil
+        entity.IsGlideRagdoll = nil
     end
 end
 
