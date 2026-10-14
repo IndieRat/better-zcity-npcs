@@ -44,6 +44,16 @@ The class-switch command accepts `default`, `Combine`, `Metrocop`, `Rebel`, or `
 
 Combine and MetroCop use the shared `Combine` faction/role label and consider players outside that faction hostile; the logical `TeamName` is exposed through the NPC adapter because a NextBot cannot join a real Player team index. The furry NPC keeps Z-City's hands SWEP lowered for grabbing, carries the target ragdoll through `weapon_hands_sh:SetCarrying()`, and holds simulated RMB+LMB so the real Z-City assimilation code can run. Conversion calls `hg.Furrify()` for real players or switches a managed NPC to the furry class.
 
+## Per-NPC AI manager
+
+`lua/autorun/server/sv_bzcn_ai_manager.lua` owns a per-managed-NPC brain record. The manager registers the adapter, social, task, companion, squad, combat-reaction, metrocop, combat, fake-actor, vehicle, and equipment subsystems; tracks a short-lived winning intent with a priority/reason/target; refreshes subsystem connections; and clears the per-entity record on removal. The behavior coroutine publishes its active high-level intent, while existing specialized modules continue to execute their own physical/gameplay actions. This is an integration layer, not a rewrite of every subsystem into one file.
+
+Use `bzcn_ai_dump <entity-index>` from the server console (or aim at a managed NPC as an admin) to inspect its selected intent and registered subsystems. The initial intent priorities reserve lifecycle/vehicle locks above combat and fleeing, then help, tactical orders, faction tasks, and fallback movement. Further migrations should move event handlers to intent requests rather than writing competing action state directly.
+
+Squad membership/leadership has one owner: `sv_bzcn_squad_director.lua`. The older expansion-AI timer that independently rebuilt Combine/Metrocop leaders was removed because it overwrote leader pointers without matching squad IDs/slots and incorrectly treated solo Metrocops as fireteam members. Metrocop alertness now remains in the `calm/suspicious/alert` vocabulary; confirmed hostility is tracked separately as disposition.
+
+The Glide seated fake-body pose applies a 180-degree physics-bone heading correction against the chassis forward axis while keeping limb targets in chassis coordinates. This corrects the previously reversed visible occupant heading independently from the already-corrected forward driving/throttle frame; verify the result in-game with the installed Glide vehicle models.
+
 ## Adapter chain
 
 The server runs a lightweight adapter cycle every 0.20 seconds for managed NPCs:
