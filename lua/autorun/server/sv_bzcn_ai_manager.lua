@@ -25,6 +25,17 @@ local SUBSYSTEMS = {
     equipment = function() return BZCN.EquipmentAI end
 }
 
+function Manager.RegisterSubsystem(name, api)
+    if not isstring(name) or name == "" then return false end
+    Manager.Subsystems[name] = api or {registered = true}
+    for ent, brain in pairs(Manager.Brains) do
+        if IsValid(ent) and brain and brain.active then
+            brain.subsystems[name] = Manager.Subsystems[name]
+        end
+    end
+    return true
+end
+
 local function IsManaged(ent)
     return IsValid(ent) and not ent:IsPlayer()
         and ent.GetNW2Bool and ent:GetNW2Bool("BZCNManaged", false)
