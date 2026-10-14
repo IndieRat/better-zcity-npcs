@@ -682,6 +682,12 @@ function ENT:IsBZCNEnemy(target)
     if self:HasRecentAllyThreat(target) then return true end
 
     local ownClass = string.lower(tostring(self.BZCNClass or self.PlayerClassName or ""))
+    -- A direct attacker is a confirmed hostile regardless of class label or current weapon.
+    if (ownClass == "combine" or ownClass == "metrocop" or ownClass == "police")
+        and self.BZCNLastAttacker == target
+        and CurTime() - (tonumber(self.BZCNLastDamageTime) or 0) <= 18 then
+        return true
+    end
     if self.BZCNGoodCopDefected then ownClass = "rebel" end
     local function IsArmed(actor)
         if not IsValid(actor) then return false end
