@@ -120,6 +120,20 @@ local function SeatLocalPosition(vehicle, seat)
     return pos, ang
 end
 
+local function GetBoardingDoorPoint(vehicle, seat)
+    if not IsValid(vehicle) or not IsValid(seat) then return nil end
+    local localSeat = vehicle:WorldToLocal(seat:GetPos())
+    local mins, maxs = vehicle:OBBMins(), vehicle:OBBMaxs()
+    -- Approach from the nearer side of the vehicle, outside its collision bounds.
+    local side = localSeat.y >= 0 and 1 or -1
+    local localPoint = Vector(
+        math.Clamp(localSeat.x, mins.x + 12, maxs.x - 12),
+        side > 0 and (maxs.y + 26) or (mins.y - 26),
+        math.max(mins.z + 8, 8)
+    )
+    return vehicle:LocalToWorld(localPoint)
+end
+
 local function SeatNPC(npc, vehicle, seat, role)
     if not IsManaged(npc) or not IsValid(vehicle) or not IsValid(seat) then return false end
     if npc.BZCNGlideVehicle and npc.BZCNGlideVehicle ~= vehicle then return false end
@@ -867,7 +881,7 @@ local function BoardSquad(vehicle, driver)
             mate.BZCNGlideApproachRole = "passenger"
             mate.BZCNGlideApproachUntil = CurTime() + 24
             mate.BZCNGlideExitAt = nil
-            ApproachPosition(mate, seat:GetPos())
+            ApproachPosition(mate, GetBoardingDoorPoint(vehicle, seat) or seat:GetPos())
         end
     end
 end
@@ -880,6 +894,14 @@ local function FindDriverForVehicle(vehicle)
             or (npc.BZCNGlideExitAt or 0) > CurTime() then continue end
         local info = ClassInfo(npc)
         if not info.civilian and not info.combat then continue end
+        local owner = vehicle.BZCNVehicleOwnerNPC
+        if IsValid(owner) and owner ~= npc then
+            local ownerInfo = ClassInfo(owner)
+            local trusted = (info.squad ~= nil and ownerInfo.squad == info.squad)
+                or (info.faction ~= "" and ownerInfo.faction == info.faction
+                    and info.civilian and ownerInfo.civilian)
+            if not trusted then continue end
+        end
         local dist = npc:GetPos():DistToSqr(vehicle:GetPos())
         if dist > CLAIM_RADIUS * CLAIM_RADIUS then continue end
         local score = -dist / (CLAIM_RADIUS * CLAIM_RADIUS)
@@ -906,7 +928,7 @@ local function BeginVehicleAI(vehicle, driver)
         driver.BZCNGlideApproachSeat = seat
         driver.BZCNGlideApproachRole = "driver"
         driver.BZCNGlideApproachUntil = CurTime() + 24
-        ApproachPosition(driver, seat:GetPos())
+        ApproachPosition(driver, GetBoardingDoorPoint(vehicle, seat) or seat:GetPos())
         return true
     end
     if not SeatNPC(driver, vehicle, seat, "driver") then return false end
@@ -916,6 +938,11 @@ local function BeginVehicleAI(vehicle, driver)
     driver.BZCNGlideApproachUntil = nil
 
     vehicle.BZCNAIDriver = driver
+    -- Remember the last driver even after they leave. A vehicle with no owner
+    -- is free to claim; otherwise only that owner or their trusted companions
+    -- may automatically reclaim it.
+    vehicle.BZCNVehicleLastDriver = driver
+    vehicle.BZCNVehicleOwnerNPC = driver
     vehicle.BZCNGlideAIMode = info.combat and "combat" or "wander"
     vehicle.BZCNGlideAITarget = nil
     vehicle.BZCNGlideAIBeganAt = CurTime()
@@ -1189,17 +1216,17 @@ local function UpdateVehicleAI(vehicle, now)
     -- the brakes for anything in the general corridor. Brake progressively and
     -- only come to a full stop for a genuinely close obstruction.
     local obstacleDistance = GetForwardObstacleDistance(vehicle, combat and 360 or 460)
-    if obstacleDistance < 100 then
+    if obstacleDistance < 85 then
         throttle = 0
-        brake = 0.18
-    elseif obstacleDistance < 190 then
-        throttle = math.min(throttle, 0.16)
-        brake = forwardSpeed > 180 and 0.12 or 0
-    elseif obstacleDistance < 300 then
-        throttle = math.min(throttle, 0.32)
+        brake = forwardSpeed > 45 and 0.16 or 0
+    elseif obstacleDistance < 145 then
+        throttle = math.min(throttle, 0.22)
+        brake = forwardSpeed > 240 and 0.08 or 0
+    elseif obstacleDistance < 260 then
+        throttle = math.min(throttle, 0.40)
         brake = 0
     end
-    if obstacleDistance < 190 and not combat
+    if obstacleDistance < 145 and not combat
         and now >= (vehicle.BZCNGlideAINextAvoidAt or 0) then
         -- A close obstruction should prompt a broad route change, not a permanent
         -- standstill. Debounce the retarget so the vehicle doesn't zigzag.
@@ -1280,7 +1307,8 @@ local function ProcessBoardingApproaches(now)
         end
         if npc:GetPos():DistToSqr(seat:GetPos()) > 72 * 72 then
             npc.BZCNGlideInteractAt = nil
-            ApproachPosition(npc, seat:GetPos())
+            local doorPoint = GetBoardingDoorPoint(vehicle, seat) or seat:GetPos()
+            ApproachPosition(npc, doorPoint)
             continue
         end
 
@@ -1452,7 +1480,7 @@ hook.Add("BZCN_PlayerPhrase", "BZCN_GlidePositivePickupCall", function(ply, sign
         vehicle.BZCNPlayerPickupPassengers = true
         npc.BZCNHumanInterestTarget = nil
         npc.BZCNHumanInterestUntil = nil
-        ApproachPosition(npc, freeSeat:GetPos())
+        ApproachPosition(npc, GetBoardingDoorPoint(vehicle, freeSeat) or freeSeat:GetPos())
         break
     end
 end)
@@ -1484,6 +1512,13 @@ function AI.RequestDrive(driver)
     for _, vehicle in ipairs(ents.FindInSphere(driver:GetPos(), CLAIM_RADIUS)) do
         if not IsCar(vehicle) or IsValid(vehicle.BZCNAIDriver)
             or IsValid(vehicle:GetDriver()) then continue end
+        local owner = vehicle.BZCNVehicleOwnerNPC
+        if IsValid(owner) and owner ~= driver then
+            local a, b = ClassInfo(driver), ClassInfo(owner)
+            local trusted = (a.squad ~= nil and a.squad == b.squad)
+                or (a.civilian and b.civilian and a.faction ~= "" and a.faction == b.faction)
+            if not trusted then continue end
+        end
         local seat = GetDriverSeat(vehicle)
         if not IsSeatFree(seat) then continue end
 
