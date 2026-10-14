@@ -2017,6 +2017,20 @@ local function UseMedicalItem(healer, target, class)
         if not istable(target.organism) then target.organism = org end
         target.BZCN_Organism = org
         if not IsValid(org.owner) then org.owner = target end
+        -- Several native medicine methods use raw arithmetic and #table
+        -- operations instead of nil-safe reads. BZCN's fallback organism table
+        -- can be partial, so normalize only the fields the stock Heal methods
+        -- expect before invoking them.
+        org.wounds = istable(org.wounds) and org.wounds or {}
+        org.arterialwounds = istable(org.arterialwounds) and org.arterialwounds or {}
+        org.internalBleed = tonumber(org.internalBleed) or 0
+        org.internalBleedHeal = tonumber(org.internalBleedHeal) or 0
+        org.analgesiaAdd = tonumber(org.analgesiaAdd) or 0
+        org.analgesia = tonumber(org.analgesia) or 0
+        org.pain = tonumber(org.pain) or 0
+        org.shock = tonumber(org.shock) or 0
+        org.blood = tonumber(org.blood) or 5000
+        org.bleed = tonumber(org.bleed) or 0
     end
     local actions = {}
     local internalBleed = (tonumber(org.internalBleed) or 0) - (tonumber(org.internalBleedHeal) or 0)
