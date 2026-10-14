@@ -13,7 +13,7 @@ local TASK_POOLS = {
         -- time stationary or clustering at their spawn/home point. Exploration
         -- is a first-class routine, while conversations remain opportunistic.
         {"stay", 1}, {"crowd", 2}, {"talk", 3}, {"wander", 4}, {"explore", 5},
-        {"look", 1}, {"sit", 1}, {"drive", 1}
+        {"look", 1}, {"sit", 1}, {"drive", 4}
     },
     furry = {
         {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"comfort", 2}, {"hold", 1}
