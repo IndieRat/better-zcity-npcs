@@ -219,6 +219,32 @@ local function SeatNPC(npc, vehicle, seat, role)
     npc.GlideRagdollStartPos = seat:GetPos()
     npc.GlideRagdollTimeout = math.huge
 
+    -- Leave a translucent standing echo at the boarding point. The organism
+    -- NextBot is hidden for AI/state and its physical ragdoll rides in the seat;
+    -- this separate non-solid prop prevents the entry from looking like the
+    -- NPC simply stares at an empty seat and vanishes.
+    if not IsValid(npc.BZCNGlideGhost) then
+        local ghost = ents.Create("prop_dynamic")
+        if IsValid(ghost) then
+            ghost:SetModel(npc:GetModel())
+            ghost:SetPos(npc:GetPos())
+            ghost:SetAngles(Angle(0, npc:GetAngles().y, 0))
+            ghost:Spawn()
+            ghost:SetSolid(SOLID_NONE)
+            ghost:SetMoveType(MOVETYPE_NONE)
+            ghost:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
+            ghost:SetRenderMode(RENDERMODE_TRANSCOLOR)
+            ghost:SetColor(Color(165, 210, 255, 95))
+            ghost:SetPlaybackRate(1)
+            local sequence = ghost:LookupSequence("idle_all")
+            if sequence < 0 then sequence = ghost:LookupSequence("idle") end
+            if sequence >= 0 then ghost:ResetSequence(sequence) end
+            ghost:DrawShadow(false)
+            ghost.BZCNGlideGhostOwner = npc
+            npc.BZCNGlideGhost = ghost
+        end
+    end
+
     -- The physical ragdoll is the only visible body while seated. Reassert
     -- this because civilian appearance/animation hooks can leave the source
     -- NextBot drawable after the injury bridge initially hid it.
@@ -269,6 +295,9 @@ local function UnseatNPC(npc, reason, keepDowned)
     local vehicle = npc.BZCNGlideVehicle
     local seat = npc.BZCNGlideSeat
     local saved = npc.BZCNGlideSavedState
+    local ghost = npc.BZCNGlideGhost
+    if IsValid(ghost) then ghost:Remove() end
+    npc.BZCNGlideGhost = nil
     local wasSeatedFake = npc.BZCNGlideSeatedFake == true
     if wasSeatedFake then
         local rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
@@ -604,6 +633,27 @@ local function SetControls(vehicle, throttle, steer, brake)
     -- Keep ordinary braking below that threshold; reverse momentum is handled
     -- by selecting forward gear and applying controlled forward throttle below.
     vehicle:SetInputFloat(1, "brake", math.Clamp(brake or 0, 0, 0.18))
+
+    -- This is a fake occupant, not Glide's actual seat driver. On some Glide
+    -- builds inputs are accepted but fail to produce chassis motion. After a
+    -- short stall, apply a small chassis-axis force as a failsafe. This only
+    -- runs under commanded throttle at near-zero speed, never during braking.
+    local speed = vehicle:GetVelocity():Length2D()
+    if throttle > 0.18 and speed < 18 then
+        vehicle.BZCNGlideAIStallSince = vehicle.BZCNGlideAIStallSince or CurTime()
+        if CurTime() - vehicle.BZCNGlideAIStallSince > 0.9 then
+            local phys = vehicle:GetPhysicsObject()
+            if IsValid(phys) and phys:GetMass() > 0 then
+                local forward = GetDrivingForward(vehicle)
+                if forward:LengthSqr() > 0.01 then
+                    phys:Wake()
+                    phys:ApplyForceCenter(forward * phys:GetMass() * 85)
+                end
+            end
+        end
+    else
+        vehicle.BZCNGlideAIStallSince = nil
+    end
 end
 
 local function ReleaseVehicle(vehicle, reason, keepDowned)
