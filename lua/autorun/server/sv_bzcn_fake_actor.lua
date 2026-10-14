@@ -869,7 +869,7 @@ function FakeActor:UpdateVehicleSeat(dt)
     -- direct-yaw variant visibly made NPCs look through the rear window; rotate
     -- the bone orientation half a turn while keeping all target positions in
     -- chassis coordinates so the body faces the windshield.
-    local yaw = math.NormalizeAngle(desiredForward:Angle().y + 180)
+    local yaw = math.NormalizeAngle(desiredForward:Angle().y)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
@@ -892,11 +892,9 @@ function FakeActor:UpdateVehicleSeat(dt)
     local spinePos = SeatPoint(Vector(0, 0, 36))
     local headPos = SeatPoint(Vector(0, 0, 57))
 
-    -- Establish the Glide seated body pose once. Reapplying pelvis/spine/leg
-    -- yaw every frame makes the ragdoll slowly rotate away from the windshield
-    -- as the vehicle turns. After the initial pose, torso and legs remain physical;
-    -- only the head and arms receive ongoing articulation.
-    if not self.vehiclePoseInitialized then
+    -- Keep the complete seated pose constrained to the moving seat. A one-shot
+    -- pelvis/spine target lets gravity collapse the ragdoll out of the vehicle pose.
+    do
         self:ShadowBone("ValveBiped.Bip01_Pelvis", upright, 0.16, 48 * power, 34,
             pelvisPos, 90, 55)
         self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.14, 52 * power, 36,
