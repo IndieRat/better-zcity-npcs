@@ -21,10 +21,9 @@ end
 local function IsCollisionSource(ent)
     if not IsValid(ent) then return false end
     local class = ent:GetClass()
-    return class == "prop_ragdoll"
-        or string.StartWith(class, "prop_vehicle")
-        or class == "prop_physics" or class == "prop_physics_override"
-        or class == "prop_physics_multiplayer" or class == "prop_physics_respawnable"
+    -- Standard physics props are already handled by the shared injury module;
+    -- only add the missing vehicle and body collision paths here.
+    return class == "prop_ragdoll" or string.StartWith(class, "prop_vehicle")
 end
 
 local function InstallCollisionBridge(source)
