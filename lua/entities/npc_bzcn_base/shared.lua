@@ -117,7 +117,9 @@ end
 function ENT:UpdateBZCNMovementState(speed)
     speed = math.max(tonumber(speed) or 0, 0)
     local previous = self.BZCNMovementState
-    local runThreshold = (previous == "running" or previous == "sprinting") and 125 or 150
+    -- Use a little hysteresis, but do not leave a speed-boosted actor in the
+    -- walk cycle just because it has not crossed the old 150-unit threshold.
+    local runThreshold = (previous == "running" or previous == "sprinting") and 118 or 132
     local walkThreshold = previous == "walking" and 5 or 8
     local state = "standing"
     local support = hg and hg.BZCNNPCSupport
@@ -146,7 +148,7 @@ function ENT:UpdateBZCNMovementState(speed)
         -- running speed, rather than switching the animation on a sprint flag.
         local baseSpeed = BZCN and isfunction(BZCN.GetBaseMoveSpeed)
             and BZCN.GetBaseMoveSpeed(self) or (BZCN and BZCN.BaseMoveSpeed) or 190
-        local sprintThreshold = (previous == "sprinting" and 1.03 or 1.12) * baseSpeed
+        local sprintThreshold = (previous == "sprinting" and 1.00 or 1.08) * baseSpeed
         if self.BZCN_Sprinting and speed > sprintThreshold then
             state = "sprinting"
         elseif speed > runThreshold then
