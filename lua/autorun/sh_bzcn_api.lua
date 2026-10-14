@@ -986,7 +986,9 @@ function BZCN.InstallAdapter(ent)
 end
 
 function BZCN.IsManaged(ent)
-    if not IsValid(ent) then return false end
+    -- This predicate is the shared NPC boundary. A real player must never be
+    -- classified as a managed NPC, even if a stale custom flag is present.
+    if not IsValid(ent) or ent:IsPlayer() then return false end
     if ent.BZCNManaged then return true end
     return ent.GetNW2Bool and ent:GetNW2Bool("BZCNManaged", false) or false
 end
