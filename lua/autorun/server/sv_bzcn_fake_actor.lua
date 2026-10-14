@@ -873,7 +873,7 @@ function FakeActor:UpdateVehicleSeat(dt)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
-    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.12, 0.6)
+    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.2, 0.85)
 
     -- Glide's driver seat is commonly authored with a 270-degree local yaw so
     -- the Source prisoner-pod seat works. Its LocalToWorld basis is therefore
@@ -895,9 +895,9 @@ function FakeActor:UpdateVehicleSeat(dt)
     -- Keep the complete seated pose constrained to the moving seat. A one-shot
     -- pelvis/spine target lets gravity collapse the ragdoll out of the vehicle pose.
     do
-        self:ShadowBone("ValveBiped.Bip01_Pelvis", upright, 0.16, 48 * power, 34,
+        self:ShadowBone("ValveBiped.Bip01_Pelvis", upright, 0.08, 85 * power, 42,
             pelvisPos, 90, 55)
-        self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.14, 52 * power, 36,
+        self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.08, 90 * power, 44,
             spinePos, 90, 55)
 
         local legs = {
@@ -915,7 +915,7 @@ function FakeActor:UpdateVehicleSeat(dt)
         self.vehiclePoseInitialized = true
     end
 
-    self:ShadowBone("ValveBiped.Bip01_Head1", Angle(-8, yaw, 0), 0.13, 60 * power, 40,
+    self:ShadowBone("ValveBiped.Bip01_Head1", Angle(-8, yaw, 0), 0.08, 95 * power, 48,
         headPos, 95, 55)
 
     for _, arm in ipairs({
