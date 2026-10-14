@@ -967,6 +967,16 @@ function FakeActor.Attach(owner, ragdoll, config)
         BZCN.ActiveFakeActors = BZCN.ActiveFakeActors or setmetatable({}, {__mode = "k"})
         BZCN.ActiveFakeActors[owner] = actor
         actor.lastUpdate = CurTime()
+        if BZCN.AIManager and isfunction(BZCN.AIManager.AddConnection) then
+            local attachedActor = actor
+            BZCN.AIManager.AddConnection(owner, "fakeActor", function(entity)
+                if entity and entity.BZCNFakeActor == attachedActor then
+                    attachedActor:Destroy()
+                elseif attachedActor.active then
+                    attachedActor:Destroy()
+                end
+            end)
+        end
     end
     return actor
 end
