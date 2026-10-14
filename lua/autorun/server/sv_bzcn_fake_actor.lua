@@ -966,7 +966,8 @@ function FakeActor:UpdateSwim(dt)
     for index = 0, count - 1 do
         local phys = rag:GetPhysicsObjectNum(index)
         if not IsValid(phys) then continue end
-        local name = rag:GetBoneName(rag:TranslatePhysBoneToBone(index)) or ""
+        local boneIndex = rag:TranslatePhysBoneToBone(index)
+        local name = isnumber(boneIndex) and boneIndex >= 0 and rag:GetBoneName(boneIndex) or ""
         local velocity = phys:GetVelocity()
         local target = direction * (self.physiology and self.physiology.canMove and 62 or 18)
         target.z = math.Clamp(velocity.z + 18, -45, 55)
