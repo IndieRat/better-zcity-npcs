@@ -950,6 +950,47 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
 end
 
+-- Keep a downed fake body moving in water without invoking the ground crawl
+-- controller (whose hand-grip constraints are inappropriate underwater).
+function FakeActor:UpdateSwim(dt)
+    local rag = self.ragdoll
+    if not IsValid(rag) then return end
+    dt = math.Clamp(tonumber(dt) or FrameTime(), 0, 0.05)
+
+    local direction = isvector(self.moveVelocity) and self.moveVelocity or vector_origin
+    direction = Vector(direction.x, direction.y, 0)
+    if direction:LengthSqr() < 16 then
+        direction = rag:GetForward()
+        direction.z = 0
+    end
+    if direction:LengthSqr() > 0.01 then direction:Normalize() end
+
+    local count = rag:GetPhysicsObjectCount()
+    for index = 0, count - 1 do
+        local phys = rag:GetPhysicsObjectNum(index)
+        if not IsValid(phys) then continue end
+        local name = rag:GetBoneName(rag:TranslatePhysBoneToBone(index)) or ""
+        local velocity = phys:GetVelocity()
+        local target = direction * (self.physiology and self.physiology.canMove and 62 or 18)
+        target.z = math.Clamp(velocity.z + 18, -45, 55)
+
+        -- Alternate the arms and legs as paddles. Use the physics bone's real
+        -- name to avoid the left/right inversion that can happen when relying
+        -- on a model's numeric bone order.
+        local phase = CurTime() * 5 + (string.find(name, "_L_", 1, true) and 0 or math.pi)
+        if string.find(name, "Arm", 1, true) or string.find(name, "Hand", 1, true) then
+            target = target + direction * (math.sin(phase) * 42)
+        elseif string.find(name, "Leg", 1, true) or string.find(name, "Foot", 1, true) then
+            target = target + direction * (math.sin(phase + math.pi) * 26)
+        end
+        local delta = target - velocity
+        local maxDelta = 90 * dt
+        if delta:Length() > maxDelta and maxDelta > 0 then delta = delta:GetNormalized() * maxDelta end
+        phys:SetVelocity(velocity + delta)
+        phys:Wake()
+    end
+end
+
 function FakeActor:Update(dt)
     if not self.active or not IsValid(self.owner) or not IsValid(self.ragdoll) then
         self:Destroy()
@@ -963,6 +1004,15 @@ function FakeActor:Update(dt)
 
     dt = math.Clamp(tonumber(dt) or FrameTime(), 0, 0.05)
     self:RefreshPhysiology()
+    if self.owner:WaterLevel() >= 2 or self.ragdoll:WaterLevel() >= 2 then
+        self.mode = "swim"
+    elseif self.mode == "swim" then
+        self.mode = self.autoCrawl and "crawl" or "loose"
+    end
+    if self.mode == "swim" then
+        self:UpdateSwim(dt)
+        return
+    end
     if self.mode == "vehicle" then
         -- Seat pose must be the only controller writing these bones this frame.
         -- Running the normal head/spine aim first makes the seated body fight itself.
