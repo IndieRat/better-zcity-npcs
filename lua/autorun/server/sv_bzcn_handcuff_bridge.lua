@@ -106,6 +106,44 @@ local function InstallHandcuffBridge()
         return original(self, trace)
     end
     stored.BZCNManagedTieWrapped = true
+
+    local keyStored = weapons.GetStored("weapon_handcuffs_key")
+    if istable(keyStored) and isfunction(keyStored.UnTie) and not keyStored.BZCNManagedUnTieWrapped then
+        local originalUnTie = keyStored.UnTie
+        keyStored.UnTie = function(self, target)
+            local user = self:GetOwner()
+            local owner = GetOwnerForRagdoll(target)
+            if not IsValid(owner) then return originalUnTie(self, target) end
+            if not IsValid(user) or not user:IsPlayer() or not user:Alive()
+                or user:GetPos():DistToSqr(target:GetPos()) > 500 * 500 then return end
+
+            local rag = IsValid(owner.BZCNHandcuffRagdoll) and owner.BZCNHandcuffRagdoll
+                or (IsValid(owner.BZCNNPCRagdoll) and owner.BZCNNPCRagdoll
+                or (IsValid(owner.FakeRagdoll) and owner.FakeRagdoll or nil))
+            if IsValid(rag) and istable(rag.handcuffs) then
+                if IsValid(rag.handcuffs[1]) then rag.handcuffs[1]:Remove() end
+                if IsValid(rag.handcuffs[2]) then rag.handcuffs[2]:Remove() end
+            end
+            if IsValid(rag) then
+                rag.handcuffs = nil
+                rag.handcuffed = false
+                rag:SetNW2Bool("handcuffed", false)
+                rag:SetNW2Bool("BZCNHandcuffed", false)
+            end
+            local org = owner.organism or owner.BZCN_Organism or owner.BZCNOrganism
+            if istable(org) then org.handcuffed = false end
+            owner.BZCNHandcuffed = false
+            owner.BZCNHandcuffRagdoll = nil
+            owner:SetNW2Bool("handcuffed", false)
+            owner:SetNW2Bool("BZCNHandcuffed", false)
+            if IsValid(user) then
+                user:EmitSound("weapons/357/357_reload1.wav")
+                user:Give("weapon_handcuffs")
+            end
+            hook.Run("BZCN_NPCUnrestrained", owner, rag, "handcuffs_key")
+        end
+        keyStored.BZCNManagedUnTieWrapped = true
+    end
 end
 
 hook.Add("Initialize", "BZCN_HandcuffBridge_Init", function()
