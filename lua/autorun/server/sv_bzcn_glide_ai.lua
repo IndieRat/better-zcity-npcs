@@ -402,10 +402,135 @@ end
 
 local function FindRoadNodeGoal(vehicle)
     if not IsValid(vehicle) then return nil end
-    local nodes = GetRoadNodes()
-    if #nodes == 0 then return nil end
     local origin = vehicle:GetPos()
     local forward = GetDrivingForward(vehicle)
+
+    -- The BZCN Road Node tool stores a persistent, linked graph in BZCNRoads.
+    -- These are not path_track entities, so scanning Source map entities alone
+    -- silently ignored the very routes administrators placed with the tool gun.
+    local roadSystem = BZCNRoads
+    local graph = istable(roadSystem) and roadSystem.Nodes or nil
+    if istable(graph) and table.Count(graph) > 1 then
+        local function nodePos(node)
+            if not istable(node) then return nil end
+            if isvector(node.pos) then return node.pos end
+            if isnumber(node.x) and isnumber(node.y) and isnumber(node.z) then
+                return Vector(node.x, node.y, node.z)
+            end
+            return nil
+        end
+
+        local currentID = vehicle.BZCNGlideRoadCurrentID
+        local nextID = vehicle.BZCNGlideRoadNextID
+        local currentNode, nextNode = graph[currentID], graph[nextID]
+        local currentPos, nextPos = nodePos(currentNode), nodePos(nextNode)
+
+        -- Acquire a route once, then retain it. Re-selecting the nearest node on
+        -- every target refresh made cars oscillate between nearby branches.
+        if not currentPos or not nextPos then
+            local nearestID, nearestDistance
+            for id, node in pairs(graph) do
+                local pos = nodePos(node)
+                if pos then
+                    local delta = pos - origin
+                    delta.z = 0
+                    local distance = delta:LengthSqr()
+                    if distance < 1800 * 1800 and (not nearestDistance or distance < nearestDistance) then
+                        nearestID, nearestDistance = id, distance
+                    end
+                end
+            end
+            currentID = nearestID
+            currentNode = graph[currentID]
+            currentPos = nodePos(currentNode)
+            nextID = nil
+            if currentNode and currentPos then
+                local bestScore
+                for _, linkedID in ipairs(currentNode.links or {}) do
+                    local linked = graph[linkedID]
+                    local pos = nodePos(linked)
+                    if pos and linkedID ~= currentID then
+                        local delta = pos - currentPos
+                        delta.z = 0
+                        if delta:LengthSqr() > 1 then
+                            delta:Normalize()
+                            local facing = forward:Dot(delta)
+                            local score = facing * 1000 - origin:Distance(pos) * 0.05
+                            if not bestScore or score > bestScore then
+                                nextID, bestScore = linkedID, score
+                            end
+                        end
+                    end
+                end
+            end
+            vehicle.BZCNGlideRoadCurrentID = currentID
+            vehicle.BZCNGlideRoadNextID = nextID
+            nextNode = graph[nextID]
+            nextPos = nodePos(nextNode)
+        end
+
+        if currentPos and nextPos then
+            -- Advance along the authored graph as the vehicle reaches each node.
+            local horizontalToNext = nextPos - origin
+            horizontalToNext.z = 0
+            if horizontalToNext:LengthSqr() < 210 * 210 then
+                local previousID = currentID
+                currentID, currentNode, currentPos = nextID, nextNode, nextPos
+                local bestID, bestScore
+                for _, linkedID in ipairs(currentNode.links or {}) do
+                    if linkedID ~= previousID then
+                        local linked = graph[linkedID]
+                        local pos = nodePos(linked)
+                        if pos then
+                            local delta = pos - currentPos
+                            delta.z = 0
+                            if delta:LengthSqr() > 1 then
+                                delta:Normalize()
+                                local facing = forward:Dot(delta)
+                                local score = facing * 1000 - origin:Distance(pos) * 0.05
+                                if not bestScore or score > bestScore then bestID, bestScore = linkedID, score end
+                            end
+                        end
+                    end
+                end
+                if not bestID then
+                    for _, linkedID in ipairs(currentNode.links or {}) do
+                        if graph[linkedID] then bestID = linkedID break end
+                    end
+                end
+                nextID = bestID
+                nextNode = graph[nextID]
+                nextPos = nodePos(nextNode)
+                vehicle.BZCNGlideRoadCurrentID = currentID
+                vehicle.BZCNGlideRoadNextID = nextID
+            end
+        end
+
+        if currentPos and nextPos then
+            -- Aim slightly beyond the next node along the following segment so
+            -- the car rounds corners smoothly instead of sawing left/right.
+            local lookAhead = nextPos
+            local afterID
+            for _, linkedID in ipairs((nextNode and nextNode.links) or {}) do
+                if linkedID ~= currentID then afterID = linkedID break end
+            end
+            local afterPos = nodePos(graph[afterID])
+            if afterPos then
+                local continuation = afterPos - nextPos
+                continuation.z = 0
+                if continuation:LengthSqr() > 1 then
+                    continuation:Normalize()
+                    lookAhead = nextPos + continuation * 150
+                end
+            end
+            return lookAhead
+        end
+    end
+
+    -- Compatibility fallback for authored Source paths on maps that do not
+    -- use the BZCN Road Node tool.
+    local nodes = GetRoadNodes()
+    if #nodes == 0 then return nil end
     local best, bestScore
     for _, node in ipairs(nodes) do
         local delta = node:GetPos() - origin
@@ -416,23 +541,17 @@ local function FindRoadNodeGoal(vehicle)
             local facing = forward:Dot(delta)
             if facing > -0.05 then
                 local score = distance + (1 - facing) * 700
-                if not bestScore or score < bestScore then
-                    best, bestScore = node, score
-                end
+                if not bestScore or score < bestScore then best, bestScore = node, score end
             end
         end
     end
     if not IsValid(best) then return nil end
-
     local nextNode = GetNextRoadNode(best)
     if IsValid(nextNode) and nextNode:GetPos():DistToSqr(origin) > 180 * 180 then
-        -- Aim one node ahead when possible so the car begins turning smoothly
-        -- instead of repeatedly stopping on each node.
         return nextNode:GetPos()
     end
     return best:GetPos()
 end
-
 local function FindNavPoint(vehicle, minDist, maxDist)
     if not navmesh or not navmesh.GetAllNavAreas then return nil end
     local areas = navmesh.GetAllNavAreas()
@@ -652,6 +771,8 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
     vehicle.BZCNGlideAIPreviousVelocity = nil
     vehicle.BZCNGlideAIPreviousVelocityAt = nil
     vehicle.BZCNGlideAISteer = nil
+    vehicle.BZCNGlideRoadCurrentID = nil
+    vehicle.BZCNGlideRoadNextID = nil
 end
 
 -- Glide's native crash ejection only processes real Player occupants. Managed
@@ -1033,13 +1154,14 @@ local function UpdateVehicleAI(vehicle, now)
     direction:Normalize()
 
     local forward = GetDrivingForward(vehicle)
-    local right = Vector(-forward.y, forward.x, 0)
-    local lateral = direction:Dot(right)
     local alignment = math.Clamp(forward:Dot(direction), -1, 1)
-    -- Smooth steering at shallow angles; commit to a wide turn for a goal
-    -- behind the car instead of flipping steering every AI tick.
-    local steerGain = alignment < -0.15 and 1.15 or 1.65
-    local steer = math.Clamp(lateral * steerGain, -1, 1)
+    -- Steer from the signed heading error, not the target's lateral offset.
+    -- Lateral-only steering over-corrected as each short-lived target moved
+    -- across the car's nose, producing continuous left/right swerving.
+    local wantedYaw = direction:Angle().y
+    local currentYaw = forward:Angle().y
+    local headingError = math.AngleDifference(wantedYaw, currentYaw)
+    local steer = math.Clamp(headingError / 52, -1, 1)
     local combat = vehicle.BZCNGlideAIMode == "combat"
     local socialApproach = IsValid(interest) and not combat
     local parkingApproach = vehicle.BZCNGlideAIMode == "park_approach" and not combat
