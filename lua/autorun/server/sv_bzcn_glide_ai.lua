@@ -458,9 +458,42 @@ local function FindRoadNodeGoal(vehicle)
             currentNode = graph[currentID]
             currentPos = nodePos(currentNode)
             nextID = nil
-            if currentNode and currentPos then
-                local bestScore
+
+            -- If the nearest node is ahead of the vehicle and its links extend
+            -- back toward the vehicle, enter the graph through that preceding
+            -- node. Otherwise continue from the nearest node toward the best
+            -- forward link. This lets off-road vehicles join a road in either
+            -- travel direction instead of aiming backward along the graph.
+            local toNearest = currentPos and (currentPos - origin) or vector_origin
+            toNearest.z = 0
+            local nearestAhead = currentPos and forward:Dot(toNearest) > 0
+            local approachID, approachScore
+            if nearestAhead and currentNode then
                 for _, linkedID in ipairs(currentNode.links or {}) do
+                    local linkedPos = nodePos(graph[linkedID])
+                    if linkedPos then
+                        local awayFromNearest = linkedPos - currentPos
+                        awayFromNearest.z = 0
+                        if awayFromNearest:LengthSqr() > 1 then
+                            awayFromNearest:Normalize()
+                            local score = -forward:Dot(awayFromNearest) * 1000
+                                - origin:Distance(linkedPos) * 0.05
+                            if not approachScore or score > approachScore then
+                                approachID, approachScore = linkedID, score
+                            end
+                        end
+                    end
+                end
+            end
+
+            if approachID and approachScore and approachScore > -250 then
+                nextID = currentID
+                currentID = approachID
+                currentNode = graph[currentID]
+                currentPos = nodePos(currentNode)
+            else
+                local bestScore
+                for _, linkedID in ipairs(currentNode and currentNode.links or {}) do
                     local linked = graph[linkedID]
                     local pos = nodePos(linked)
                     if pos and linkedID ~= currentID then
@@ -770,7 +803,6 @@ local function SetControls(vehicle, throttle, steer, brake)
     if isfunction(vehicle.SetInputBool) then
         vehicle:SetInputBool(1, "handbrake", false)
     end
-    vehicle:SetInputFloat(1, "accelerate", math.Clamp(throttle, 0, 1))
     vehicle:SetInputFloat(1, "steer", math.Clamp(steer, -1, 1))
     -- Glide can interpret simultaneous throttle/brake as reverse-like input.
     -- Permit a tiny residual throttle only when the smoothed brake is negligible.
