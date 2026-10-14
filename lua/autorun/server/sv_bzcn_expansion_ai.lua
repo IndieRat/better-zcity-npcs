@@ -4,6 +4,7 @@ if not SERVER then return end
 BZCN = BZCN or {}
 BZCNCompanionAI = BZCNCompanionAI or {}
 local Companion = BZCNCompanionAI
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("companion", Companion) end
 util.AddNetworkString("BZCN_NPCChat")
 
 local function Managed(ent)
