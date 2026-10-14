@@ -1779,9 +1779,31 @@ local function InstallZCityStunAdapters()
     end
 end
 
+-- Do not replace Z-City's global Fake/FakeUp functions. Even a wrapper that
+-- delegates Players can interfere with native fake/ragdoll ownership when other
+-- addons also wrap these entry points. On hot reload, undo only our own wrapper
+-- and restore the stable original captured by this addon.
+local function RestoreNativeFakeEntrypoints()
+    if not hg then return end
+
+    if hg.BZCNNPCFakeAdapter and hg.Fake == hg.BZCNNPCFakeAdapter
+        and isfunction(hg.BZCNNPCOriginalFake) then
+        hg.Fake = hg.BZCNNPCOriginalFake
+    end
+    if hg.BZCNNPCFakeUpAdapter and hg.FakeUp == hg.BZCNNPCFakeUpAdapter
+        and isfunction(hg.BZCNNPCOriginalFakeUp) then
+        hg.FakeUp = hg.BZCNNPCOriginalFakeUp
+    end
+
+    hg.BZCNNPCFakeAdapter = nil
+    hg.BZCNNPCFakeUpAdapter = nil
+end
+
+RestoreNativeFakeEntrypoints()
+
 local function InstallZCityKnockdownAdapters()
-    InstallZCityFakeAdapter()
-    InstallZCityFakeUpAdapter()
+    -- Native fake/get-up lifecycle is exclusively Z-City-owned. Only the
+    -- non-player stun adapters remain; they explicitly delegate real Players.
     InstallZCityStunAdapters()
 end
 
@@ -1795,11 +1817,9 @@ timer.Create("BZCNNPCSupport_ZCityKnockdownAdapterRetry", 0.5, 20, function()
     InstallZCityKnockdownAdapters()
     if not hg then return end
 
-    local fakeReady = not isfunction(hg.Fake) or hg.Fake == hg.BZCNNPCFakeAdapter
-    local fakeUpReady = not isfunction(hg.FakeUp) or hg.FakeUp == hg.BZCNNPCFakeUpAdapter
     local stunReady = not isfunction(hg.StunPlayer) or hg.StunPlayer == hg.BZCNNPCStunAdapter
     local lightStunReady = not isfunction(hg.LightStunPlayer) or hg.LightStunPlayer == hg.BZCNNPCLightStunAdapter
-    if fakeReady and fakeUpReady and stunReady and lightStunReady then
+    if stunReady and lightStunReady then
         timer.Remove("BZCNNPCSupport_ZCityKnockdownAdapterRetry")
     end
 end)
