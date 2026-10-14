@@ -439,7 +439,10 @@ hook.Add("Org Think", "BZCNNPCSupport_WoundNetVarMirror", function(owner, org)
 end)
 
 local function EnsureZCityOrganism(owner)
-    if not IsValid(owner) then return nil, false end
+    -- Hard boundary: this helper exists only to initialize the managed NPC's
+    -- fake-player organism. Never pass a real player through Add/Clear here;
+    -- Z-City's Add replaces the organism table and Clear resets its state.
+    if not IsSupportedNPC(owner) or owner:IsPlayer() then return nil, false end
 
     local current = owner.organism
     if istable(current) and current.owner == owner and current.fakePlayer == true then
@@ -532,9 +535,12 @@ local function EnsureZCityOrganism(owner)
 end
 
 local function SyncEntity(ent, state)
-    if not IsValid(ent) then return end
+    if not IsValid(ent) or ent:IsPlayer() or not istable(state) then return end
 
     local owner = state.owner
+    -- tracked state is NPC-only. If an owner reference is ever corrupted or
+    -- accidentally pointed at a player, stop before touching either organism.
+    if not IsSupportedNPC(owner) or owner:IsPlayer() then return end
     local org, nativeReady
     if IsValid(owner) then
         org, nativeReady = EnsureZCityOrganism(owner)
@@ -645,7 +651,8 @@ local function SyncEntity(ent, state)
 end
 
 function Support.Attach(ent)
-    if not IsSupportedNPC(ent) then return nil end
+    -- Keep the public entry point as strict as the internal sync path.
+    if not IsSupportedNPC(ent) or ent:IsPlayer() then return nil end
 
     local state = ent.BZCNNPCOrg
     if not state then
