@@ -4,6 +4,8 @@
 if not SERVER then return end
 
 BZCN = BZCN or {}
+BZCN.MetrocopAlertness = BZCN.MetrocopAlertness or {}
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("metrocop", BZCN.MetrocopAlertness) end
 
 local function IsMetrocop(ent)
     if not IsValid(ent) or ent:IsPlayer()
