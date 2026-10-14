@@ -554,20 +554,24 @@ local function FindWanderGoal(vehicle)
     return candidates[math.random(pickCount)].pos
 end
 
-local function HasClearForward(vehicle, distance)
+local function GetForwardObstacleDistance(vehicle, distance)
     local startPos = vehicle:WorldSpaceCenter()
     local endPos = startPos + GetDrivingForward(vehicle) * distance
     local trace = util.TraceHull({
         start = startPos,
         endpos = endPos,
-        mins = Vector(-42, -42, -10),
-        maxs = Vector(42, 42, 48),
+        mins = Vector(-34, -34, -8),
+        maxs = Vector(34, 34, 38),
         filter = {vehicle, unpack(vehicle:GetChildren())},
         mask = MASK_SOLID
     })
-    if trace.Hit and IsValid(trace.Entity) and trace.Entity:IsPlayer() then return false end
-    if trace.Hit and IsValid(trace.Entity) and IsManaged(trace.Entity) then return false end
-    return not trace.Hit
+    if not trace.Hit or trace.HitSky then return distance end
+    -- Only react to a real obstruction in the driving corridor. Ignore trigger
+    -- entities and the AI's own seated occupants; the hull already filters the car.
+    if IsValid(trace.Entity) and trace.Entity:GetClass() == "trigger_multiple" then
+        return distance
+    end
+    return math.max(0, distance * math.Clamp(tonumber(trace.Fraction) or 1, 0, 1))
 end
 
 local function NearbyHazard(vehicle, radius)
@@ -647,6 +651,7 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
     vehicle.BZCNGlideAIInterestUntil = nil
     vehicle.BZCNGlideAIPreviousVelocity = nil
     vehicle.BZCNGlideAIPreviousVelocityAt = nil
+    vehicle.BZCNGlideAISteer = nil
 end
 
 -- Glide's native crash ejection only processes real Player occupants. Managed
@@ -1040,36 +1045,50 @@ local function UpdateVehicleAI(vehicle, now)
     local parkingApproach = vehicle.BZCNGlideAIMode == "park_approach" and not combat
     local desiredSpeed = combat and COMBAT_SPEED or (socialApproach and 145 or parkingApproach and 165 or CIVILIAN_SPEED)
 
-    -- Civilians brake and wait whenever the road ahead is occupied. Combat
-    -- drivers pursue hostile targets, but still avoid pedestrians and friendlies.
-    local hazard = NearbyHazard(vehicle, combat and 105 or AVOID_RADIUS)
-    local clearAhead = HasClearForward(vehicle, combat and 300 or 520)
-    local throttle = 0.45
-    local brake = 0
-    if speed > desiredSpeed then throttle = 0.08 end
-    if speed < desiredSpeed and alignment > 0.35 then throttle = combat and 0.82 or 0.36 end
-    if alignment < -0.35 then
-        -- Avoid full braking throughout a turn: that repeatedly stalls the car
-        -- and lets residual momentum make it appear to switch between forward
-        -- and reverse. Keep a small crawl while the steering arc develops.
-        throttle = speed < 45 and (combat and 0.38 or 0.24) or 0.12
-        brake = 0
-    elseif alignment < 0.12 then
-        throttle = math.min(throttle, 0.18)
-        brake = speed > desiredSpeed + 80 and 0.18 or 0
-    end
-    if math.abs(steer) > 0.72 then throttle = math.min(throttle, combat and 0.48 or 0.30) end
-
-    -- Glide exposes signed forwardSpeed. If the chassis is still travelling
-    -- backward from a previous steering correction, brake it to a stop before
-    -- applying forward throttle; absolute speed alone caused reverse momentum
-    -- to be mistaken for ordinary forward travel.
+    -- Cruise control: continuously adjust throttle to the speed target instead
+    -- of alternating between a fixed throttle and full stop each AI tick.
     local signedForwardSpeed = currentVelocity:Dot(forward)
+    local forwardSpeed = math.max(signedForwardSpeed, 0)
+    local speedError = desiredSpeed - forwardSpeed
+    local throttle = math.Clamp(0.30 + speedError / math.max(desiredSpeed, 1) * 0.62, 0.12, combat and 0.9 or 0.78)
+    local brake = 0
+
+    -- Slow down for sharp turns without repeatedly stopping at every steering
+    -- correction. Keep a little drive through the turn so the chassis maintains flow.
+    if alignment < -0.35 then
+        throttle = math.min(throttle, forwardSpeed < 35 and 0.28 or 0.20)
+    elseif alignment < 0.12 then
+        throttle = math.min(throttle, 0.30)
+    end
+    if math.abs(steer) > 0.82 then throttle = math.min(throttle, 0.34) end
+    if forwardSpeed > desiredSpeed + 70 then throttle = 0.08 end
+
+    -- Use distance-to-obstacle, not a boolean 520-unit look-ahead that slammed
+    -- the brakes for anything in the general corridor. Brake progressively and
+    -- only come to a full stop for a genuinely close obstruction.
+    local obstacleDistance = GetForwardObstacleDistance(vehicle, combat and 360 or 460)
+    if obstacleDistance < 100 then
+        throttle = 0
+        brake = 0.18
+    elseif obstacleDistance < 190 then
+        throttle = math.min(throttle, 0.16)
+        brake = forwardSpeed > 180 and 0.12 or 0
+    elseif obstacleDistance < 300 then
+        throttle = math.min(throttle, 0.32)
+        brake = 0
+    end
+
+    -- Nearby pedestrians beside the car should not force a stop; only a very
+    -- close hazard can request a cautious crawl, while the forward hull handles
+    -- actual objects in the car's path.
+    if NearbyHazard(vehicle, combat and 95 or 115) then
+        throttle = math.min(throttle, 0.22)
+        brake = 0
+    end
+
+    -- Glide treats reverse momentum and heavy braking as reverse input. Correct
+    -- backward drift with forward gear and a measured counter-throttle instead.
     if signedForwardSpeed < -45 then
-        -- A strong brake input doesn't stop a Glide car here: it selects reverse.
-        -- With throttle at zero the chassis then coasts backward and the AI
-        -- stalls indefinitely. Reassert forward gear and gently drive against
-        -- the unwanted backward momentum until the car is moving forward again.
         if isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
             and vehicle:GetGear() < 0 then
             vehicle:SwitchGear(1, 0)
@@ -1078,17 +1097,12 @@ local function UpdateVehicleAI(vehicle, now)
         brake = 0
     end
 
-    if not clearAhead or hazard then
-        throttle = 0
-        brake = combat and 0.7 or 0.9
-        if not combat and now >= (vehicle.BZCNGlideAINextAvoidAt or 0) then
-            -- Retarget to an open forward sector, but debounce this so the
-            -- vehicle doesn't randomly change steering every Think tick.
-            vehicle.BZCNGlideAITarget = FindWanderGoal(vehicle)
-            vehicle.BZCNGlideAINextTargetAt = now + math.Rand(2.5, 4.5)
-            vehicle.BZCNGlideAINextAvoidAt = now + 1.2
-        end
-    end
+    -- Smooth steering changes at the AI cadence; this prevents twitching and
+    -- reduces the brake/throttle oscillation caused by sharp target corrections.
+    local previousSteer = tonumber(vehicle.BZCNGlideAISteer) or steer
+    local steerAlpha = math.Clamp(FrameTime() * 5, 0.12, 0.42)
+    steer = Lerp(steerAlpha, previousSteer, steer)
+    vehicle.BZCNGlideAISteer = steer
 
     -- Do not ram a non-hostile player/NPC to reach a combat target.
     if combat and IsValid(target) and IsHostile(driver, target) then
