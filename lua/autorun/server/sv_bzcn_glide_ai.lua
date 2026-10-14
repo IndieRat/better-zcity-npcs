@@ -506,6 +506,9 @@ local function SetControls(vehicle, throttle, steer, brake)
 
     vehicle:SetInputFloat(1, "accelerate", math.Clamp(throttle, 0, 1))
     vehicle:SetInputFloat(1, "steer", math.Clamp(steer, -1, 1))
+    -- Glide uses brake > 0.2 as a reverse-gear request at low forward speed.
+    -- Keep ordinary braking below that threshold; reverse momentum is handled
+    -- by selecting forward gear and applying controlled forward throttle below.
     vehicle:SetInputFloat(1, "brake", math.Clamp(brake or 0, 0, 0.18))
 end
 
@@ -921,8 +924,16 @@ local function UpdateVehicleAI(vehicle, now)
     -- to be mistaken for ordinary forward travel.
     local signedForwardSpeed = currentVelocity:Dot(forward)
     if signedForwardSpeed < -45 then
-        throttle = 0
-        brake = math.max(brake, 0.85)
+        -- A strong brake input doesn't stop a Glide car here: it selects reverse.
+        -- With throttle at zero the chassis then coasts backward and the AI
+        -- stalls indefinitely. Reassert forward gear and gently drive against
+        -- the unwanted backward momentum until the car is moving forward again.
+        if isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
+            and vehicle:GetGear() < 0 then
+            vehicle:SwitchGear(1, 0)
+        end
+        throttle = math.Clamp(0.22 + math.abs(signedForwardSpeed) / 300, 0.22, 0.55)
+        brake = 0
     end
 
     if not clearAhead or hazard then
