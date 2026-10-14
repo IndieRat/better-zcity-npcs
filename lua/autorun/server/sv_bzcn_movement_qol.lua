@@ -134,7 +134,8 @@ hook.Add("OnEntityCreated", "BZCN.MovementQOL.Attach", function(ent)
     timer.Simple(0, function()
         if not IsManaged(ent) or ent.BZCNMovementQOLAttached then return end
         ent.BZCNMovementQOLAttached = true
-        ent.BZCNQOLOriginalBounds = {ent:OBBMins(), ent:OBBMaxs()}
+        local mins, maxs = ent:GetCollisionBounds()
+        ent.BZCNQOLOriginalBounds = {mins, maxs}
         if ent.loco then
             pcall(ent.loco.SetAcceleration, ent.loco, 850)
             pcall(ent.loco.SetDeceleration, ent.loco, 700)
