@@ -219,32 +219,6 @@ local function SeatNPC(npc, vehicle, seat, role)
     npc.GlideRagdollStartPos = seat:GetPos()
     npc.GlideRagdollTimeout = math.huge
 
-    -- Leave a translucent standing echo at the boarding point. The organism
-    -- NextBot is hidden for AI/state and its physical ragdoll rides in the seat;
-    -- this separate non-solid prop prevents the entry from looking like the
-    -- NPC simply stares at an empty seat and vanishes.
-    if not IsValid(npc.BZCNGlideGhost) then
-        local ghost = ents.Create("prop_dynamic")
-        if IsValid(ghost) then
-            ghost:SetModel(npc:GetModel())
-            ghost:SetPos(npc:GetPos())
-            ghost:SetAngles(Angle(0, npc:GetAngles().y, 0))
-            ghost:Spawn()
-            ghost:SetSolid(SOLID_NONE)
-            ghost:SetMoveType(MOVETYPE_NONE)
-            ghost:SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE)
-            ghost:SetRenderMode(RENDERMODE_TRANSCOLOR)
-            ghost:SetColor(Color(165, 210, 255, 95))
-            ghost:SetPlaybackRate(1)
-            local sequence = ghost:LookupSequence("idle_all")
-            if sequence < 0 then sequence = ghost:LookupSequence("idle") end
-            if sequence >= 0 then ghost:ResetSequence(sequence) end
-            ghost:DrawShadow(false)
-            ghost.BZCNGlideGhostOwner = npc
-            npc.BZCNGlideGhost = ghost
-        end
-    end
-
     -- The physical ragdoll is the only visible body while seated. Reassert
     -- this because civilian appearance/animation hooks can leave the source
     -- NextBot drawable after the injury bridge initially hid it.
@@ -295,9 +269,6 @@ local function UnseatNPC(npc, reason, keepDowned)
     local vehicle = npc.BZCNGlideVehicle
     local seat = npc.BZCNGlideSeat
     local saved = npc.BZCNGlideSavedState
-    local ghost = npc.BZCNGlideGhost
-    if IsValid(ghost) then ghost:Remove() end
-    npc.BZCNGlideGhost = nil
     local wasSeatedFake = npc.BZCNGlideSeatedFake == true
     if wasSeatedFake then
         local rag = npc.BZCNNPCRagdoll or npc.FakeRagdoll
@@ -611,49 +582,25 @@ end
 local function SetControls(vehicle, throttle, steer, brake)
     if not IsValid(vehicle) then return end
 
-    -- Critical Glide quirk: base_glide_car treats brake > 0.2 while
-    -- forwardSpeed < 100 as a request to select reverse gear. AI avoidance,
-    -- target turns, and the old reverse-momentum recovery all used 0.7-0.9,
-    -- so ordinary braking repeatedly put the car in reverse. Keep AI braking
-    -- below that gear-selection threshold and explicitly restore forward gear.
-    -- NPCs do not trigger Glide's real OnDriverEnter callback, so the
-    -- engine can remain off and the gearbox can remain in neutral forever.
-    if isfunction(vehicle.IsEngineOn) and not vehicle:IsEngineOn()
-        and isfunction(vehicle.TurnOn) then
+    -- Glide's base_glide_car:TurnOn() resets the transmission to neutral.
+    -- Engine state 1 means "starting"; repeatedly calling TurnOn while the
+    -- engine cranks resets the gear to 0 every AI tick, so throttle never
+    -- reaches the drivetrain. Start only from off/stopping states, then select
+    -- first gear once the engine has actually reached state 2 (running).
+    local engineState = isfunction(vehicle.GetEngineState) and vehicle:GetEngineState() or nil
+    if (engineState == 0 or engineState == 3) and isfunction(vehicle.TurnOn) then
         vehicle:TurnOn()
+        engineState = isfunction(vehicle.GetEngineState) and vehicle:GetEngineState() or engineState
     end
-    if isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
+    if engineState == 2 and isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
         and vehicle:GetGear() <= 0 then
         vehicle:SwitchGear(1, 0)
     end
 
     vehicle:SetInputFloat(1, "accelerate", math.Clamp(throttle, 0, 1))
     vehicle:SetInputFloat(1, "steer", math.Clamp(steer, -1, 1))
-    -- Glide uses brake > 0.2 as a reverse-gear request at low forward speed.
-    -- Keep ordinary braking below that threshold; reverse momentum is handled
-    -- by selecting forward gear and applying controlled forward throttle below.
+    -- Keep ordinary braking below Glide's low-speed reverse-selection threshold.
     vehicle:SetInputFloat(1, "brake", math.Clamp(brake or 0, 0, 0.18))
-
-    -- This is a fake occupant, not Glide's actual seat driver. On some Glide
-    -- builds inputs are accepted but fail to produce chassis motion. After a
-    -- short stall, apply a small chassis-axis force as a failsafe. This only
-    -- runs under commanded throttle at near-zero speed, never during braking.
-    local speed = vehicle:GetVelocity():Length2D()
-    if throttle > 0.18 and speed < 18 then
-        vehicle.BZCNGlideAIStallSince = vehicle.BZCNGlideAIStallSince or CurTime()
-        if CurTime() - vehicle.BZCNGlideAIStallSince > 0.9 then
-            local phys = vehicle:GetPhysicsObject()
-            if IsValid(phys) and phys:GetMass() > 0 then
-                local forward = GetDrivingForward(vehicle)
-                if forward:LengthSqr() > 0.01 then
-                    phys:Wake()
-                    phys:ApplyForceCenter(forward * phys:GetMass() * 85)
-                end
-            end
-        end
-    else
-        vehicle.BZCNGlideAIStallSince = nil
-    end
 end
 
 local function ReleaseVehicle(vehicle, reason, keepDowned)
@@ -830,14 +777,6 @@ local function BeginVehicleAI(vehicle, driver)
     driver.BZCNGlideApproachRole = nil
     driver.BZCNGlideApproachUntil = nil
 
-    -- Fake actors do not enter a real Glide seat, so explicitly wake the engine
-    -- and put the transmission in first gear before the first AI control tick.
-    if isfunction(vehicle.TurnOn) then vehicle:TurnOn() end
-    if isfunction(vehicle.SwitchGear) and isfunction(vehicle.GetGear)
-        and vehicle:GetGear() <= 0 then
-        vehicle:SwitchGear(1, 0)
-    end
-
     vehicle.BZCNAIDriver = driver
     vehicle.BZCNGlideAIMode = info.combat and "combat" or "wander"
     vehicle.BZCNGlideAITarget = nil
@@ -853,9 +792,6 @@ local function BeginVehicleAI(vehicle, driver)
     vehicle.BZCNGlideAIPreviousVelocityAt = CurTime()
     vehicle.BZCNAIClaimedAt = CurTime()
 
-    if isfunction(vehicle.TurnOn) and (not isfunction(vehicle.GetEngineState) or vehicle:GetEngineState() == 0) then
-        pcall(vehicle.TurnOn, vehicle)
-    end
     BoardSquad(vehicle, driver)
     hook.Run("BZCN_NPCEnteredGlideVehicle", driver, vehicle, vehicle.BZCNGlideAIMode)
     return true
