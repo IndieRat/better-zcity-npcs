@@ -905,9 +905,13 @@ function FakeActor:UpdateVehicleSeat(dt)
         {side = -1, thigh = "ValveBiped.Bip01_L_Thigh", calf = "ValveBiped.Bip01_L_Calf", foot = "ValveBiped.Bip01_L_Foot"},
         {side = 1, thigh = "ValveBiped.Bip01_R_Thigh", calf = "ValveBiped.Bip01_R_Calf", foot = "ValveBiped.Bip01_R_Foot"}
     }) do
-        local thighPos = SeatPoint(Vector(8, leg.side * 8, 22))
-        local kneePos = SeatPoint(Vector(24, leg.side * 8, 12))
-        local footPos = SeatPoint(Vector(17, leg.side * 8, 3))
+        -- The seated physics-bone basis is mirrored against the chassis lateral
+        -- axis; invert the lateral target so anatomical L/R land on the matching
+        -- side of the occupant instead of crossing over.
+        local lateral = -leg.side
+        local thighPos = SeatPoint(Vector(8, lateral * 8, 22))
+        local kneePos = SeatPoint(Vector(24, lateral * 8, 12))
+        local footPos = SeatPoint(Vector(17, lateral * 8, 3))
         self:ShadowBone(leg.thigh, upright, 0.075, 95 * power, 52,
             thighPos, 150, 75)
         self:ShadowBone(leg.calf, upright, 0.075, 90 * power, 50,
@@ -920,9 +924,11 @@ function FakeActor:UpdateVehicleSeat(dt)
         {side = -1, upper = "ValveBiped.Bip01_L_UpperArm", forearm = "ValveBiped.Bip01_L_Forearm", hand = "ValveBiped.Bip01_L_Hand"},
         {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand"}
     }) do
-        local upperPos = SeatPoint(Vector(0, arm.side * 13, 40))
-        local forearmPos = SeatPoint(Vector(11, arm.side * 12, 31))
-        local handPos = SeatPoint(Vector(22, arm.side * 10, 27))
+        -- Match the same mirrored chassis-space correction used by the legs.
+        local lateral = -arm.side
+        local upperPos = SeatPoint(Vector(0, lateral * 13, 40))
+        local forearmPos = SeatPoint(Vector(11, lateral * 12, 31))
+        local handPos = SeatPoint(Vector(22, lateral * 10, 27))
         self:ShadowBone(arm.upper, upright, 0.075, 105 * power, 55,
             upperPos, 150, 75)
         self:ShadowBone(arm.forearm, upright, 0.075, 100 * power, 52,
