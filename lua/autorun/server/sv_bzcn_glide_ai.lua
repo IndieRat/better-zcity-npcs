@@ -492,9 +492,20 @@ end
 
 local function SetControls(vehicle, throttle, steer, brake)
     if not IsValid(vehicle) then return end
+
+    -- Critical Glide quirk: base_glide_car treats brake > 0.2 while
+    -- forwardSpeed < 100 as a request to select reverse gear. AI avoidance,
+    -- target turns, and the old reverse-momentum recovery all used 0.7-0.9,
+    -- so ordinary braking repeatedly put the car in reverse. Keep AI braking
+    -- below that gear-selection threshold and explicitly restore forward gear.
+    if isfunction(vehicle.GetGear) and isfunction(vehicle.SwitchGear)
+        and vehicle:GetGear() < 0 then
+        vehicle:SwitchGear(1, 0)
+    end
+
     vehicle:SetInputFloat(1, "accelerate", math.Clamp(throttle, 0, 1))
     vehicle:SetInputFloat(1, "steer", math.Clamp(steer, -1, 1))
-    vehicle:SetInputFloat(1, "brake", math.Clamp(brake or 0, 0, 1))
+    vehicle:SetInputFloat(1, "brake", math.Clamp(brake or 0, 0, 0.18))
 end
 
 local function ReleaseVehicle(vehicle, reason, keepDowned)
