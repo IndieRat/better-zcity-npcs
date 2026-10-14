@@ -833,7 +833,10 @@ function FakeActor:UpdateVehicleSeat(dt)
     -- Glide chassis forward axis after the pose-axis correction below. Keep
     -- limb target positions in chassis coordinates, but compensate the bone
     -- orientation so the visible face/torso point through the windshield.
-    local yaw = math.NormalizeAngle(desiredForward:Angle().y + 180)
+    -- Physics-bone orientation must use the chassis forward yaw directly here.
+    -- Adding 180 made the occupant's face point through the rear window even
+    -- though the vehicle itself was driving forward.
+    local yaw = math.NormalizeAngle(desiredForward:Angle().y)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
