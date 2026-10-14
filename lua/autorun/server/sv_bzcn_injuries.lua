@@ -1670,64 +1670,9 @@ hook.Add("HomigradDamage", "BZCNNPCSupport_DeathFinalizer", function(ent, damage
     QueueManagedNPCDeathCheck(ent, damageInfo)
 end)
 
--- Z-City's shock/knockout path calls hg.Fake(org.owner). Its implementation
--- is Player-specific, so route only managed NextBots into our organism-aware
--- knockdown/recovery lifecycle while leaving real Player calls untouched.
-local function InstallZCityFakeAdapter()
-    if not hg or not isfunction(hg.Fake) then return false end
-    if hg.BZCNNPCFakeAdapter and hg.Fake == hg.BZCNNPCFakeAdapter then return true end
-
-    -- Another addon may have wrapped/replaced hg.Fake since our last retry.
-    -- Compose over its current function rather than silently leaving our
-    -- NextBot bridge disconnected or overwriting the other addon's behavior.
-    -- Always delegate through the first captured native entry point. If another
-    -- addon wraps hg.Fake after us, capturing that wrapper and then retrying this
-    -- installer can create a wrapper cycle (native wrapper -> old BZCN adapter ->
-    -- newly installed adapter), repeatedly faking real players.
-    local nativeFake = hg.BZCNNPCOriginalFake or hg.Fake
-    hg.BZCNNPCOriginalFake = nativeFake
-    local function BZCNNPCFakeAdapter(ent, ...)
-        -- Preserve the native player path before inspecting any addon marker.
-        if IsValid(ent) and ent:IsPlayer() then return nativeFake(ent, ...) end
-        if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
-        if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
-            local state = Support.Attach(ent)
-            if state and not state.downed and not state.gettingUp then
-                return EnterDownedState(ent, "shock")
-            end
-            return false
-        end
-        return nativeFake(ent, ...)
-    end
-    hg.BZCNNPCFakeAdapter = BZCNNPCFakeAdapter
-    hg.Fake = BZCNNPCFakeAdapter
-    return true
-end
-
-local function InstallZCityFakeUpAdapter()
-    if not hg or not isfunction(hg.FakeUp) then return false end
-    if hg.BZCNNPCFakeUpAdapter and hg.FakeUp == hg.BZCNNPCFakeUpAdapter then return true end
-
-    -- Match the hg.Fake retry behavior above when other addons load later.
-    -- Use the stable native entry point for the same reason as hg.Fake above:
-    -- never stack our own previous adapter through a third-party wrapper.
-    local nativeFakeUp = hg.BZCNNPCOriginalFakeUp or hg.FakeUp
-    hg.BZCNNPCOriginalFakeUp = nativeFakeUp
-    local function BZCNNPCFakeUpAdapter(ent, ...)
-        -- Player recovery always delegates to the function this adapter wrapped.
-        if IsValid(ent) and ent:IsPlayer() then return nativeFakeUp(ent, ...) end
-        if IsValid(ent) and ent.BZCNNPCDeathCorpse then return false end
-        if IsValid(ent) and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
-            local state = ent.BZCNNPCOrg
-            if state and state.downed then return Recover(ent, ent.BZCNNPCRagdoll, false) end
-            return false
-        end
-        return nativeFakeUp(ent, ...)
-    end
-    hg.BZCNNPCFakeUpAdapter = BZCNNPCFakeUpAdapter
-    hg.FakeUp = BZCNNPCFakeUpAdapter
-    return true
-end
+-- Player and NPC knockdown entry points are intentionally not wrapped here.
+-- Z-City owns hg.Fake/hg.FakeUp for every entity; managed NPC downed state is
+-- entered through the BZCN-specific damage/stun bridge instead.
 
 local function InstallZCityStunAdapters()
     if not hg then return end
