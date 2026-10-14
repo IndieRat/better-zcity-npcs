@@ -65,6 +65,16 @@ end
 function Bridge.Bind(npc, vehicle, seat, ragdoll)
     if not IsValid(npc) or not IsValid(vehicle) or not IsValid(seat) then return false end
     ragdoll = IsValid(ragdoll) and ragdoll or npc.BZCNNPCRagdoll or npc.FakeRagdoll
+    local previousRagdoll = npc.BZCNGlideBoundRagdoll
+    if IsValid(previousRagdoll) and previousRagdoll ~= ragdoll then
+        RemoveContract(previousRagdoll)
+        previousRagdoll.GlideVehicle = nil
+        previousRagdoll.GlideSeat = nil
+        previousRagdoll.GlideSeatIndex = nil
+        previousRagdoll.GlideRagdollPlayer = nil
+        previousRagdoll.IsGlideRagdoll = nil
+    end
+    npc.BZCNGlideBoundRagdoll = IsValid(ragdoll) and ragdoll or nil
     npc.BZCNGlideSeatIndex = GetSeatIndex(vehicle, seat)
     InstallContract(npc, npc)
     if IsValid(ragdoll) then
@@ -83,6 +93,7 @@ function Bridge.Unbind(npc, ragdoll)
     if not IsValid(npc) then return end
     RemoveContract(npc)
     npc.BZCNGlideSeatIndex = nil
+    npc.BZCNGlideBoundRagdoll = nil
     if IsValid(ragdoll) then
         RemoveContract(ragdoll)
         ragdoll.GlideVehicle = nil
@@ -111,7 +122,8 @@ end)
 -- Keep the bridge correct if Z-City replaces the fake ragdoll during a downed
 -- transition. The authoritative organism ragdoll, not a stale proxy, is exposed.
 hook.Add("Think", "BZCN_GlideNativeOccupantSync", function()
-    for _, npc in ipairs(ents.FindByClass("npc_bzcn_base")) do
+    for _, npc in ipairs(ents.GetAll()) do
+        if not IsValid(npc) or not npc.BZCNGlideVehicle then continue end
         local vehicle, seat = npc.BZCNGlideVehicle, npc.BZCNGlideSeat
         if not IsValid(vehicle) or not IsValid(seat) then continue end
         local ragdoll = npc.BZCNNPCRagdoll or npc.FakeRagdoll
