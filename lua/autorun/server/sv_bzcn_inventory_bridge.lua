@@ -109,9 +109,37 @@ local function FindVisibleRagdoll(source, preferred)
     end
 end
 
+-- Z-City's stock sv_inventory.lua passes a stored weapon entry straight to
+-- SWEP:SetInfo(). Its native inventory normally stores live weapon entities or
+-- tables, but BZCN's class-only marker (true) is also used for virtual loadout
+-- entries. For SWEPs with SetInfo, convert that marker to the expected empty
+-- info table on the corpse copy only; never rewrite the live NPC/player inventory.
+local function HasSetInfo(class)
+    local seen = {}
+    for _ = 1, 16 do
+        if not isstring(class) or class == "" or seen[class] then return false end
+        seen[class] = true
+        local definition = weapons and weapons.GetStored and weapons.GetStored(class)
+        if not istable(definition) then return false end
+        if isfunction(definition.SetInfo) then return true end
+        class = definition.Base
+    end
+    return false
+end
+
+local function NormalizeLootWeaponInfo(inventory)
+    if not istable(inventory) or not istable(inventory.Weapons) then return end
+    for class, entry in pairs(inventory.Weapons) do
+        if entry == true and HasSetInfo(class) then
+            inventory.Weapons[class] = {}
+        end
+    end
+end
+
 local function PublishInventory(rag, source)
     if not IsValid(rag) or not IsValid(source) then return false end
     local inventory = EnsureInventory(source)
+    NormalizeLootWeaponInfo(inventory)
     rag.inventory = inventory
     rag.Inventory = inventory
 
