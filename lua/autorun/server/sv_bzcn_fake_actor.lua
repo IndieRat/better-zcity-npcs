@@ -281,6 +281,10 @@ function FakeActor:UpdateLookTarget()
     -- snapping the head back toward the last attacker/combat target, which makes
     -- the prone recovery look like the NPC is still fighting while incapacitated.
     if self.autoCrawl then
+        -- Crawling is recovery, not combat: discard stale aim and keep the neck
+        -- raised toward the travel direction so the face doesn't stay planted.
+        self.aimTarget = nil
+        self.autoLookTarget = true
         local pelvis = GetPhysicsForBone(self.ragdoll, "ValveBiped.Bip01_Pelvis")
         local velocity = IsValid(pelvis) and pelvis:GetVelocity() or self.ragdoll:GetVelocity()
         local horizontal = Vector(velocity.x, velocity.y, 0)
@@ -289,7 +293,7 @@ function FakeActor:UpdateLookTarget()
         direction.z = 0
         if direction:LengthSqr() < 0.01 then direction = Vector(1, 0, 0) end
         direction:Normalize()
-        self.lookTarget = self.ragdoll:WorldSpaceCenter() + direction * 500
+        self.lookTarget = self.ragdoll:WorldSpaceCenter() + direction * 420 + Vector(0, 0, 125)
         return
     end
     local attacker = self.owner.BZCNLastAttacker
@@ -679,15 +683,15 @@ function FakeActor:UpdateCrawl(dt)
         torso:ApplyForceCenter(force)
     else
         if now >= (self.nextCrawlNudge or 0) then
-            self.nextCrawlNudge = now + math.Rand(0.16, 0.22)
-            -- A crawl should visibly translate the body, not just twitch the
-            -- pelvis. Keep the pull capped, but raise its useful baseline so
-            -- an injured NPC can actually drag itself across the floor.
-            local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 52, 32, 62)
+            self.nextCrawlNudge = now + math.Rand(0.10, 0.14)
+            -- Apply translation to both pelvis and torso. Correcting only the
+            -- pelvis is often absorbed by ragdoll constraints/floor friction,
+            -- leaving a convincing crawl pose that barely changes position.
+            local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 78, 58, 92)
             local velocity = pelvis:GetVelocity()
             local horizontal = Vector(velocity.x, velocity.y, 0)
             local correction = direction * speed - horizontal
-            local maxChange = math.Clamp((tonumber(self.config.crawlAcceleration) or 72) * 0.18, 5, 12)
+            local maxChange = math.Clamp((tonumber(self.config.crawlAcceleration) or 100) * 0.14, 9, 16)
             if correction:Length() > maxChange then
                 correction:Normalize()
                 correction = correction * maxChange
@@ -697,6 +701,15 @@ function FakeActor:UpdateCrawl(dt)
                 velocity.y + correction.y,
                 velocity.z
             ))
+            local torso = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
+            if IsValid(torso) then
+                local torsoVelocity = torso:GetVelocity()
+                torso:SetVelocity(Vector(
+                    torsoVelocity.x + correction.x * 0.55,
+                    torsoVelocity.y + correction.y * 0.55,
+                    torsoVelocity.z
+                ))
+            end
         end
     end
 
@@ -848,14 +861,12 @@ function FakeActor:UpdateVehicleSeat(dt)
     end
     if desiredForward:LengthSqr() < 0.01 then return end
     desiredForward:Normalize()
-    -- The seated player-model physics-bone basis is reversed against the
-    -- Glide chassis forward axis after the pose-axis correction below. Keep
-    -- limb target positions in chassis coordinates, but compensate the bone
-    -- orientation so the visible face/torso point through the windshield.
-    -- Physics-bone orientation must use the chassis forward yaw directly here.
-    -- Adding 180 made the occupant's face point through the rear window even
-    -- though the vehicle itself was driving forward.
-    local yaw = math.NormalizeAngle(desiredForward:Angle().y)
+    -- The player-model physics-bone basis is reversed relative to the Glide
+    -- chassis when the seated pose axes are converted below. The earlier
+    -- direct-yaw variant visibly made NPCs look through the rear window; rotate
+    -- the bone orientation half a turn while keeping all target positions in
+    -- chassis coordinates so the body faces the windshield.
+    local yaw = math.NormalizeAngle(desiredForward:Angle().y + 180)
     local upright = Angle(0, yaw, 0)
     upright:RotateAroundAxis(upright:Forward(), 90)
     upright:RotateAroundAxis(upright:Up(), 90)
@@ -955,7 +966,8 @@ function FakeActor:Update(dt)
         return
     elseif self.mode == "crawl" then
         self:UpdateCrawl(dt)
-        self:UpdateWeaponAim(dt)
+        -- Don't run weapon aiming after the crawl controller: that overrides
+        -- the alternating hand reach and leaves the gun extended while prone.
         return
     elseif self.mode == "pounce" then
         self:UpdatePounce(dt)
