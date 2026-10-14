@@ -171,6 +171,10 @@ The injury bridge also uses the public [Z-City NPC Integration (zcnpci)](https:/
 
 The temporary knockdown ragdoll keeps the expected owner links together: `rag.ply`, `owner.FakeRagdoll`, networked `ply`/ `FakeRagdoll`, and the NPC's `GetRagdollEntity()` compatibility accessor. `hg.Fake`, `hg.FakeUp`, `hg.StunPlayer`, and `hg.LightStunPlayer` are adapted only for BZCN-managed actors; calls for real players continue through the installed native/other-addon function. Recovery retries while the temporary ragdoll is held, and the downed copy preserves bodygroups, submaterials, and Citizen-type metadata so appearance-changing addons don't lose their setup. On get-up or death, temporary links are cleared and the death corpse receives its own organism instead of continuing to share the living NPC's.
 
+## Glide occupant bridge
+
+The server-side Glide bridge exposes `GlideGetVehicle()` and `GlideGetSeatIndex()` on the managed NPC and its currently visible organism ragdoll, without changing global Player/Entity metatables. It mirrors Glide's occupant/ragdoll metadata (`GlideVehicle`, `GlideSeat`, `GlideSeatIndex`, and `GlideRagdollPlayer`) and rebinds if Z-City replaces the ragdoll while the NPC remains seated. Unseating restores any instance methods and removes the bridge metadata. This improves compatibility for code that queries Glide's player-facing occupant contract; it does not turn a NextBot into a Player or enable Player-only input/animation hooks.
+
 ## Compatibility approach and limits
 
 NPCs expose Z-City-style fields such as `PlayerClassName`, `Inventory.Weapons/Items/Armor`, `armors`, `armors_health`, `organism`, `GetNetVar`, and `SetNetVar`. Entity-valued netvars and ragdoll ownership links are mirrored for systems that inspect them.
