@@ -1680,8 +1680,12 @@ local function InstallZCityFakeAdapter()
     -- Another addon may have wrapped/replaced hg.Fake since our last retry.
     -- Compose over its current function rather than silently leaving our
     -- NextBot bridge disconnected or overwriting the other addon's behavior.
-    local nativeFake = hg.Fake
-    hg.BZCNNPCOriginalFake = hg.BZCNNPCOriginalFake or nativeFake
+    -- Always delegate through the first captured native entry point. If another
+    -- addon wraps hg.Fake after us, capturing that wrapper and then retrying this
+    -- installer can create a wrapper cycle (native wrapper -> old BZCN adapter ->
+    -- newly installed adapter), repeatedly faking real players.
+    local nativeFake = hg.BZCNNPCOriginalFake or hg.Fake
+    hg.BZCNNPCOriginalFake = nativeFake
     local function BZCNNPCFakeAdapter(ent, ...)
         -- Preserve the native player path before inspecting any addon marker.
         if IsValid(ent) and ent:IsPlayer() then return nativeFake(ent, ...) end
@@ -1705,8 +1709,10 @@ local function InstallZCityFakeUpAdapter()
     if hg.BZCNNPCFakeUpAdapter and hg.FakeUp == hg.BZCNNPCFakeUpAdapter then return true end
 
     -- Match the hg.Fake retry behavior above when other addons load later.
-    local nativeFakeUp = hg.FakeUp
-    hg.BZCNNPCOriginalFakeUp = hg.BZCNNPCOriginalFakeUp or nativeFakeUp
+    -- Use the stable native entry point for the same reason as hg.Fake above:
+    -- never stack our own previous adapter through a third-party wrapper.
+    local nativeFakeUp = hg.BZCNNPCOriginalFakeUp or hg.FakeUp
+    hg.BZCNNPCOriginalFakeUp = nativeFakeUp
     local function BZCNNPCFakeUpAdapter(ent, ...)
         -- Player recovery always delegates to the function this adapter wrapped.
         if IsValid(ent) and ent:IsPlayer() then return nativeFakeUp(ent, ...) end
