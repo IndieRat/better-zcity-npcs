@@ -201,7 +201,8 @@ local function HasFatalZCityOrganDamage(owner)
 end
 
 local function FinalizeManagedNPCDeath(owner, sourceDamage)
-    if not IsValid(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner))
+    if not IsSupportedNPC(owner) or owner:IsPlayer()
+        or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner))
         or (owner:Health() > 0 and not HasFatalZCityOrganDamage(owner))
         or owner.BZCNDeathHandled then
         return false
@@ -1974,7 +1975,8 @@ function Support.OnNPCDeath(owner)
 end
 
 hook.Add("CreateEntityRagdoll", "BZCNNPCSupport_ZCityDeathRagdoll", function(owner, rag)
-    if not IsValid(owner) or not IsValid(rag) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return end
+    if not IsValid(owner) or owner:IsPlayer() or not IsValid(rag)
+        or not IsSupportedNPC(owner) or not (BZCN and BZCN.IsManaged and BZCN.IsManaged(owner)) then return end
 
     -- If the NPC died while already downed, its visible proxy is the corpse.
     -- The engine/Z-City death callback can still create a second ragdoll;
@@ -2486,7 +2488,8 @@ hook.Add("EntityRemoved", "BZCNNPCSupport_EntityCleanup", function(ent)
 
     -- Do not leave a stale entry in Z-City's native Think list if an external
     -- cleanup removes a managed entity before the death-ragdoll hook runs.
-    if BZCN and BZCN.IsManaged and BZCN.IsManaged(ent)
+    if IsSupportedNPC(ent) and not ent:IsPlayer()
+        and BZCN and BZCN.IsManaged and BZCN.IsManaged(ent)
         and hg.organism and isfunction(hg.organism.Remove)
         and istable(hg.organism.list) and hg.organism.list[ent] then
         pcall(hg.organism.Remove, ent)
