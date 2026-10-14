@@ -4,6 +4,7 @@ BZCN = BZCN or {}
 local FakeActor = {}
 FakeActor.__index = FakeActor
 BZCN.FakeActor = FakeActor
+if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("fakeActor", FakeActor) end
 
 function FakeActor.New(owner, ragdoll, config)
     if not IsValid(owner) or not IsValid(ragdoll) then return nil end
