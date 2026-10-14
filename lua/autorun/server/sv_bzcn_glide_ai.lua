@@ -894,8 +894,12 @@ local function FindDriverForVehicle(vehicle)
             or (npc.BZCNGlideExitAt or 0) > CurTime() then continue end
         local info = ClassInfo(npc)
         if not info.civilian and not info.combat then continue end
-        local owner = vehicle.BZCNVehicleOwnerNPC
+        local owner = IsValid(vehicle.BZCNVehicleOwner) and vehicle.BZCNVehicleOwner
+            or vehicle.BZCNVehicleOwnerNPC
         if IsValid(owner) and owner ~= npc then
+            -- A player-owned car is not a public NPC taxi. NPCs may reclaim
+            -- their own car, or share an NPC-owned car with squad/faction mates.
+            if owner:IsPlayer() then continue end
             local ownerInfo = ClassInfo(owner)
             local trusted = (info.squad ~= nil and ownerInfo.squad == info.squad)
                 or (info.faction ~= "" and ownerInfo.faction == info.faction
@@ -1512,8 +1516,10 @@ function AI.RequestDrive(driver)
     for _, vehicle in ipairs(ents.FindInSphere(driver:GetPos(), CLAIM_RADIUS)) do
         if not IsCar(vehicle) or IsValid(vehicle.BZCNAIDriver)
             or IsValid(vehicle:GetDriver()) then continue end
-        local owner = vehicle.BZCNVehicleOwnerNPC
+        local owner = IsValid(vehicle.BZCNVehicleOwner) and vehicle.BZCNVehicleOwner
+            or vehicle.BZCNVehicleOwnerNPC
         if IsValid(owner) and owner ~= driver then
+            if owner:IsPlayer() then continue end
             local a, b = ClassInfo(driver), ClassInfo(owner)
             local trusted = (a.squad ~= nil and a.squad == b.squad)
                 or (a.civilian and b.civilian and a.faction ~= "" and a.faction == b.faction)
