@@ -831,52 +831,72 @@ function TOOL.BuildCPanel(panel)
     addSelectedButton:DockMargin(0, 0, 5, 0)
     addSelectedButton:SetWide(170)
     addSelectedButton.DoClick = function()
+        -- Keep the visible CSV field as the canonical catalog output. Relying on
+        -- sixteen separate TOOL userinfo convars here meant the button could
+        -- appear to add items locally while TOOL:GetClientInfo("weaponN") still
+        -- arrived empty/stale on the server when the loadout was applied.
         local convarName = "tool_bzcn_inventory_giver_weapons"
         local current = GetConVar(convarName)
         local entries = SplitList(current and current:GetString() or "", 64)
-        local seen = {}
-        for _, entry in ipairs(entries) do seen[string.lower(entry)] = true end
+        local seen, merged = {}, {}
 
-        local slots, emptySlots = {}, {}
-        for slot = 1, 16 do
-            local slotName = "tool_bzcn_inventory_giver_weapon" .. slot
-            local variable = GetConVar(slotName)
-            local value = variable and string.Trim(variable:GetString() or "") or ""
-            slots[slot] = value
-            if value == "" then emptySlots[#emptySlots + 1] = slot end
-            for _, entry in ipairs(SplitList(value, 16)) do seen[string.lower(entry)] = true end
+        local function AddEntry(class)
+            if not isstring(class) then return false end
+            class = string.Trim(class)
+            if class == "" then return false end
+            local key = string.lower(class)
+            if seen[key] then return false end
+            if #merged >= 64 then return false end
+            seen[key] = true
+            merged[#merged + 1] = class
+            return true
         end
 
-        local added, slotCursor = 0, 1
+        -- Migrate any existing per-slot entries into the CSV before adding the
+        -- new selection, so old saved configurations are not discarded.
+        for _, entry in ipairs(entries) do AddEntry(entry) end
+        for slot = 1, 16 do
+            local variable = GetConVar("tool_bzcn_inventory_giver_weapon" .. slot)
+            local value = variable and variable:GetString() or ""
+            for _, entry in ipairs(SplitList(value, 16)) do AddEntry(entry) end
+        end
+
         local classes = {}
-        for class in pairs(selectedWeapons) do classes[#classes + 1] = class end
+        for class, picked in pairs(selectedWeapons) do
+            if picked == true then classes[#classes + 1] = class end
+        end
         table.sort(classes)
+
+        local added, skippedForLimit = 0, 0
         for _, class in ipairs(classes) do
-            local key = string.lower(class)
-            if not seen[key] then
-                local slot = emptySlots[slotCursor]
-                if slot then
-                    slots[slot] = class
-                    slotCursor = slotCursor + 1
-                    seen[key] = true
-                    added = added + 1
-                elseif #entries < 64 then
-                    -- Overflow remains supported through the legacy CSV field.
-                    entries[#entries + 1] = class
-                    seen[key] = true
-                    added = added + 1
-                end
+            if seen[string.lower(class)] then
+                -- Already configured: don't create duplicate loadout entries.
+            elseif AddEntry(class) then
+                added = added + 1
+            else
+                skippedForLimit = skippedForLimit + 1
             end
         end
 
+        -- Write one authoritative list first, then clear the redundant slots.
+        -- ParseConfiguredInventory still supports legacy/manual slot values, but
+        -- catalog selections now appear in the field users can inspect/edit.
+        RunConsoleCommand(convarName, table.concat(merged, ","))
         for slot = 1, 16 do
-            RunConsoleCommand("tool_bzcn_inventory_giver_weapon" .. slot, slots[slot] or "")
+            RunConsoleCommand("tool_bzcn_inventory_giver_weapon" .. slot, "")
         end
-        RunConsoleCommand(convarName, table.concat(entries, ","))
+
         if added > 0 then
             chat.AddText(Color(125, 220, 175), "[BZCN] Added " .. tostring(added)
-                .. " weapon(s) to individual loadout slots.")
+                .. " weapon(s) to the loadout list.")
+            table.Empty(selectedWeapons)
+            RebuildCatalog()
+        elseif skippedForLimit > 0 then
+            chat.AddText(Color(235, 190, 120), "[BZCN] The loadout list is full (64 entries). "
+                .. tostring(skippedForLimit) .. " selected weapon(s) were not added.")
+            surface.PlaySound("buttons/button10.wav")
         else
+            chat.AddText(Color(205, 205, 215), "[BZCN] No new weapons added; selection is already in the loadout.")
             surface.PlaySound("buttons/button10.wav")
         end
     end
@@ -912,7 +932,7 @@ function TOOL.BuildCPanel(panel)
     panel:TextEntry("Attachment IDs (comma-separated)", "tool_bzcn_inventory_giver_attachments")
     panel:TextEntry("Armor assignments: slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
     panel:CheckBox("Auto-fill reserve ammo for configured weapons", "tool_bzcn_inventory_giver_autoammo")
-    panel:Help("Each catalog choice is stored in its own weapon slot (16 independent slots); the CSV field remains supported for legacy/manual loadouts. The NPC shows only its currently selected weapon in hand.")
+    panel:Help("Catalog selections are written into the visible comma-separated loadout list. Legacy per-weapon slots remain supported, and the NPC shows only its currently selected weapon in hand while the rest stay in its inventory.")
     panel:Help("Legacy aliases like Pistol:9mm or Ammo:SMG1 are still accepted in the weapon field, but each alias resolves to one concrete SWEP.")
     panel:Help("Examples — reserve ammo: Pistol:120,SMG1:90  ·  attachments: suppressor2,scope1  ·  armor: head=combine_helmet,torso=vest3")
     panel:Help("Players keep unrelated physical weapons. Scripted item classes must already be registered; they are stored in the native loot inventory, not spawned into the NPC's hands.")
