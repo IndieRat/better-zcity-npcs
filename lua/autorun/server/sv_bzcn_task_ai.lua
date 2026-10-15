@@ -1148,12 +1148,6 @@ hook.Add("BZCN_EntityDamaged", "BZCN_CombatProneResponse", function(victim, atta
             end
             if isvector(cover) then break end
         end
-        -- If the map has no usable occluder, reposition out of the current
-        -- firing lane; a valid prone/crouch sequence is the final fallback.
-        if not isvector(cover) then
-            local destination = victim:GetPos() + away * 185
-            cover = NavPoint(victim, destination, 300)
-        end
     end
 
     victim.BZCNCombatProneCooldownAt = now + math.Rand(5.5, 9.0)
@@ -1167,7 +1161,26 @@ hook.Add("BZCN_EntityDamaged", "BZCN_CombatProneResponse", function(victim, atta
         return
     end
 
-    if not isnumber(sequence) or sequence < 0 then return end
+    -- No line-of-sight-breaking position was found: use the model's prone/crouch
+    -- pose instead. Only models without that animation fall back to a short
+    -- lateral/retreat move out of the firing lane.
+    if not isnumber(sequence) or sequence < 0 then
+        if not IsValid(attacker) then return end
+        local away = victim:GetPos() - attacker:GetPos()
+        away.z = 0
+        if away:LengthSqr() < 1 then away = victim:GetForward() * -1 end
+        away:Normalize()
+        local fallback = NavPoint(victim, victim:GetPos() + away * 185, 300)
+        if not isvector(fallback) then return end
+        victim.BZCNCombatCoverPos = fallback
+        victim.BZCNCombatCoverThreat = attacker
+        victim.BZCNCombatCoverUntil = now + math.Rand(1.4, 2.4)
+        if victim.SetNW2Vector then victim:SetNW2Vector("BZCNCombatCoverPos", fallback) end
+        if victim.SetNW2Float then victim:SetNW2Float("BZCNCombatCoverUntil", victim.BZCNCombatCoverUntil) end
+        hook.Run("BZCN_NPCCombatCover", victim, attacker, fallback, kind)
+        return
+    end
+
     victim.BZCNCombatProneSequence = sequence
     victim.BZCNCombatProneUntil = now + math.Rand(1.4, 2.8)
     if victim.SetNW2Float then
