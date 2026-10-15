@@ -834,6 +834,78 @@ local function GiveItemIfMissing(ply, class)
     return ok and result ~= nil
 end
 
+-- Players can deliberately gift their held SWEP to a friend. Use /give or
+-- !give while looking at the NPC; no weapon is removed unless the full entry
+-- was accepted into that NPC's inventory.
+hook.Add("PlayerSay", "BZCN_PlayerGiftToFriend", function(ply, text)
+    local command = string.lower(string.Trim(tostring(text or "")))
+    if command ~= "/give" and command ~= "!give" and command ~= "/gift" and command ~= "!gift" then return end
+    if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return true end
+    local trace = ply:GetEyeTrace()
+    local target = trace and trace.Entity
+    if not Managed(target) or ply:GetPos():DistToSqr(target:GetPos()) > 180 * 180 then
+        ply:ChatPrint("[BZCN] Look at a managed NPC friend and use /give while holding the item.")
+        return true
+    end
+    local bond = BZCN.GetHumanBond and BZCN.GetHumanBond(ply, target) or 0
+    if bond < 25 then
+        ply:ChatPrint("[BZCN] You need to know this NPC better before they'll accept a personal gift.")
+        return true
+    end
+    if (isfunction(ply.IsBZCNEnemy) and ply:IsBZCNEnemy(target))
+        or (isfunction(target.IsBZCNEnemy) and target:IsBZCNEnemy(ply))
+        or IsValid(target.BZCNEnemy) then
+        ply:ChatPrint("[BZCN] This isn't a safe moment to exchange gifts.")
+        return true
+    end
+
+    local weapon = ply:GetActiveWeapon()
+    if not IsValid(weapon) then
+        ply:ChatPrint("[BZCN] Hold the weapon or supply you want to give first.")
+        return true
+    end
+    local class = weapon:GetClass()
+    if class == "weapon_hands_sh" or class == "weapon_zombclaws"
+        or not weapons or not weapons.GetStored or not istable(weapons.GetStored(class)) then
+        ply:ChatPrint("[BZCN] That item can't be stored as a gift.")
+        return true
+    end
+
+    local inventory = BZCN.GetNetVar and BZCN.GetNetVar(target, "Inventory", nil)
+        or target.inventory or target.Inventory or {}
+    if not istable(inventory) then inventory = {} end
+    inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    if inventory.Weapons[class] ~= nil then
+        ply:ChatPrint("[BZCN] This NPC already has one of those.")
+        return true
+    end
+    local info
+    if isfunction(weapon.GetInfo) then
+        local ok, result = pcall(weapon.GetInfo, weapon)
+        if ok and istable(result) then info = result end
+    end
+    inventory.Weapons[class] = info or true
+    local published = BZCN.SetNetVar and BZCN.SetNetVar(target, "Inventory", inventory)
+    if not published then
+        ply:ChatPrint("[BZCN] The NPC couldn't store that item, so your weapon was kept.")
+        return true
+    end
+
+    ply:StripWeapon(class)
+    if hg and isfunction(hg.RenewInv) then pcall(hg.RenewInv, ply) end
+    if BZCN.AddHumanBond then BZCN.AddHumanBond(ply, target, 5, "gift") end
+    if BZCN.Social and isfunction(BZCN.Social.PlayGesture) then
+        BZCN.Social.PlayGesture(target, "agree")
+    end
+    if BZCN.Social and isfunction(BZCN.Social.PlayPhrase) then
+        BZCN.Social.PlayPhrase(target, "answer", "Satisfied", true)
+    end
+    target.BZCNLastGiftAt = CurTime()
+    hook.Run("BZCN_PlayerGiftedNPC", ply, target, class)
+    ply:ChatPrint("[BZCN] Gave " .. class .. " to " .. tostring(target.BZCNHumanName or target.BZCNName or "your friend") .. ". Their bond improved.")
+    return true
+end)
+
 -- Civilians can offer a spare consumable to a nearby player on use.
 -- Only remove the inventory entry after Give succeeds; never invent a supply
 -- or consume the civilian's item when the player already owns that class.
