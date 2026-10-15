@@ -1298,7 +1298,17 @@ end
 function ENT:PlayBZCNAttackAnimation()
     local profile = self:GetBZCNProfile()
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
-    local ranged = profile.Ranged == true and not IsBZCNNonCombatWeapon(weaponClass)
+    local storedWeapon = weaponClass ~= "" and weapons and weapons.GetStored
+        and weapons.GetStored(weaponClass) or nil
+    local primary = istable(storedWeapon) and istable(storedWeapon.Primary)
+        and storedWeapon.Primary or nil
+    -- Match AttackTarget's ranged classifier: loadout-provided firearms still
+    -- need a firing gesture even when their NPC class profile says Ranged=false.
+    local registeredRanged = primary ~= nil and isstring(primary.Ammo)
+        and primary.Ammo ~= "" and string.lower(primary.Ammo) ~= "none"
+        and math.max(tonumber(primary.ClipSize) or 0, tonumber(primary.DefaultClip) or 0) > 0
+    local ranged = (profile.Ranged == true or registeredRanged)
+        and not IsBZCNNonCombatWeapon(weaponClass)
 
     -- IXAnims' generic "attack" entry is often a full-body melee animation.
     -- For guns, request the model's actual ranged-fire gesture instead, so the
