@@ -780,10 +780,13 @@ local function StartConversation(a, b)
     if istable(a.BZCNConversation) or istable(b.BZCNConversation) then return nil end
 
     if a:EntIndex() > b:EntIndex() then a, b = b, a end
+    local includesPlayer = a:IsPlayer() or b:IsPlayer()
     pair = {
         a = a, b = b, members = {a, b}, turn = 1,
-        nextAt = now + math.Rand(0.3, 0.8),
-        untilTime = now + math.Rand(7, 12)
+        -- People need a moment to notice, think, and answer. Player-involved
+        -- conversations have a longer opening pause than NPC-only exchanges.
+        nextAt = now + (includesPlayer and math.Rand(1.4, 2.8) or math.Rand(0.6, 1.2)),
+        untilTime = now + math.Rand(8, 14)
     }
 
     -- Invite up to two nearby H participants (including a real player) while
@@ -887,10 +890,20 @@ local function RunConversation(ent)
                 side == 1 and "Satisfied" or nil, true)
         end
         for _, other in ipairs(pair.members) do
-            if other ~= ent and IsValid(other) then BZCN.AddHumanBond(ent, other, 1.2, "conversation") end
+            if other ~= ent and IsValid(other) then
+                BZCN.AddHumanBond(ent, other, 1.2, "conversation")
+                if BZCN.RememberHuman then
+                    BZCN.RememberHuman(ent, other, "conversation")
+                    BZCN.RememberHuman(other, ent, "conversation")
+                end
+            end
         end
         pair.turn = (side % #pair.members) + 1
-        pair.nextAt = CurTime() + math.Rand(1.2, 2.5)
+        local playerInGroup = false
+        for _, member in ipairs(pair.members) do
+            if IsValid(member) and member:IsPlayer() then playerInGroup = true break end
+        end
+        pair.nextAt = CurTime() + (playerInGroup and math.Rand(2.0, 4.2) or math.Rand(1.3, 2.7))
     end
     if CurTime() >= pair.untilTime then ClearConversation(pair) end
     coroutine.wait(0.35)
