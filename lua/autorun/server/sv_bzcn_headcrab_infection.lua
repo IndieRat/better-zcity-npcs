@@ -102,7 +102,20 @@ local function HandlePounce(ent, now)
         ent.BZCNHeadcrabPounce = nil
         return
     end
-    if now - (tonumber(pounce.startedAt) or now) < 0.10 then return end
+    local age = now - (tonumber(pounce.startedAt) or now)
+    if age < 0.14 then return end
+
+    -- Never apply infection/damage just because a grounded headcrab is near
+    -- its victim. Require a real takeoff or enough displacement to prove that
+    -- the jump impulse was accepted by the movement controller.
+    local launchStart = isvector(pounce.startPos) and pounce.startPos or ent:GetPos()
+    local launchDistance = ent:GetPos():Distance(launchStart)
+    local airborne = ent.loco and isfunction(ent.loco.IsOnGround)
+        and not ent.loco:IsOnGround() or false
+    if not airborne and launchDistance < 24 then
+        if age >= 0.32 then ent.BZCNHeadcrabPounce = nil end
+        return
+    end
 
     local targetBody = BZCNCombatActor and BZCNCombatActor.GetVisibleBody
         and BZCNCombatActor.GetVisibleBody(target) or target
