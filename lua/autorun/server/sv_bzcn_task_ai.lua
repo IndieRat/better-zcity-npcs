@@ -9,11 +9,10 @@ if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("tasks", Tasks) end
 
 local TASK_POOLS = {
     civilian = {
-        -- Civilians should visibly use the map, not spend most of their idle
-        -- time stationary or clustering at their spawn/home point. Exploration
-        -- is a first-class routine, while conversations remain opportunistic.
-        {"stay", 1}, {"crowd", 2}, {"talk", 3}, {"wander", 4}, {"explore", 5},
-        {"look", 1}, {"sit", 1}, {"drive", 4}
+        -- Conversations, shared hangouts, exploration, and small loot discoveries
+        -- form an ordinary civilian routine rather than rare scripted exceptions.
+        {"stay", 1}, {"crowd", 2}, {"talk", 3}, {"meetup", 3}, {"pickup", 2},
+        {"wander", 4}, {"explore", 5}, {"look", 1}, {"sit", 1}, {"drive", 4}
     },
     furry = {
         {"pack", 5}, {"hunt", 4}, {"patrol", 2}, {"climb", 2}, {"comfort", 2}, {"hold", 1}
@@ -23,16 +22,17 @@ local TASK_POOLS = {
         {"drive", 1}
     },
     metrocop = {
-        -- Officers still pause to observe incidents, but routine patrol must
-        -- happen often enough that an unalerted officer does not look frozen.
-        {"guard", 5}, {"observe", 3}, {"hold", 2}, {"talk", 1},
-        {"patrol", 5}, {"pickup", 1}, {"rescue", 2}, {"sit", 1}, {"drive", 1}
+        -- Officers still pause to observe incidents, but also share low-key
+        -- public hangouts with familiar civilians and resistance contacts.
+        {"guard", 5}, {"observe", 3}, {"hold", 2}, {"talk", 1}, {"meetup", 1},
+        {"patrol", 5}, {"pickup", 2}, {"rescue", 3}, {"sit", 1}, {"drive", 1}
     },
     rebel = {
-        -- Resistance fighters default to cohesion and cover. Rescue/scavenging
-        -- remain possible, but idle social tasks should not split a nearby squad.
+        -- Resistance fighters default to cohesion and cover, but keep social
+        -- anchors for safe houses and bonded allies between dangerous tasks.
         {"guard", 2}, {"squad", 6}, {"regroup", 5}, {"cover", 5},
-        {"pickup", 3}, {"rescue", 4}, {"talk", 1}, {"hold", 2}, {"sit", 1}, {"drive", 1}
+        {"pickup", 4}, {"rescue", 5}, {"talk", 2}, {"meetup", 2},
+        {"hold", 2}, {"sit", 1}, {"drive", 1}
     },
     headcrab = {
         {"hunt", 6}, {"patrol", 2}, {"climb", 3}, {"hold", 1}
@@ -76,6 +76,22 @@ local function GetKind(ent)
     if class == "combine" or faction == "combine" then return "combine" end
     return "civilian"
 end
+
+local function CanScavengeWeapons(ent)
+    if not IsManaged(ent) then return false end
+    local profile = ent.BZCNClassProfile or {}
+    if profile.CanScavengeWeapons == false then return false end
+    local kind = GetKind(ent)
+    if kind == "civilian" or kind == "metrocop" or kind == "rebel" or kind == "combine" then
+        return true
+    end
+    -- Furry scavenging remains an intentional advanced behavior; headcrabs and
+    -- zombies do not interpret human loadouts as ordinary inventory.
+    return kind == "furry" and (profile.SmartFurry == true or profile.CanScavengeWeapons == true)
+end
+
+Tasks.CanScavengeWeapons = CanScavengeWeapons
+Tasks.GetKind = GetKind
 
 local function EnsureHome(ent)
     if not isvector(ent.BZCNHomePosition) then ent.BZCNHomePosition = ent:GetPos() end
@@ -210,6 +226,11 @@ local function GetHumanBond(a, b)
     if not IsValid(a) or not IsValid(b) or not istable(a.BZCNHumanBonds) then return 0 end
     return math.Clamp(tonumber(a.BZCNHumanBonds[b]) or 0, 0, 100)
 end
+
+-- Shared relationship read API for social memory, rescue triage, gifts and UI
+-- integrations. It returns a score only; it does not change faction hostility.
+BZCN.GetHumanBond = GetHumanBond
+Tasks.GetHumanBond = GetHumanBond
 
 function BZCN.AddHumanBond(a, b, amount, reason)
     if not AreSocialCompatible(a, b) then return 0 end
@@ -746,8 +767,7 @@ local function RunConversation(ent)
 end
 
 local function FindDroppedWeapon(ent)
-    local profile = ent.BZCNClassProfile or {}
-    if profile.CanScavengeWeapons ~= true then return nil end
+    if not CanScavengeWeapons(ent) then return nil end
     local inventory = BZCN.GetNetVar and BZCN.GetNetVar(ent, "Inventory", {}) or ent.inventory or {}
     local owned = istable(inventory.Weapons) and inventory.Weapons or {}
     local best, bestDistance
@@ -768,9 +788,7 @@ local function FindDroppedWeapon(ent)
 end
 
 function Tasks.TryPickupAmmo(ent)
-    if not IsAvailable(ent) then return false end
-    local profile = ent.BZCNClassProfile or {}
-    if profile.CanScavengeWeapons ~= true then return false end
+    if not IsAvailable(ent) or not CanScavengeWeapons(ent) then return false end
 
     for _, item in ipairs(ents.FindInSphere(ent:GetPos(), 92)) do
         if not IsValid(item) then continue end
@@ -853,9 +871,9 @@ end
 -- Medical pickups are separate from firearm scavenging: retain each item's
 -- native class and treatment supply so the triage AI can choose by symptoms.
 function Tasks.TryPickupMedicalItem(ent)
-    if not IsAvailable(ent) or not BZCN.IsMedicalWeaponClass then return false end
+    if not IsAvailable(ent) or not BZCN.IsMedicalWeaponClass
+        or not CanScavengeWeapons(ent) then return false end
     local kind = GetKind(ent)
-    if kind ~= "rebel" and kind ~= "combine" and kind ~= "metrocop" then return false end
 
     local inventory = BZCN.GetNetVar and BZCN.GetNetVar(ent, "Inventory", {}) or ent.inventory or {}
     inventory = istable(inventory) and inventory or {}
@@ -1008,13 +1026,12 @@ end)
 
 timer.Create("BZCN_TaskWeaponPickup", 0.75, 0, function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
-        if not IsAvailable(ent) then continue end
-        local kind = GetKind(ent)
-        if kind == "metrocop" or kind == "rebel" or kind == "combine" then
-            if not Tasks.TryPickupWeapon(ent)
-                and not (Tasks.TryPickupMedicalItem and Tasks.TryPickupMedicalItem(ent)) then
-                Tasks.TryPickupAmmo(ent)
-            end
+        if not IsAvailable(ent) or not CanScavengeWeapons(ent) then continue end
+        -- Loot is an inventory action, not a combat task: H can safely collect
+        -- a dropped weapon, medical supply or nearby ammo and retain it for later.
+        if not Tasks.TryPickupWeapon(ent)
+            and not (Tasks.TryPickupMedicalItem and Tasks.TryPickupMedicalItem(ent)) then
+            Tasks.TryPickupAmmo(ent)
         end
     end
 end)
@@ -1433,29 +1450,65 @@ function Tasks.RunIdleTask(ent)
 
     if task == "meetup" then
         Tasks.HangoutSpots = Tasks.HangoutSpots or {}
-        local candidates, bestDistance = {}, math.huge
+        local now = CurTime()
+        local currentSpot = ent.BZCNCurrentHangout
+        if istable(currentSpot) and isvector(currentSpot.pos)
+            and (tonumber(currentSpot.expiresAt) or (now + 1)) > now
+            and ent:GetPos():DistToSqr(currentSpot.pos) <= 205 * 205 then
+            ent.loco:SetDesiredSpeed(0)
+            local mate = FindSocialMate(ent, 310, false)
+            if IsValid(mate) then
+                ent.loco:FaceTowards(mate:WorldSpaceCenter())
+                if math.random(1, 5) == 1 and BZCN.Social
+                    and isfunction(BZCN.Social.PlayGesture) then
+                    BZCN.Social.PlayGesture(ent, math.random(1, 2) == 1 and "wave" or "agree")
+                end
+            end
+            if BZCN.SocialWorld and isfunction(BZCN.SocialWorld.RecordHangoutVisit) then
+                BZCN.SocialWorld.RecordHangoutVisit(ent, currentSpot)
+            end
+            coroutine.wait(math.Rand(1.0, 2.4))
+            return true
+        end
+
+        local candidates = {}
         for _, spot in ipairs(Tasks.HangoutSpots) do
-            if not isvector(spot.pos) or spot.pos:DistToSqr(ent:GetPos()) < 520 * 520 then continue end
+            if not istable(spot) or not isvector(spot.pos)
+                or (tonumber(spot.expiresAt) or (now + 1)) <= now then continue end
             local compatible = spot.kind == kind
                 or (kind == "civilian" and (spot.kind == "metrocop" or spot.kind == "rebel"))
                 or (kind == "metrocop" and (spot.kind == "civilian" or spot.kind == "rebel"))
                 or (kind == "rebel" and (spot.kind == "civilian" or spot.kind == "metrocop"))
             local distance = ent:GetPos():DistToSqr(spot.pos)
             if compatible and distance < 9000 * 9000 then
-                candidates[#candidates + 1] = {pos = spot.pos, distance = distance}
+                local popularity = math.Clamp(tonumber(spot.score) or 0, 0, 80)
+                local distanceScore = math.sqrt(distance)
+                candidates[#candidates + 1] = {
+                    spot = spot,
+                    score = distanceScore - popularity * 8 - math.min((tonumber(spot.visits) or 0), 30) * 4
+                }
             end
         end
-        table.sort(candidates, function(a, b) return a.distance < b.distance end)
+        table.sort(candidates, function(a, b) return a.score < b.score end)
         if #candidates > 0 then
-            -- Pick among several near-enough gathering points, not always the
-            -- nearest one, so the whole population doesn't form one giant blob.
+            -- Select from the best few, balancing travel distance and places that
+            -- have become familiar, without herding every H into the same point.
             local pick = candidates[math.random(1, math.min(4, #candidates))]
-            MoveTo(ent, NavPoint(ent, pick.pos, 320), 1.4, 0.55)
-            if ent.loco then ent.loco:SetDesiredSpeed(0) end
-            coroutine.wait(math.Rand(0.4, 1.1))
+            local angle = math.Rand(0, math.pi * 2)
+            local offset = Vector(math.cos(angle), math.sin(angle), 0) * math.Rand(45, 125)
+            ent.BZCNCurrentHangout = pick.spot
+            local reached = MoveTo(ent, NavPoint(ent, pick.spot.pos + offset, 320), 4.8, 0.48)
+            if reached and ent:GetPos():DistToSqr(pick.spot.pos) <= 230 * 230 then
+                if BZCN.SocialWorld and isfunction(BZCN.SocialWorld.RecordHangoutVisit) then
+                    BZCN.SocialWorld.RecordHangoutVisit(ent, pick.spot)
+                end
+            else
+                ent.BZCNCurrentHangout = nil
+            end
         else
+            ent.BZCNCurrentHangout = nil
             local destination = ChooseHomePoint(ent, math.Rand(700, 1350))
-            MoveTo(ent, destination, 1.2, 0.52)
+            MoveTo(ent, destination, 2.6, 0.48)
         end
         return true
     end
