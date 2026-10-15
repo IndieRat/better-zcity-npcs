@@ -1219,6 +1219,23 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             profile.WeaponRange = 900
             profile.AnimationHoldType = "pistol"
         end
+
+        -- Civilians sometimes carry one extra useful consumable, chosen only
+        -- from actually registered Z-City items. Their default medkit/bandage
+        -- remains intact, and no inventory entry is added for missing SWEPs.
+        local chance = math.Clamp(tonumber(profile.ExtraConsumableChance) or 0, 0, 1)
+        if chance > 0 and math.Rand(0, 1) <= chance then
+            local candidates = {}
+            for _, itemClass in ipairs(profile.ExtraConsumables or {}) do
+                if isstring(itemClass) and inventory.Weapons[itemClass] == nil
+                    and weapons and weapons.GetStored and istable(weapons.GetStored(itemClass)) then
+                    candidates[#candidates + 1] = itemClass
+                end
+            end
+            if #candidates > 0 then
+                inventory.Weapons[candidates[math.random(#candidates)]] = true
+            end
+        end
     end
 
     if SERVER and profile.FurryStyle == true and not profile.SmartFurry
