@@ -382,7 +382,20 @@ local function WriteInventory(ent, inventory, clearVirtualItems)
         end
     end
 
-    if isfunction(ent.SetNetVar) then
+    local managedNPC = BZCN and BZCN.IsManaged and BZCN.IsManaged(ent)
+    if managedNPC and isfunction(BZCN.SetNetVar) then
+        -- BZCN's addon-owned store is authoritative for managed NextBots.
+        -- Calling only the entity's inherited/native SetNetVar can update the
+        -- Homigrad-facing mirror while leaving BZCN.GetNetVar pointed at the
+        -- previous class-default inventory; subsequent weapon selection then
+        -- republishes that stale one-weapon table.
+        BZCN.SetNetVar(ent, "Inventory", inventory)
+        BZCN.SetNetVar(ent, "Armor", inventory.Armor)
+        if isfunction(ent.SetNetVar) then
+            pcall(ent.SetNetVar, ent, "Inventory", inventory)
+            pcall(ent.SetNetVar, ent, "Armor", inventory.Armor)
+        end
+    elseif isfunction(ent.SetNetVar) then
         ent:SetNetVar("Inventory", inventory)
         ent:SetNetVar("Armor", inventory.Armor)
     elseif BZCN and isfunction(BZCN.SetNetVar) then
@@ -472,13 +485,17 @@ local function WriteInventory(ent, inventory, clearVirtualItems)
         -- SelectWeapon/ShowHeldWeapon has finished touching held-weapon state.
         ent.inventory = inventory
         ent.Inventory = inventory
-        if isfunction(ent.SetNetVar) then
-            pcall(ent.SetNetVar, ent, "Inventory", inventory)
-        elseif BZCN.SetNetVar then
+        -- Reassert the canonical BZCN inventory after SelectWeapon /
+        -- EquipRuntimeWeapon. Those routines may consult the addon store while
+        -- changing the active hand slot; always publish the full configured
+        -- multi-entry table there first, then mirror it to the entity adapter.
+        if BZCN.SetNetVar then
             pcall(BZCN.SetNetVar, ent, "Inventory", inventory)
         end
-        -- Native SetNetVar implementations may keep a separate compatibility
-        -- copy; keep both direct lookup paths pointed at the same full table.
+        if isfunction(ent.SetNetVar) then
+            pcall(ent.SetNetVar, ent, "Inventory", inventory)
+        end
+        -- Keep direct fields aligned with both stores.
         ent.inventory = inventory
         ent.Inventory = inventory
     end
