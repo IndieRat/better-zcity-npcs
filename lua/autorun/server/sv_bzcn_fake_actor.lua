@@ -861,7 +861,10 @@ end
 -- the visible body remains a real physics ragdoll and can be ejected on impact.
 function FakeActor:SetVehicleSeat(seat)
     local nextSeat = IsValid(seat) and seat or nil
-    if self.vehicleSeat ~= nextSeat then self.vehiclePoseInitialized = nil end
+    if self.vehicleSeat ~= nextSeat then
+        self.vehiclePoseInitialized = nil
+        self.vehiclePose = nil
+    end
     self.vehicleSeat = nextSeat
     if self.vehicleSeat then
         self.manualMode = "vehicle"
@@ -871,6 +874,7 @@ function FakeActor:SetVehicleSeat(seat)
         self.manualMode = nil
         self.mode = "loose"
         self.vehiclePoseInitialized = nil
+        self.vehiclePose = nil
     end
 end
 
@@ -879,6 +883,49 @@ function FakeActor:UpdateVehicleSeat(dt)
     if not IsValid(rag) or not IsValid(seat) then
         self:SetVehicleSeat(nil)
         return
+    end
+
+    -- If SeatNPC selected Glide's actual drive/sit sequence, preserve the
+    -- resulting articulated pose rather than replacing it with a guessed
+    -- hard-coded silhouette. Capture each physics bone in seat-local space,
+    -- then keep that same pose attached as Glide moves/steers the vehicle.
+    if IsValid(self.owner) and self.owner.BZCNGlideNativePose == true then
+        if not istable(self.vehiclePose) then
+            local pose, captured = {}, 0
+            for index = 0, rag:GetPhysicsObjectCount() - 1 do
+                local phys = rag:GetPhysicsObjectNum(index)
+                if not IsValid(phys) then continue end
+                local bone = rag:TranslatePhysBoneToBone(index)
+                local name = isnumber(bone) and bone >= 0 and rag:GetBoneName(bone) or nil
+                if not isstring(name) or name == "" or name == "__INVALIDBONE__" then continue end
+                pose[name] = {
+                    pos = seat:WorldToLocal(phys:GetPos()),
+                    ang = seat:WorldToLocalAngles(phys:GetAngles())
+                }
+                captured = captured + 1
+            end
+            if captured >= 5 then self.vehiclePose = pose end
+        end
+
+        if istable(self.vehiclePose) then
+            local power = math.Clamp(tonumber(self.controlPower) or 1, 0.65, 1)
+            for name, transform in pairs(self.vehiclePose) do
+                if not isvector(transform.pos) or not isangle(transform.ang) then continue end
+                self:ShadowBone(name, seat:LocalToWorldAngles(transform.ang),
+                    0.055, 135 * power, 65, seat:LocalToWorld(transform.pos), 180, 85)
+            end
+            self.vehiclePoseInitialized = true
+
+            local velocity = IsValid(seat:GetParent()) and seat:GetParent():GetVelocity() or seat:GetVelocity()
+            local pelvis = GetPhysicsForBone(rag, "ValveBiped.Bip01_Pelvis")
+            if IsValid(pelvis) and isvector(velocity) then
+                local current = pelvis:GetVelocity()
+                local delta = velocity - current
+                if delta:Length() > 90 then delta = delta:GetNormalized() * 90 end
+                pelvis:SetVelocity(current + delta * math.Clamp((tonumber(dt) or FrameTime()) * 8, 0, 1))
+            end
+            return
+        end
     end
 
     -- The Glide seat entity's angle is a seating/attachment transform, not
