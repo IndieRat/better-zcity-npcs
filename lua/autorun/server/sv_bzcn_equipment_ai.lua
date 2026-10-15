@@ -500,6 +500,10 @@ local function FireStatBasedShot(ent, target, weapon)
         -- the same trigger/recoil window as the hidden runtime weapon.
         ent.BZCNActorFiringUntil = firedAt + 0.11
         ent.BZCNActorLastShotAt = firedAt
+        if ent.SetNW2Float then
+            ent:SetNW2Float("BZCNActorFiringUntil", ent.BZCNActorFiringUntil)
+            ent:SetNW2Float("BZCNActorLastShotAt", firedAt)
+        end
         local delay = BZCNCombatActor and BZCNCombatActor.GetFireDelay
             and BZCNCombatActor.GetFireDelay(ent, weapon)
             or math.max(tonumber(profile.AttackDelay) or 0.35, 0.34)
@@ -515,6 +519,18 @@ local function FireStatBasedShot(ent, target, weapon)
     if isfunction(ent.MuzzleFlash) then pcall(ent.MuzzleFlash, ent) end
     hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon, trace)
     return didFire
+end
+
+local function PublishNPCReloadPose(owner, startedAt, untilAt)
+    if not IsValid(owner) then return end
+    startedAt = tonumber(startedAt) or 0
+    untilAt = tonumber(untilAt) or 0
+    owner.BZCNActorReloadStartedAt = startedAt > 0 and startedAt or nil
+    owner.BZCNActorReloadUntil = untilAt > 0 and untilAt or nil
+    if owner.SetNW2Float then
+        owner:SetNW2Float("BZCNActorReloadStartedAt", startedAt)
+        owner:SetNW2Float("BZCNActorReloadUntil", untilAt)
+    end
 end
 
 function BZCN.FireRuntimeWeapon(ent, target)
@@ -576,6 +592,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
         end
         if reserve ~= nil and reserve <= 0 then
             weapon.BZCNReloadUntil = nil
+            PublishNPCReloadPose(ent, 0, 0)
             weapon.BZCNOutOfAmmo = true
             weapon.BZCNNextFire = now + 0.35
             if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(weapon.BZCNNextFire) end
@@ -583,6 +600,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
         end
         if not weapon.BZCNReloadUntil then
             weapon.BZCNReloadUntil = now + math.max(tonumber(profile.ReloadDelay) or 1.25, 0.5)
+            PublishNPCReloadPose(ent, now, weapon.BZCNReloadUntil)
             if isfunction(weapon.Reload) then pcall(weapon.Reload, weapon) end
             hook.Run("BZCN_NPCWeaponReload", ent, weapon)
             return true
@@ -594,6 +612,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
         if reserve ~= nil then loaded = math.min(loaded, reserve) end
         if loaded <= 0 then
             weapon.BZCNReloadUntil = nil
+            PublishNPCReloadPose(ent, 0, 0)
             weapon.BZCNOutOfAmmo = true
             return true
         end
@@ -608,6 +627,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
         weapon.BZCNNextFire = now + 0.2
         if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(weapon.BZCNNextFire) end
         weapon.BZCNReloadUntil = nil
+        PublishNPCReloadPose(ent, 0, 0)
         weapon.BZCNOutOfAmmo = false
         return true
     end
@@ -649,8 +669,13 @@ function BZCN.FireRuntimeWeapon(ent, target)
         end
         if nativeHandled then
             -- Share the native trigger window with the fake-ragdoll arm controller.
-            ent.BZCNActorFiringUntil = CurTime() + 0.11
-            ent.BZCNActorLastShotAt = CurTime()
+            local firedAt = CurTime()
+            ent.BZCNActorFiringUntil = firedAt + 0.11
+            ent.BZCNActorLastShotAt = firedAt
+            if ent.SetNW2Float then
+                ent:SetNW2Float("BZCNActorFiringUntil", ent.BZCNActorFiringUntil)
+                ent:SetNW2Float("BZCNActorLastShotAt", firedAt)
+            end
             -- Homigrad already consumed ammo and ran its ammo-type bullet path.
             -- Keep the actor's cooldown per weapon instance, not in shared SWEP.Primary.
             local nextFire = now + (BZCNCombatActor and BZCNCombatActor.GetFireDelay
