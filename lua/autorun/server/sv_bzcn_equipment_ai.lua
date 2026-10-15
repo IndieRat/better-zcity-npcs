@@ -1695,8 +1695,21 @@ local function WoundCount(wounds)
     return count
 end
 
+local function IsMedicallyLiving(target)
+    if not IsValid(target) or target:Health() <= 0 then return false end
+    if target:IsPlayer() and not target:Alive() then return false end
+
+    -- Z-City can leave a fake body's organism attached after the actor has
+    -- died, and its entity health is not always the authoritative life state.
+    local org = target.organism or target.BZCN_Organism
+    if istable(org) and org.alive == false then return false end
+    if target.BZCNDead == true or target.BZCNIsDead == true then return false end
+    if target.GetNW2Bool and target:GetNW2Bool("BZCNDead", false) then return false end
+    return true
+end
+
 local function NeedsMedicalAttention(target)
-    if not IsValid(target) or target:Health() <= 0 then return false, 0 end
+    if not IsMedicallyLiving(target) then return false, 0 end
     local org = target.organism or target.BZCN_Organism
     local hasOrganism = istable(org) and (org.owner ~= nil or org.fakePlayer == true
         or org.blood ~= nil or org.wounds ~= nil or org.arterialwounds ~= nil)
@@ -1892,8 +1905,18 @@ local function ChooseMedicalClass(inventory, target, healer)
 end
 
 local function IsAllyToHealer(healer, target)
-    if healer == target then return true end
-    if not IsValid(healer) or not IsValid(target) then return false end
+    if healer == target then return IsMedicallyLiving(target) end
+    if not IsValid(healer) or not IsMedicallyLiving(target) then return false end
+
+    -- Metrocops are an enforcement faction, not general field medics. Their
+    -- enemy classifier can be permissive for managed NPC proxies, so explicitly
+    -- prevent the medical fallback from turning a shot furry into a patient.
+    local healerProfile = healer.BZCNClassProfile or {}
+    local healerClass = string.lower(tostring(healer.BZCNClass or healer.PlayerClassName
+        or (healer.GetNW2String and healer:GetNW2String("PlayerClassName", "")) or ""))
+    local isMetrocop = healerClass == "metrocop" or healerClass == "police"
+        or string.lower(tostring(healerProfile.Faction or healer.BZCN_Faction or "")) == "metrocop"
+    if isMetrocop and IsFurryTarget(target) then return false end
 
     -- A rare Good Cop may treat a civilian hurt by an accidental shot even
     -- though that officer's normal threat policy would not classify them ally.
@@ -2327,7 +2350,7 @@ end)
 
 timer.Create("BZCN_MedicalAI", 1, 0, function()
     for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
-        if IsValid(ent) and BZCN.IsManaged(ent) then
+        if IsMedicallyLiving(ent) and BZCN.IsManaged(ent) then
             BZCN.TryUseMedicalItem(ent)
             BZCN.TryUseSmallConsumable(ent)
         end
