@@ -74,7 +74,10 @@ function BRIDGE.OnWeaponFired(ent, weapon)
     local now = CurTime()
     if (ent.BZCNLastPresentationShot or 0) > now then return end
     ent.BZCNLastPresentationShot = now + 0.035
+    ent.BZCNWeaponAttackUntil = now + 0.18
+    ent.BZCNWeaponAttackSequence = nil
     PlayFireAnimation(ent, weapon)
+    ent.BZCNWeaponAttackSequence = ent:GetSequence()
     hook.Run("BZCN_NPCWeaponFired", ent, weapon)
 end
 
@@ -112,17 +115,43 @@ timer.Simple(0, function()
     -- Do not patch Entity globally; the scripted entity owns this method.
     local entMeta = scripted_ents.GetStored("npc_bzcn_base")
     local base = entMeta and entMeta.t
-    if not istable(base) or not isfunction(base.UpdateBZCNMovementState) then return end
-    if base.BZCNOriginalUpdateMovementState then return end
-    local original = base.UpdateBZCNMovementState
-    base.BZCNOriginalUpdateMovementState = original
-    base.UpdateBZCNMovementState = function(self, speed)
-        if IsManaged(self) then
-            local actual = self.GetVelocity and self:GetVelocity():Length2D() or 0
-            local locoSpeed = self.loco and self.loco.GetVelocity and self.loco:GetVelocity():Length2D() or 0
-            speed = math.max(tonumber(speed) or 0, actual, locoSpeed)
+    if not istable(base) then return end
+
+    if isfunction(base.UpdateBZCNMovementState) and not base.BZCNOriginalUpdateMovementState then
+        local originalState = base.UpdateBZCNMovementState
+        base.BZCNOriginalUpdateMovementState = originalState
+        base.UpdateBZCNMovementState = function(self, speed)
+            if IsManaged(self) then
+                local actual = self.GetVelocity and self:GetVelocity():Length2D() or 0
+                local locoSpeed = self.loco and self.loco.GetVelocity and self.loco:GetVelocity():Length2D() or 0
+                speed = math.max(tonumber(speed) or 0, actual, locoSpeed)
+            end
+            return originalState(self, speed)
         end
-        return original(self, speed)
+    end
+
+    -- BodyUpdate normally replaces a one-shot sequence on the next frame.
+    -- Hold the shot/reload sequence briefly, then hand control back to the
+    -- original locomotion implementation without replacing its behavior.
+    if isfunction(base.BodyUpdate) and not base.BZCNOriginalBodyUpdate then
+        local originalBodyUpdate = base.BodyUpdate
+        base.BZCNOriginalBodyUpdate = originalBodyUpdate
+        base.BodyUpdate = function(self, ...)
+            if IsManaged(self) and (self.BZCNWeaponAttackUntil or 0) > CurTime()
+                and not self:GetNW2Bool("BZCNNPCDowned", false) then
+                local sequence = self.BZCNWeaponAttackSequence
+                if isnumber(sequence) and sequence >= 0 then
+                    if self:GetSequence() ~= sequence then
+                        self:ResetSequence(sequence)
+                        self:SetCycle(0)
+                    end
+                    self:SetPlaybackRate(1)
+                    self:FrameAdvance()
+                    return
+                end
+            end
+            return originalBodyUpdate(self, ...)
+        end
     end
 end)
 
