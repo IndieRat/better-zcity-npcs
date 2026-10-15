@@ -123,8 +123,12 @@ hook.Add("InitPostEntity", "BZCNNPCVehicleBodyImpact_Existing", function()
 end)
 
 hook.Add("OnEntityCreated", "BZCNNPCVehicleBodyImpact_New", function(ent)
-    -- Let Spawn and BZCN's ragdoll-owner assignment finish before classifying a
-    -- newly-created body. Install only on known collision source classes.
+    if not IsValid(ent) then return end
+    local class = ent:GetClass()
+    -- Don't allocate timers for unrelated entities. Ragdolls are checked again
+    -- after a short delay because their BZCN owner may be assigned after creation.
+    if class ~= "prop_ragdoll" and not string.StartWith(class, "prop_vehicle") then return end
+
     timer.Simple(0.08, function()
         if IsValid(ent) then InstallCollisionBridge(ent) end
     end)
