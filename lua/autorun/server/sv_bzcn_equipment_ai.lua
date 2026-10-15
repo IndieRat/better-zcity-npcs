@@ -337,6 +337,17 @@ hook.Add("BZCN_InventorySet", "BZCN_RuntimeWeaponInventorySync", function(ent, i
         if not IsValid(ent) or not BZCN.IsManaged(ent) then return end
         local current = GetInventory(ent)
         local weaponsOwned = istable(current.Weapons) and current.Weapons or {}
+
+        -- Inventory replacement can schedule this fallback and then explicitly
+        -- select a different weapon in the same frame (e.g. the Loadout Manager).
+        -- Do not let the old deferred fallback overwrite that newer selection.
+        local selectedNow = ent.BZCN_SelectedWeapon
+            or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", "")) or ""
+        local runtimeNow = ent.BZCNRuntimeWeapon
+        if isstring(selectedNow) and selectedNow ~= "" and selectedNow ~= activeClass
+            and weaponsOwned[selectedNow] ~= nil then return end
+        if IsValid(runtimeNow) and runtimeNow:GetClass() ~= activeClass then return end
+
         local preferred = ent.BZCNClassProfile and ent.BZCNClassProfile.WeaponClass
         local candidate
         if isstring(preferred) and preferred ~= activeClass and weaponsOwned[preferred] ~= nil then
