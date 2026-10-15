@@ -1182,12 +1182,26 @@ end)
 local function FindWoundedAlly(ent, radius)
     local profile = ent.BZCNClassProfile or {}
     local ownFaction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or GetKind(ent)))
-    local best, bestDistance
+    local ownClass = HumanSocialClass(ent)
+    local best, bestScore
     for _, other in ipairs(ents.FindInSphere(ent:GetPos(), radius or 950)) do
-        if not IsManaged(other) or other == ent or other:Health() <= 0 then continue end
+        if other == ent or not IsValid(other) or other:Health() <= 0 then continue end
+        local isManagedAlly = IsManaged(other)
+        local playerAlly = other:IsPlayer() and other:Alive() and HumanSocialClass(other) ~= nil
+        if not isManagedAlly and not playerAlly then continue end
+
         local otherProfile = other.BZCNClassProfile or {}
-        local faction = string.lower(tostring(otherProfile.Faction or other.BZCN_Faction or GetKind(other)))
-        if faction ~= ownFaction then continue end
+        local faction = string.lower(tostring(otherProfile.Faction or other.BZCN_Faction
+            or (other:IsPlayer() and other.PlayerClassName) or GetKind(other)))
+        local bond = GetHumanBond(ent, other)
+        local sameFaction = faction == ownFaction
+        local sameSocialRole = ownClass and HumanSocialClass(other) == ownClass
+        -- Include human players in the rescue loop when they share the actor's
+        -- faction/social role or have built a real bond; never rescue enemies
+        -- merely because they happen to be injured nearby.
+        if not sameFaction and not sameSocialRole and bond < 25 then continue end
+        if SocialHostile(ent, other) then continue end
+
         local organism = other.BZCNNPCOrg or other.BZCN_Organism or other.organism or {}
         local downed = other:GetNW2Bool("BZCNNPCDowned", false)
             or (istable(organism) and (organism.downed == true or organism.otrub == true))
@@ -1195,10 +1209,15 @@ local function FindWoundedAlly(ent, radius)
             or (istable(organism) and organism.crawling == true)
         local maxHealth = math.max(other:GetMaxHealth(), 1)
         local severelyWounded = other:Health() / maxHealth <= 0.35
-        if not downed and not crawling and not severelyWounded then continue end
+        local recentlyHurt = CurTime() - (tonumber(other.BZCNLastDamageTime) or 0) <= 12
+        if not downed and not crawling and not severelyWounded and not (bond >= 45 and recentlyHurt) then continue end
         local distance = ent:GetPos():DistToSqr(other:GetPos())
-        if not bestDistance or distance < bestDistance then
-            best, bestDistance = other, distance
+        local urgency = (downed and 1000000 or 0) + (crawling and 350000 or 0)
+            + (severelyWounded and (1 - other:Health() / maxHealth) * 260000 or 0)
+            + math.min(bond, 100) * 1800 + (recentlyHurt and 35000 or 0)
+        local score = urgency - math.sqrt(distance) * 70
+        if not bestScore or score > bestScore then
+            best, bestScore = other, score
         end
     end
     return best
