@@ -1353,8 +1353,7 @@ function BZCN.GetWeaponModel(ent, weaponClass)
     end
     if not isstring(weaponClass) or weaponClass == "" then return nil end
 
-    local stored = (runtime and runtime:GetClass() == weaponClass and runtime)
-        or (weapons and weapons.GetStored and weapons.GetStored(weaponClass))
+    local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
     if not istable(stored) then return nil end
 
     -- Homigrad/Z-City weapons often inherit a generic Source WorldModel while
@@ -1366,7 +1365,10 @@ function BZCN.GetWeaponModel(ent, weaponClass)
     end
 
     local model = stored.WorldModel
-    if isfunction(stored.GetWeaponWorldModel) then
+    if runtime and runtime:GetClass() == weaponClass and isfunction(runtime.GetWeaponWorldModel) then
+        local ok, result = pcall(runtime.GetWeaponWorldModel, runtime)
+        if ok and IsUsableWeaponModel(result) then model = result end
+    elseif isfunction(stored.GetWeaponWorldModel) then
         local ok, result = pcall(stored.GetWeaponWorldModel, stored)
         if ok and IsUsableWeaponModel(result) then model = result end
     end
