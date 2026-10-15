@@ -1263,7 +1263,11 @@ local function EnterDownedState(owner, reason)
                 -- ragdoll fall back to the NPC's pre-entry world position.
                 local localBonePos, localBoneAng = WorldToLocal(
                     bonePos, boneAng, owner:GetPos(), owner:GetAngles())
-                localBonePos.z = localBonePos.z - 34
+                -- Native Glide sit sequences already account for leg and
+                -- pelvis placement; don't apply the legacy standing-pose drop.
+                if owner.BZCNGlideNativePose ~= true then
+                    localBonePos.z = localBonePos.z - 34
+                end
                 bonePos = glideSeat:LocalToWorld(localBonePos)
                 boneAng = glideSeat:LocalToWorldAngles(localBoneAng)
             end
