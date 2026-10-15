@@ -2151,6 +2151,45 @@ function ENT:ChaseEnemy(target)
             and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
         local actualDistance = visible and self:WorldSpaceCenter():Distance(actualAimPoint) or math.huge
 
+        -- Take the selected cover/reposition point before returning to the
+        -- normal attack path. If no real occluder existed, this still moves the
+        -- combatant off the current lane rather than pretending to be in cover.
+        local coverUntil = tonumber(self.BZCNCombatCoverUntil) or 0
+        local coverPos = self.BZCNCombatCoverPos
+        if now < coverUntil and isvector(coverPos) then
+            self.loco:FaceTowards(actualAimPoint)
+            if self:GetPos():DistToSqr(coverPos) > 48 * 48 then
+                local needsCoverPath = not path:IsValid() or not isvector(pathGoal)
+                    or pathGoal:DistToSqr(coverPos) > 58 * 58
+                    or now >= nextPathCompute or path:GetAge() > 0.55
+                if needsCoverPath then
+                    local computed = TryComputePathToGoal(path, self, coverPos)
+                    pathGoal = coverPos
+                    nextPathCompute = now + (computed and 0.3 or 0.5)
+                end
+                self.loco:SetDesiredSpeed(baseSpeed * physiologySpeed * 0.68)
+                if path:IsValid() then
+                    path:Update(self)
+                else
+                    self.loco:Approach(coverPos, 0.8)
+                end
+            else
+                -- At the new position, keep the weapon pointed toward the threat.
+                self.loco:SetDesiredSpeed(0)
+                if visible and actualDistance <= (tonumber(profile.WeaponRange) or 900) then
+                    self.BZCNEnemy = target
+                    self:AttackTarget(target)
+                end
+            end
+            coroutine.wait(0.1)
+            continue
+        elseif coverUntil > 0 then
+            self.BZCNCombatCoverUntil = nil
+            self.BZCNCombatCoverPos = nil
+            self.BZCNCombatCoverThreat = nil
+            if self.SetNW2Float then self:SetNW2Float("BZCNCombatCoverUntil", 0) end
+        end
+
         -- When a trained combatant voluntarily drops into a prone/crouched aim
         -- pose, hold position and keep the TPIK aim trained on the real body
         -- instead of having path following immediately stand it back up.
