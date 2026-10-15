@@ -579,7 +579,6 @@ function TOOL.BuildCPanel(panel)
     end
 
     local selectedWeapons = {}
-    local weaponButtons = {}
     local weaponEntries = {}
     local selectedCountLabel
     local addSelectedButton
@@ -600,9 +599,9 @@ function TOOL.BuildCPanel(panel)
             for _, listed in ipairs(weapons.GetList() or {}) do
                 local class = ClassOfListedWeapon(listed)
                 local stored = class and weapons.GetStored(class) or nil
-                -- Only display registered, spawnable SWEPs. This deliberately
-                -- excludes missing classes, abstract/non-spawnable bases and
-                -- admin-only entries; manually typed classes still validate on server.
+                -- Display registered SWEPs unless they're explicitly marked
+                -- non-spawnable, abstract, or admin-only. Missing classes are
+                -- excluded; manually typed classes still validate on the server.
                 if not class or seen[class] or not istable(stored)
                     or stored.Spawnable == false or stored.AdminOnly == true
                     or stored.Abstract == true or class == "weapon_base" then
@@ -671,14 +670,12 @@ function TOOL.BuildCPanel(panel)
             if IsValid(button) then button:InvalidateLayout(true) end
             surface.PlaySound("buttons/button15.wav")
         end
-        weaponButtons[class] = button
         return button
     end
 
     local function RebuildCatalog()
         if not IsValid(catalogLayout) then return end
         catalogLayout:Clear()
-        weaponButtons = {}
         local needle = string.lower(string.Trim(searchText or ""))
         local matches = 0
         for _, entry in ipairs(weaponEntries) do
@@ -767,7 +764,10 @@ function TOOL.BuildCPanel(panel)
         local seen = {}
         for _, entry in ipairs(entries) do seen[string.lower(entry)] = true end
         local added = 0
-        for class in pairs(selectedWeapons) do
+        local classes = {}
+        for class in pairs(selectedWeapons) do classes[#classes + 1] = class end
+        table.sort(classes)
+        for _, class in ipairs(classes) do
             if not seen[string.lower(class)] and #entries < 64 then
                 entries[#entries + 1] = class
                 seen[string.lower(class)] = true
