@@ -25,10 +25,6 @@ local ACTIVITY_FOR_GESTURE = {
     disagree = "ACT_GMOD_GESTURE_DISAGREE",
     bow = "ACT_GMOD_GESTURE_BOW",
     beckon = "ACT_GMOD_GESTURE_BECON",
-    -- Tactical signal names reuse stock activities with model-specific sequence fallbacks.
-    halt = "ACT_GMOD_GESTURE_SALUTE",
-    forward = "ACT_GMOD_GESTURE_POINT",
-    group = "ACT_GMOD_GESTURE_BECON",
     cheer = "ACT_GMOD_GESTURE_TAUNT_CHEER",
     laugh = "ACT_GMOD_GESTURE_TAUNT_LAUGH",
     dance = "ACT_GMOD_GESTURE_TAUNT_DANCE",
@@ -43,9 +39,6 @@ local GESTURE_ALIASES = {
     disagree = {"disagree", "gesture_disagree", "shakehead", "no"},
     bow = {"bow", "gesture_bow"},
     beckon = {"becon", "beckon", "gesture_beccon"},
-    halt = {"signal_halt", "gesture_halt", "gesture_stop", "halt", "stop", "gesture_salute", "salute"},
-    forward = {"signal_forward", "gesture_forward", "forward", "point_forward", "gesture_point", "point"},
-    group = {"signal_group", "gesture_group", "group", "gesture_beccon", "beckon", "becon"},
     cheer = {"cheer", "taunt_cheer"},
     laugh = {"laugh", "taunt_laugh"},
     dance = {"dance", "taunt_dance"},
@@ -54,6 +47,16 @@ local GESTURE_ALIASES = {
     flipoff = {"flipoff", "flip_off", "middlefinger", "middle_finger", "flippingoff"},
     point = {"point", "gesture_point", "pointing", "point_forward"}
 }
+
+-- These are semantic hand signals, not separate engine activities. Resolve
+-- their visible animation through a stock gesture without letting the shared
+-- activity->gesture reverse map reinterpret a player's ordinary salute/point.
+local TACTICAL_GESTURE_ALIASES = {
+    halt = {"signal_halt", "gesture_halt", "gesture_stop", "halt", "stop"},
+    forward = {"signal_forward", "gesture_forward", "forward"},
+    group = {"signal_group", "gesture_group", "group"}
+}
+local TACTICAL_VISUAL_GESTURE = {halt = "salute", forward = "point", group = "beckon"}
 
 local activityGesture = {}
 for gesture, globalName in pairs(ACTIVITY_FOR_GESTURE) do
@@ -210,22 +213,35 @@ end
 
 local function PlayNPCGesture(ent, gesture)
     if IsUnavailableForSocial(ent) then return false end
-    if not GESTURE_ALIASES[gesture] then return false end
+    local tacticalAliases = TACTICAL_GESTURE_ALIASES[gesture]
+    local baseAliases = GESTURE_ALIASES[gesture]
+    if not baseAliases and not tacticalAliases then return false end
 
+    local visualGesture = TACTICAL_VISUAL_GESTURE[gesture] or gesture
     local sequence = -1
-    local activity = _G[ACTIVITY_FOR_GESTURE[gesture] or ""]
+    local activity = _G[ACTIVITY_FOR_GESTURE[visualGesture] or ""]
     if isnumber(activity) and isfunction(ent.SelectWeightedSequence) then
         local ok, selected = pcall(ent.SelectWeightedSequence, ent, activity)
         if ok and isnumber(selected) and selected >= 0 then sequence = selected end
     end
 
+    -- Prefer a model's explicitly named tactical signal; otherwise use its
+    -- normal salute/point/beckon sequence as the visual equivalent.
+    local aliasLists = {}
+    if tacticalAliases then aliasLists[#aliasLists + 1] = tacticalAliases end
+    local visualAliases = GESTURE_ALIASES[visualGesture]
+    if visualAliases then aliasLists[#aliasLists + 1] = visualAliases end
+    if baseAliases then aliasLists[#aliasLists + 1] = baseAliases end
     if sequence < 0 then
-        for _, name in ipairs(GESTURE_ALIASES[gesture]) do
-            local ok, selected = pcall(ent.LookupSequence, ent, name)
-            if ok and isnumber(selected) and selected >= 0 then
-                sequence = selected
-                break
+        for _, aliases in ipairs(aliasLists) do
+            for _, name in ipairs(aliases) do
+                local ok, selected = pcall(ent.LookupSequence, ent, name)
+                if ok and isnumber(selected) and selected >= 0 then
+                    sequence = selected
+                    break
+                end
             end
+            if sequence >= 0 then break end
         end
     end
 
