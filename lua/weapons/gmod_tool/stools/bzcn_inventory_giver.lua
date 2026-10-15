@@ -504,8 +504,16 @@ function TOOL:LeftClick(trace)
 
     local inventory, rejected = ParseConfiguredInventory(self)
     WriteInventory(target, inventory)
-    ply:ChatPrint("[BZCN] Inventory data applied to " .. target:Nick() .. "."
-        .. (#rejected > 0 and (" Skipped unknown SWEP classes: " .. table.concat(rejected, ", ")) or ""))
+    local entriesApplied = table.Count(inventory.Weapons or {})
+    local resultText = "[BZCN] Loadout applied to " .. target:Nick()
+        .. " (" .. tostring(entriesApplied) .. " inventory entries)."
+    if BZCN and BZCN.IsManaged and BZCN.IsManaged(target) then
+        resultText = resultText .. " The NPC holds one selected weapon at a time; the remaining entries stay in its inventory."
+    end
+    if #rejected > 0 then
+        resultText = resultText .. " Skipped invalid classes: " .. table.concat(rejected, ", ")
+    end
+    ply:ChatPrint(resultText)
     return true
 end
 
@@ -713,6 +721,7 @@ function TOOL.BuildCPanel(panel)
     categoryBox:DockMargin(10, 0, 10, 5)
     categoryBox:SetTall(23)
     categoryBox:SetValue("All categories")
+    BuildWeaponCatalog()
     local categories = {}
     for _, entry in ipairs(weaponEntries) do categories[entry.category] = true end
     local categoryNames = {}
@@ -781,7 +790,6 @@ function TOOL.BuildCPanel(panel)
     catalogLayout:SetSpaceX(5)
     catalogLayout:SetSpaceY(5)
 
-    BuildWeaponCatalog()
     RebuildCatalog()
 
     panel:TextEntry("Weapons / exact SWEP classes (comma-separated)", "tool_bzcn_inventory_giver_weapons")
