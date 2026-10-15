@@ -565,10 +565,21 @@ function TOOL:LeftClick(trace)
     else
         appliedInventory = target.inventory or target.Inventory or inventory
     end
-    local entriesApplied = table.Count(istable(appliedInventory.Weapons) and appliedInventory.Weapons or {})
+    local appliedWeapons = istable(appliedInventory.Weapons) and appliedInventory.Weapons or {}
+    local entriesApplied = table.Count(appliedWeapons)
     local resultText = "[BZCN] Loadout applied to " .. target:Nick()
         .. " (" .. tostring(entriesApplied) .. "/" .. tostring(configuredEntries)
         .. " configured inventory entries remain stored)."
+    if entriesApplied < configuredEntries then
+        local missing = {}
+        for class in pairs(inventory.Weapons or {}) do
+            if appliedWeapons[class] == nil then missing[#missing + 1] = class end
+        end
+        table.sort(missing)
+        if #missing > 0 then
+            resultText = resultText .. " Missing after write: " .. table.concat(missing, ", ")
+        end
+    end
     if BZCN and BZCN.IsManaged and BZCN.IsManaged(target) then
         resultText = resultText .. " The NPC holds one selected weapon at a time; the remaining entries stay in its inventory."
     end
@@ -877,6 +888,20 @@ function TOOL.BuildCPanel(panel)
     catalogLayout:Dock(FILL)
     catalogLayout:SetSpaceX(5)
     catalogLayout:SetSpaceY(5)
+
+    local clearStoredLoadout = vgui.Create("DButton", catalog)
+    clearStoredLoadout:Dock(TOP)
+    clearStoredLoadout:DockMargin(10, 0, 10, 6)
+    clearStoredLoadout:SetTall(22)
+    clearStoredLoadout:SetText("Clear saved weapon slots and CSV list")
+    clearStoredLoadout.DoClick = function()
+        RunConsoleCommand("tool_bzcn_inventory_giver_weapons", "")
+        for slot = 1, 16 do
+            RunConsoleCommand("tool_bzcn_inventory_giver_weapon" .. slot, "")
+        end
+        chat.AddText(Color(220, 190, 130), "[BZCN] Cleared the configured weapon list. Select weapons again to rebuild it.")
+    end
+    catalog:SetTall(338)
 
     RebuildCatalog()
 
