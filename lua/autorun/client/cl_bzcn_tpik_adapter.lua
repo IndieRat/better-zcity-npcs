@@ -180,6 +180,62 @@ local function ApplyFallbackHandTargets(ent, weapon, definition)
     ent.lhold = targets.left
 end
 
+local function ApplyReplicatedWeaponActionPose(ent, weapon)
+    if not IsValid(ent) or not IsValid(weapon) then return end
+    local now = CurTime()
+    local aim = ent:EyeAngles()
+    local flatAim = Angle(0, aim.y, 0)
+    local forward, right = flatAim:Forward(), flatAim:Right()
+
+    local spineBone = ent:LookupBone("ValveBiped.Bip01_Spine2")
+        or ent:LookupBone("ValveBiped.Bip01_Spine1")
+    local spineMatrix = spineBone and ent:GetBoneMatrix(spineBone)
+    local origin = spineMatrix and spineMatrix:GetTranslation() or ent:WorldSpaceCenter()
+
+    -- The reload timer is server-owned. Its replicated timestamps let every
+    -- client animate the support hand for the actual inventory reload window,
+    -- rather than relying on SWEP fields that do not necessarily network.
+    local reloadStart = ent:GetNW2Float("BZCNActorReloadStartedAt", 0)
+    local reloadUntil = ent:GetNW2Float("BZCNActorReloadUntil", 0)
+    if weapon.lhandik ~= false and ent.lhold and reloadUntil > now and reloadStart > 0 then
+        local fadeIn = math.Clamp((now - reloadStart) / 0.18, 0, 1)
+        local fadeOut = math.Clamp((reloadUntil - now) / 0.20, 0, 1)
+        local blend = math.min(fadeIn, fadeOut)
+        if blend > 0 then
+            local oldMatrix = ent.lhold
+            local oldPos = oldMatrix.GetTranslation and oldMatrix:GetTranslation()
+                or (origin + forward * 16 - right * 3 - Vector(0, 0, 5))
+            local oldAng = oldMatrix.GetAngles and oldMatrix:GetAngles() or aim
+            -- Bring the support hand inward to the receiver/magazine. Keep the
+            -- grip hand on target so it reads as a reload, not an aim reset.
+            local reloadPos = origin + forward * 12 + right * 1 - Vector(0, 0, 2)
+            local posed = Matrix()
+            posed:SetTranslation(LerpVector(blend, oldPos, reloadPos))
+            posed:SetAngles(LerpAngle(blend, oldAng, aim))
+            ent.lhold = posed
+        end
+    end
+
+    -- Server-fired shots do not always update the client SWEP's private
+    -- LastShootTime field. Use the replicated actor timestamp to add a short,
+    -- bounded hand recoil pulse to the visible third-person pose.
+    local shotAt = ent:GetNW2Float("BZCNActorLastShotAt", 0)
+    local age = now - shotAt
+    if shotAt > 0 and age >= -0.10 and age < 0.24 and ent.rhold then
+        local recoil = 1 - math.Clamp(math.max(age, 0) / 0.24, 0, 1)
+        if recoil > 0 then
+            local oldMatrix = ent.rhold
+            local oldPos = oldMatrix.GetTranslation and oldMatrix:GetTranslation()
+                or (origin + forward * 13 + right * 5 - Vector(0, 0, 5))
+            local oldAng = oldMatrix.GetAngles and oldMatrix:GetAngles() or aim
+            local posed = Matrix()
+            posed:SetTranslation(oldPos - forward * (2.6 * recoil) + Vector(0, 0, 1.1 * recoil))
+            posed:SetAngles(oldAng + Angle(-4 * recoil, 0, 2 * recoil))
+            ent.rhold = posed
+        end
+    end
+end
+
 local function ApplyFingerHoldPose(ent, weapon)
     if not IsValid(ent) or not IsValid(weapon) or not hg then return end
 
@@ -239,6 +295,8 @@ local function ApplyTPIK(ent)
     weapon.lhandik = not (definition and (definition.setlhik == false or definition.setlh == false))
     weapon.setrhik = weapon.rhandik
     weapon.setlhik = weapon.lhandik
+
+    ApplyReplicatedWeaponActionPose(ent, weapon)
 
     if not isfunction(ent.IsSuperAdmin) then
         ent.IsSuperAdmin = function() return false end
@@ -386,8 +444,15 @@ local function RunNativeWeaponAnimation(ent, weapon, definition)
         if weapon.weight == nil then weapon.weight = 5 end
         local ok, err = xpcall(function()
             SafeWeaponCall(weapon, "AnimHold")
-            SafeWeaponCall(weapon, "AnimApply_ShootRecoil",
-                isfunction(weapon.LastShootTime) and weapon:LastShootTime() or 0)
+            local owner = weapon:GetOwner()
+            local lastShot = IsValid(owner) and owner.GetNW2Float
+                and owner:GetNW2Float("BZCNActorLastShotAt", 0) or 0
+            local shotAge = CurTime() - lastShot
+            local shootTime = isfunction(weapon.LastShootTime) and weapon:LastShootTime() or 0
+            if lastShot > 0 and shotAge >= -0.10 and shotAge < 0.42 then
+                shootTime = lastShot
+            end
+            SafeWeaponCall(weapon, "AnimApply_ShootRecoil", shootTime)
             SafeWeaponCall(weapon, "AnimZoom")
         end, debug.traceback)
         owner.posture = oldPosture
