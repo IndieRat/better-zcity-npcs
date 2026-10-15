@@ -146,8 +146,54 @@ local function SeatNPC(npc, vehicle, seat, role)
             collisionGroup = npc:GetCollisionGroup(),
             noDraw = npc:GetNoDraw(),
             sequence = npc:GetSequence(),
-            cycle = npc:GetCycle()
+            cycle = npc:GetCycle(),
+            pos = npc:GetPos(),
+            angles = npc:GetAngles()
         }
+    end
+
+    local function RestorePreSeatPose()
+        local saved = npc.BZCNGlideSavedState
+        if saved then
+            if isvector(saved.pos) then npc:SetPos(saved.pos) end
+            if isangle(saved.angles) then npc:SetAngles(saved.angles) end
+            npc:SetMoveType(saved.moveType or MOVETYPE_STEP)
+            npc:SetSolid(saved.solid or SOLID_BBOX)
+            npc:SetCollisionGroup(saved.collisionGroup or COLLISION_GROUP_NPC)
+            npc:SetNoDraw(saved.noDraw == true)
+            if isnumber(saved.sequence) and saved.sequence >= 0 then
+                npc:ResetSequence(saved.sequence)
+                if isnumber(saved.cycle) then npc:SetCycle(saved.cycle) end
+            end
+        end
+        npc.BZCNGlideSavedState = nil
+        npc.BZCNGlideNativePose = nil
+    end
+
+    -- Use Glide's own seat animation (for example drive_jeep or a vehicle's
+    -- drive_pd override) before creating the visible ragdoll. Copying a standing
+    -- pose and folding it with generic offsets is what made riders sit backward
+    -- or with their knees through the dashboard.
+    local function ApplyNativeSeatPose()
+        if not isfunction(vehicle.GetPlayerSitSequence) then return false end
+        local seatIndex = role == "driver" and 1 or 2
+        for index, candidate in ipairs(vehicle.seats or {}) do
+            if candidate == seat then seatIndex = index break end
+        end
+        local ok, sequenceName = pcall(vehicle.GetPlayerSitSequence, vehicle, seatIndex)
+        if not ok or not isstring(sequenceName) or sequenceName == "" then return false end
+        local sequence = npc:LookupSequence(sequenceName)
+        if not isnumber(sequence) or sequence < 0 then return false end
+
+        npc:SetPos(seat:GetPos())
+        npc:SetAngles(seat:GetAngles())
+        npc:ResetSequence(sequence)
+        npc:SetCycle(0.35)
+        npc:SetPlaybackRate(1)
+        npc.BZCNGlideNativePose = true
+        if npc.InvalidateBoneCache then npc:InvalidateBoneCache() end
+        if npc.SetupBones then npc:SetupBones() end
+        return true
     end
 
     -- Set the lock BEFORE creating the fake ragdoll: Z-City's organism
@@ -158,9 +204,11 @@ local function SeatNPC(npc, vehicle, seat, role)
     npc.BZCNGlideRole = role or "passenger"
     npc.BZCNGlideSeatedFake = true
     npc.BZCNGlideState = true
+    npc.BZCNGlideNativePose = nil
     npc:SetNW2Bool("BZCNGlideRiding", true)
     npc:SetNW2Bool("BZCNGlideState", true)
     npc:SetNW2String("BZCNGlideSeatRole", role or "passenger")
+    ApplyNativeSeatPose()
 
     local support = hg and hg.BZCNNPCSupport
     if not npc:GetNW2Bool("BZCNNPCDowned", false) then
@@ -169,6 +217,7 @@ local function SeatNPC(npc, vehicle, seat, role)
             npc.BZCNGlideState = nil
             npc:SetNW2Bool("BZCNGlideRiding", false)
             npc:SetNW2Bool("BZCNGlideState", false)
+            RestorePreSeatPose()
             return false
         end
         local ok, entered = pcall(support.EnterDownedState, npc, "glide_seat")
@@ -181,6 +230,7 @@ local function SeatNPC(npc, vehicle, seat, role)
             npc:SetNW2Bool("BZCNGlideRiding", false)
             npc:SetNW2Bool("BZCNGlideState", false)
             npc:SetNW2String("BZCNGlideSeatRole", "")
+            RestorePreSeatPose()
             return false
         end
     end
@@ -200,6 +250,7 @@ local function SeatNPC(npc, vehicle, seat, role)
         npc:SetNW2Bool("BZCNGlideRiding", false)
         npc:SetNW2Bool("BZCNGlideState", false)
         npc:SetNW2String("BZCNGlideSeatRole", "")
+        RestorePreSeatPose()
         return false
     end
 
@@ -295,6 +346,7 @@ local function UnseatNPC(npc, reason, keepDowned)
         npc.BZCNGlideRole = nil
         npc.BZCNGlideSeatedFake = nil
         npc.BZCNGlideState = nil
+        npc.BZCNGlideNativePose = nil
         npc.BZCNGlideSavedState = nil
         if npc.GlideRagdoll == rag then npc.GlideRagdoll = nil end
         npc.GlideRagdollStartPos = nil
