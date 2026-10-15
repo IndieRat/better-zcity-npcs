@@ -1169,12 +1169,14 @@ local function IsDownedForFurryGrab(target, rag)
         local ok, downed = pcall(support.IsDowned, target)
         if ok and downed then return true end
     end
-    -- A player can already be fake-ragdolled before the NWBool / organism
-    -- flags synchronize. Treat the resolved live ragdoll as downed immediately;
-    -- otherwise the grab trace hits the owner entity and intermittently skips
-    -- the required arm/hand check.
-    if IsValid(rag) and rag ~= target
-        and (target:IsPlayer() or (BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(target))) then
+    -- Players can be fake-ragdolled before their NWBool/organism flags sync,
+    -- so a resolved player ragdoll is enough to require the arm/hand grab.
+    -- Managed BZCN NPCs also keep a ragdoll clone/proxy while standing; merely
+    -- finding that clone must NOT classify the NPC as already downed. Otherwise
+    -- its own grab creates a new active fake body and the strict arm/entity
+    -- identity guard rejects the grab before assimilation can attach.
+    local managedNPC = BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(target)
+    if IsValid(rag) and rag ~= target and (target:IsPlayer() or not managedNPC) then
         return true
     end
     local organ = target.organism or target.BZCN_Organism
@@ -1450,8 +1452,22 @@ function BZCN.TryFurryAssimilation(attacker, target)
         -- actual ragdoll arm/hand hit. Do not silently upgrade a torso/entity
         -- target lock into a downed-ragdoll grab on later ticks.
         if state.startedDowned and IsDownedForFurryGrab(target, ragNow) then
-            if not IsValid(ragNow) or state.grabEntity ~= ragNow
-                or not IsGrabbableArmBone(ragNow, state.grabPhysicsBone) then
+            local samePhysicalGrab = IsValid(ragNow) and state.grabEntity == ragNow
+                and IsGrabbableArmBone(ragNow, state.grabPhysicsBone)
+            if not samePhysicalGrab and IsValid(ragNow) then
+                -- Z-City may replace a fake body during the downed transition.
+                -- Reacquire a real arm/hand contact on that body rather than
+                -- keeping a stale entity/physics-bone pair from the old rag.
+                local retraced, refreshedTrace = TraceFurryGrab(attacker, target, weapon)
+                if retraced and istable(refreshedTrace)
+                    and refreshedTrace.Entity == ragNow
+                    and IsGrabbableArmBone(ragNow, refreshedTrace.PhysicsBone) then
+                    state.grabEntity = ragNow
+                    state.grabPhysicsBone = refreshedTrace.PhysicsBone
+                    samePhysicalGrab = true
+                end
+            end
+            if not samePhysicalGrab then
                 BZCN.StopFurryAssimilation(attacker)
                 return false
             end
