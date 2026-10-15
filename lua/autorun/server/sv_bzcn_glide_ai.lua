@@ -168,6 +168,14 @@ local function SeatNPC(npc, vehicle, seat, role)
         end
         npc.BZCNGlideSavedState = nil
         npc.BZCNGlideNativePose = nil
+        npc.BZCNGlideVehicle = nil
+        npc.BZCNGlideSeat = nil
+        npc.BZCNGlideRole = nil
+        npc.BZCNGlideSeatedFake = nil
+        npc.BZCNGlideState = nil
+        npc:SetNW2Bool("BZCNGlideRiding", false)
+        npc:SetNW2Bool("BZCNGlideState", false)
+        npc:SetNW2String("BZCNGlideSeatRole", "")
     end
 
     -- Use Glide's own seat animation (for example drive_jeep or a vehicle's
