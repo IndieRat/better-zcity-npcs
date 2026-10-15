@@ -1142,6 +1142,18 @@ hook.Add("BZCN_SquadCombatOrder", "BZCN_CombatLeaderHandSignals", function(leade
     end
 
     local command = IsValid(target) and "forward" or "halt"
+    if not IsValid(target) then
+        -- When contact is lost and the fireteam has become scattered, the leader
+        -- calls the unit back together instead of freezing isolated members.
+        for _, member in ipairs(members or {}) do
+            if IsCombineUnit(member) and member ~= leader
+                and member.BZCNSquadLeader == leader
+                and member:GetPos():DistToSqr(leader:GetPos()) > 520 * 520 then
+                command = "group"
+                break
+            end
+        end
+    end
     local point = isvector(leader.BZCNLastAimPoint) and leader.BZCNLastAimPoint or nil
     for _, member in ipairs(members or {}) do
         if not IsCombineUnit(member) or member == leader
@@ -1157,7 +1169,9 @@ hook.Add("BZCN_SquadCombatOrder", "BZCN_CombatLeaderHandSignals", function(leade
     -- a usable gesture sequence still follows the leader's tactical decision.
     local social = BZCN.Social
     if social and isfunction(social.PlayGesture) then
-        social.PlayGesture(leader, command == "forward" and "forward" or "halt")
+        local gesture = command == "forward" and "forward"
+            or command == "group" and "group" or "halt"
+        social.PlayGesture(leader, gesture)
     end
 end)
 
