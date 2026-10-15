@@ -1140,9 +1140,25 @@ hook.Add("BZCN_SquadCombatOrder", "BZCN_CombatLeaderHandSignals", function(leade
     elseif IsValid(target) then
         leader.BZCNLastAimPoint = target:WorldSpaceCenter()
     end
+
+    local command = IsValid(target) and "forward" or "halt"
+    local point = isvector(leader.BZCNLastAimPoint) and leader.BZCNLastAimPoint or nil
+    for _, member in ipairs(members or {}) do
+        if not IsCombineUnit(member) or member == leader
+            or member.BZCNSquadLeader ~= leader then continue end
+        member.BZCNSquadCommand = command
+        member.BZCNSquadCommandUntil = CurTime() + (command == "forward" and 9 or 15)
+        member.BZCNSquadCommandPos = point
+        if member.SetNW2String then member:SetNW2String("BZCNSquadCommand", command) end
+        if isvector(point) and member.SetNW2Vector then member:SetNW2Vector("BZCNSquadCommandPos", point) end
+    end
+
+    -- Play the visual signal after the command is committed, so a model lacking
+    -- a usable gesture sequence still follows the leader's tactical decision.
     local social = BZCN.Social
-    if not social or not isfunction(social.PlayGesture) then return end
-    social.PlayGesture(leader, IsValid(target) and "forward" or "halt")
+    if social and isfunction(social.PlayGesture) then
+        social.PlayGesture(leader, command == "forward" and "forward" or "halt")
+    end
 end)
 
 hook.Add("BZCN_EntityDamaged", "BZCN_CompanionProtectOwner", function(victim, attacker)
