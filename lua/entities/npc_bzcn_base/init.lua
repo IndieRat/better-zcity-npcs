@@ -1872,6 +1872,19 @@ function ENT:ChaseEnemy(target)
         self.BZCNBodyFacingTarget = visible and target or nil
         self.BZCNBodyFacingUntil = now + 0.25
 
+        -- Once a headcrab commits to a jump, do not let ordinary path updates
+        -- replace its launch velocity on the same or following coroutine tick.
+        -- The independent contact timer owns impact; this loop only resumes
+        -- after a successful hit or the short pounce window expires.
+        if profile.HeadcrabStyle == true and istable(self.BZCNHeadcrabPounce) then
+            local pending = self.BZCNHeadcrabPounce
+            if IsValid(pending.target) and now <= (pending.expires or 0) then
+                coroutine.wait(0.025)
+                continue
+            end
+            self.BZCNHeadcrabPounce = nil
+        end
+
         -- A pounce is a short, physics-driven tackle. Check contact before
         -- yielding to the leap so a furry can knock the target down on impact.
         if istable(self.BZCNNPCPounce) then
@@ -2141,6 +2154,10 @@ function ENT:ChaseEnemy(target)
                 self.loco:SetVelocity(direction * 325 + Vector(0, 0, 205))
                 self:EmitSound("npc/headcrab/attack1.wav", 68, math.random(95, 108), 0.8)
                 hook.Run("BZCN_HeadcrabPounce", self, target, direction)
+                -- Yield immediately so this same iteration does not call
+                -- path:Update and cancel the freshly applied jump impulse.
+                coroutine.wait(0.025)
+                continue
             end
         end
         local sprintStart = tonumber(profile.SprintStartRange) or 275
