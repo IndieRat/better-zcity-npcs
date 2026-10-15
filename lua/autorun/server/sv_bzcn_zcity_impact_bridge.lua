@@ -3,18 +3,28 @@
 -- physical shock/knockdown response when a collision doesn't generate damage.
 if not SERVER then return end
 
+-- Only living managed actors may be impact victims. A Z-City player ragdoll can
+-- resolve through hg.RagdollOwner back to a real Player, and ragdolls can inherit
+-- copied NetVars; neither a player nor a ragdoll itself is a managed NPC owner.
+local function IsManagedActor(ent)
+    if not IsValid(ent) or ent:IsPlayer() then return false end
+    if ent:GetClass() == "prop_ragdoll" then return false end
+    return BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(ent) or false
+end
+
 local function ResolveNPC(ent)
-    if not IsValid(ent) then return nil end
-    if BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(ent) then return ent end
+    if not IsValid(ent) or ent:IsPlayer() then return nil end
+    if IsManagedActor(ent) then return ent end
+
     local owner = IsValid(ent.BZCNNPCOwner) and ent.BZCNNPCOwner
         or (IsValid(ent.BZCNOwner) and ent.BZCNOwner or nil)
     if not IsValid(owner) and hg and isfunction(hg.RagdollOwner) then
         local ok, result = pcall(hg.RagdollOwner, ent)
         if ok and IsValid(result) then owner = result end
     end
-    if IsValid(owner) and BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(owner) then
-        return owner
-    end
+
+    -- Never let a player owner or a proxy entity pass the managed-NPC boundary.
+    if IsManagedActor(owner) then return owner end
     return nil
 end
 
@@ -32,8 +42,11 @@ local function InstallCollisionBridge(source)
     source.BZCNNPCVehicleBodyImpactInstalled = true
     source:AddCallback("PhysicsCollide", function(ent, data)
         if not IsValid(ent) or not istable(data) or not IsValid(data.HitEntity) then return end
+        if data.HitEntity:IsPlayer() then return end
+
         local victim = ResolveNPC(data.HitEntity)
-        if not IsValid(victim) or victim == ResolveNPC(ent) or victim:Health() <= 0 then return end
+        if not IsValid(victim) or victim:IsPlayer() or victim == ResolveNPC(ent)
+            or victim:Health() <= 0 then return end
 
         local now = CurTime()
         if (victim.BZCNNPCVehicleImpactAt or 0) > now - 0.3 then return end
