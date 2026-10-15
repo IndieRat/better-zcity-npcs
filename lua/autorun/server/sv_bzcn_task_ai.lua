@@ -253,6 +253,136 @@ function BZCN.AddHumanBond(a, b, amount, reason)
     return score
 end
 
+-- Relationship tiers are descriptive benefits, not faction overrides: even a
+-- close friend remains subject to combat hostility and active threat checks.
+function BZCN.GetHumanRelationship(a, b)
+    local bond = GetHumanBond(a, b)
+    if bond >= 80 then return "devoted", bond end
+    if bond >= 60 then return "close_friend", bond end
+    if bond >= 35 then return "friend", bond end
+    if bond >= 15 then return "familiar", bond end
+    return "acquaintance", bond
+end
+
+-- Per-actor memory of people they have actually encountered. Entity keys are
+-- weak so profiles don't keep removed NPCs alive; descriptive fields remain
+-- available for UI/debugging while the entity exists.
+function BZCN.RememberHuman(actor, other, event, detail)
+    if not IsValid(actor) or not IsValid(other) or actor == other then return nil end
+    if not HumanSocialClass(actor) or not HumanSocialClass(other) then return nil end
+    local memory = actor.BZCNHumanMemory
+    if not istable(memory) then
+        memory = setmetatable({}, {__mode = "k"})
+        actor.BZCNHumanMemory = memory
+    end
+    local entry = memory[other] or {}
+    entry.name = (other:IsPlayer() and other:Nick())
+        or (isfunction(other.GetNW2String) and other:GetNW2String("PlayerName", ""))
+        or other.BZCNHumanName or other.BZCNName or other:GetClass()
+    entry.class = tostring(other.BZCNClass or other.PlayerClassName or other:GetClass())
+    entry.faction = tostring(other.BZCN_Faction
+        or (other.BZCNClassProfile and other.BZCNClassProfile.Faction) or "unknown")
+    entry.lastSeen = CurTime()
+    entry.lastPosition = other:GetPos()
+    entry.bond = GetHumanBond(actor, other)
+    entry.relationship = select(1, BZCN.GetHumanRelationship(actor, other))
+    if event then entry.lastEvent = tostring(event) end
+    if detail then entry.lastDetail = tostring(detail) end
+    memory[other] = entry
+    return entry
+end
+
+BZCN.SocialWorld = BZCN.SocialWorld or {}
+local SocialWorld = BZCN.SocialWorld
+SocialWorld.HangoutSpots = SocialWorld.HangoutSpots or {}
+Tasks.HangoutSpots = SocialWorld.HangoutSpots
+
+function SocialWorld.RecordHangoutVisit(actor, spot)
+    if not IsValid(actor) or not istable(spot) or not isvector(spot.pos) then return false end
+    local now = CurTime()
+    spot.visits = math.min((tonumber(spot.visits) or 0) + 1, 10000)
+    spot.lastVisitedAt = now
+    spot.expiresAt = now + 1800
+    spot.score = math.Clamp((tonumber(spot.score) or 0) + 1.5, 0, 80)
+    actor.BZCNLastHangoutVisit = now
+    local kind = HumanSocialClass(actor)
+    if kind then
+        for _, other in ipairs(ents.FindInSphere(spot.pos, 300)) do
+            if other ~= actor and HumanSocialClass(other) and AreSocialCompatible(actor, other) then
+                BZCN.RememberHuman(actor, other, "hangout", spot.name or "shared hangout")
+                BZCN.RememberHuman(other, actor, "hangout", spot.name or "shared hangout")
+                if GetHumanBond(actor, other) >= 25 then
+                    spot.friendVisits = math.min((tonumber(spot.friendVisits) or 0) + 1, 10000)
+                end
+            end
+        end
+    end
+    return true
+end
+
+-- Hotspots emerge from repeated, voluntary gatherings rather than hard-coded
+-- map coordinates. Popular spots slowly decay and expire when abandoned.
+timer.Create("BZCN_SocialWorld_Hotspots", 8, 0, function()
+    local now = CurTime()
+    local humans = {}
+    for _, ent in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if IsManaged(ent) and HumanSocialClass(ent) and IsSocialAvailable(ent)
+            and not IsValid(ent.BZCNEnemy) and not ent:GetNW2Bool("BZCNNPCDowned", false) then
+            humans[#humans + 1] = ent
+        end
+    end
+    for _, actor in ipairs(humans) do
+        local current = actor.BZCNCurrentHangout
+        local near = {}
+        for _, other in ipairs(ents.FindInSphere(actor:GetPos(), 260)) do
+            if other ~= actor and HumanSocialClass(other) and AreSocialCompatible(actor, other)
+                and IsSocialAvailable(other) then
+                near[#near + 1] = other
+                BZCN.RememberHuman(actor, other, "encounter")
+                BZCN.RememberHuman(other, actor, "encounter")
+            end
+        end
+        if #near >= 1 then
+            actor.BZCNSocialGatheringSince = actor.BZCNSocialGatheringSince or now
+            if now - actor.BZCNSocialGatheringSince >= 16 then
+                local spot
+                for _, candidate in ipairs(SocialWorld.HangoutSpots) do
+                    if isvector(candidate.pos) and candidate.pos:DistToSqr(actor:GetPos()) <= 220 * 220 then
+                        spot = candidate
+                        break
+                    end
+                end
+                if not spot then
+                    spot = {
+                        pos = Vector(actor:GetPos().x, actor:GetPos().y, actor:GetPos().z),
+                        kind = HumanSocialClass(actor) or "civilian",
+                        score = 1,
+                        visits = 0,
+                        expiresAt = now + 1800,
+                        name = "local hangout"
+                    }
+                    SocialWorld.HangoutSpots[#SocialWorld.HangoutSpots + 1] = spot
+                else
+                    spot.score = math.Clamp((tonumber(spot.score) or 0) + 0.8, 0, 80)
+                    spot.expiresAt = now + 1800
+                end
+                Tasks.HangoutSpots = SocialWorld.HangoutSpots
+                actor.BZCNLastHangoutSpot = spot
+            end
+        else
+            actor.BZCNSocialGatheringSince = nil
+        end
+    end
+    for i = #SocialWorld.HangoutSpots, 1, -1 do
+        local spot = SocialWorld.HangoutSpots[i]
+        if not istable(spot) or (tonumber(spot.expiresAt) or 0) <= now then
+            table.remove(SocialWorld.HangoutSpots, i)
+        elseif (tonumber(spot.lastVisitedAt) or now) < now - 900 then
+            spot.score = math.max(0, (tonumber(spot.score) or 0) - 0.5)
+        end
+    end
+end)
+
 local function FindSocialMate(ent, radius, requireHome)
     local ownClass = HumanSocialClass(ent)
     if not ownClass then return nil end
