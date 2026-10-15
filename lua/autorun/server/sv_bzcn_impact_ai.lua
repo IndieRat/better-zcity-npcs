@@ -10,30 +10,30 @@ local function IsManagedNPC(ent)
         and ent.IsPlayer and not ent:IsPlayer()
 end
 
-local function GetHealthState(ent)
-    local support = hg and hg.BZCNNPCSupport
-    if support and isfunction(support.GetNPCHealthTable) then
-        local ok, state = pcall(support.GetNPCHealthTable, ent)
-        if ok and istable(state) then return state end
+-- Impact bookkeeping stays in an addon-owned table. In particular, don't
+-- use or mutate ent.organism here: it is Z-City's native player/organism table
+-- and must never be used as a scratchpad for collision shock.
+local function GetImpactState(ent)
+    if not IsManagedNPC(ent) then return nil end
+    local state = ent.BZCNImpactState
+    if not istable(state) then
+        state = {shock = 0, pain = 0, lastImpactAt = 0}
+        ent.BZCNImpactState = state
     end
-    return ent.BZCN_Organism or ent.organism
+    return state
 end
 
 local function AddImpactShock(target, amount, pain)
-    if not IsManagedNPC(target) then return end
-    local state = GetHealthState(target)
-    if istable(state) then
-        state.shock = math.min((tonumber(state.shock) or 0) + amount, 100)
-        state.pain = math.min((tonumber(state.pain) or 0) + (pain or amount * 0.5), 100)
-    end
-    local organ = target.organism or target.BZCN_Organism
-    if istable(organ) and organ ~= state then
-        organ.shock = math.min((tonumber(organ.shock) or 0) + amount, 100)
-        organ.pain = math.min((tonumber(organ.pain) or 0) + (pain or amount * 0.5), 100)
-    end
+    local state = GetImpactState(target)
+    if not state then return end
+
+    state.shock = math.min((tonumber(state.shock) or 0) + amount, 100)
+    state.pain = math.min((tonumber(state.pain) or 0) + (pain or amount * 0.5), 100)
+    state.lastImpactAt = CurTime()
+
     if target.SetNW2Float then
-        target:SetNW2Float("BZCNImpactShock",
-            math.min((target:GetNW2Float("BZCNImpactShock", 0) or 0) + amount, 100))
+        target:SetNW2Float("BZCNImpactShock", state.shock)
+        target:SetNW2Float("BZCNImpactPain", state.pain)
     end
 end
 
@@ -101,8 +101,10 @@ local function AttachPhysicsImpact(ent)
     if not IsValid(ent) or ent.BZCNImpactCallbackInstalled then return end
     if not isfunction(ent.AddCallback) then return end
     local class = ent:GetClass()
+    local isVehicle = isstring(class) and string.StartWith(class, "prop_vehicle")
     if class ~= "prop_ragdoll" and class ~= "prop_physics"
-        and class ~= "prop_physics_multiplayer" and class ~= "prop_physics_override" then return end
+        and class ~= "prop_physics_multiplayer" and class ~= "prop_physics_override"
+        and not isVehicle then return end
 
     ent.BZCNImpactCallbackInstalled = true
     ent:AddCallback("PhysicsCollide", function(source, data)
@@ -113,13 +115,20 @@ local function AttachPhysicsImpact(ent)
         local velocity = isvector(data.OurOldVelocity) and data.OurOldVelocity or vector_origin
         local speed = tonumber(data.Speed) or velocity:Length()
         if speed <= 0 then return end
-        local owner = source:GetClass() == "prop_ragdoll" and ResolveRagdollOwner(source) or nil
+
+        local sourceClass = source:GetClass()
+        local sourceIsVehicle = isstring(sourceClass) and string.StartWith(sourceClass, "prop_vehicle")
+        local owner = sourceClass == "prop_ragdoll" and ResolveRagdollOwner(source) or nil
         if IsValid(owner) and owner:IsPlayer() then
             -- Player tackle: a fast fake-ragdoll collision carries the sprint /
             -- jump momentum. A slow ordinary ragdoll bump is not a tackle.
             if speed >= 260 then ApplyImpact(target, data.HitPos, velocity, "tackle", owner) end
         elseif speed >= 420 then
-            -- Thrown props use the same organism shock pathway.
+            -- Thrown props and vehicles share the BZCN-only impact response.
+            -- Only a hard impact (the existing 620 threshold) may request the
+            -- separate NPC downed/ragdoll lifecycle; ordinary collisions just
+            -- update BZCNImpactState and the BZCNImpactShock/Pain netvars.
+            if sourceIsVehicle and speed < 420 then return end
             ApplyImpact(target, data.HitPos, velocity, "prop", owner)
         end
     end)
