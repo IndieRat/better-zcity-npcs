@@ -1235,6 +1235,12 @@ local function TraceFurryGrab(attacker, target, weapon)
     if IsValid(attacker.BZCNHeldWeaponProxy) then
         filter[#filter + 1] = attacker.BZCNHeldWeaponProxy
     end
+    local activeGrab = istable(attacker.BZCNFurryGrab) and attacker.BZCNFurryGrab or nil
+    if activeGrab and IsValid(activeGrab.rag) and activeGrab.rag ~= rag then
+        -- During Z-City fake-body replacement, do not let the previous body
+        -- carried by weapon_hands_sh occlude a fresh arm trace on the new one.
+        filter[#filter + 1] = activeGrab.rag
+    end
     -- Once fake-ragdolled, the living owner entity overlaps its own body and
     -- often intercepts the SWEP-style trace. Filter that owner, never the rag.
     if downed and IsValid(rag) and target ~= rag then filter[#filter + 1] = target end
