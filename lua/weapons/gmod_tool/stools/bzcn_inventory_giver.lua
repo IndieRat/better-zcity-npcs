@@ -29,11 +29,11 @@ if CLIENT then
         end
     end
 
-    language.Add("tool.bzcn_inventory_giver.name", "Inventory Giver")
-    language.Add("tool.bzcn_inventory_giver.desc", "Apply a configurable Z-City inventory to a player or managed BZCN NPC. Weapon fields accept real SWEP classes or aliases such as Pistol:9mm.")
-    language.Add("tool.bzcn_inventory_giver.left", "Apply the configured inventory to the targeted player or BZCN NPC")
-    language.Add("tool.bzcn_inventory_giver.right", "Copy the target's current inventory into this tool's configuration")
-    language.Add("tool.bzcn_inventory_giver.reload", "Clear the target's Z-City inventory data")
+    language.Add("tool.bzcn_inventory_giver.name", "NPC Loadout Manager")
+    language.Add("tool.bzcn_inventory_giver.desc", "Build and apply a multi-item Z-City loadout for players or managed BZCN NPCs.")
+    language.Add("tool.bzcn_inventory_giver.left", "Apply the complete configured loadout to the target")
+    language.Add("tool.bzcn_inventory_giver.right", "Copy the target's current loadout into the editor")
+    language.Add("tool.bzcn_inventory_giver.reload", "Clear the target's extra inventory entries")
 
     net.Receive("bzcn_inventory_giver_copy", function()
         local weaponsText = net.ReadString() or ""
@@ -466,6 +466,23 @@ local function WriteInventory(ent, inventory, clearVirtualItems)
         end
     end
 
+    if BZCN and BZCN.IsManaged and BZCN.IsManaged(ent) then
+        -- Selecting a visible/active weapon must never reduce the actual loadout
+        -- to that one weapon. Republish the complete multi-entry table after
+        -- SelectWeapon/ShowHeldWeapon has finished touching held-weapon state.
+        ent.inventory = inventory
+        ent.Inventory = inventory
+        if isfunction(ent.SetNetVar) then
+            pcall(ent.SetNetVar, ent, "Inventory", inventory)
+        elseif BZCN.SetNetVar then
+            pcall(BZCN.SetNetVar, ent, "Inventory", inventory)
+        end
+        -- Native SetNetVar implementations may keep a separate compatibility
+        -- copy; keep both direct lookup paths pointed at the same full table.
+        ent.inventory = inventory
+        ent.Inventory = inventory
+    end
+
     hook.Run("BZCN_InventoryGiverApplied", ent, inventory)
 end
 
@@ -536,66 +553,247 @@ function TOOL:Reload(trace)
 end
 
 function TOOL.BuildCPanel(panel)
-    panel:Help("Configure a native Z-City inventory, then left-click a player or managed BZCN NPC to apply it.")
-    panel:Help("Right-click a player/NPC to copy its current inventory, including live player ammo. Reload clears extra player inventory data or the NPC inventory.")
+    panel:Help("NPC Loadout Manager · Build a multi-item Z-City inventory, then left-click a player or managed BZCN NPC to apply it.")
+    panel:Help("Right-click a target to import its current loadout. The NPC displays one selected weapon at a time, while the rest stay in its inventory.")
 
-    panel:Help("Choose a live ammo family below to add a pool alias, or enter an exact SWEP class.")
-    local familyPicker = panel:ComboBox("Weapon pool / ammo family", "bzcn_inventory_giver_weapon_pool_picker")
-    local poolCounts = {}
-    if weapons and weapons.GetList and weapons.GetStored then
-        for _, listed in ipairs(weapons.GetList() or {}) do
-            local class = istable(listed) and (listed.ClassName or listed.Class or listed.Classname) or nil
-            local stored = isstring(class) and weapons.GetStored(class) or nil
-            local primary = istable(stored) and istable(stored.Primary) and stored.Primary or nil
-            local ammo = primary and primary.Ammo
-            if isstring(class) and class ~= "" and isstring(ammo) and ammo ~= ""
-                and string.lower(ammo) ~= "none" and class ~= "weapon_hands_sh"
-                and not (BZCN and BZCN.IsMedicalWeaponClass and BZCN.IsMedicalWeaponClass(class)) then
-                poolCounts[ammo] = (poolCounts[ammo] or 0) + 1
+    -- Compact searchable mini-catalog. Unlike ammo-family aliases, catalog
+    -- selections add the exact SWEP class, so several specific weapons can be
+    -- queued in one pass without every selection resolving to the same class.
+    panel:Help("WEAPON CATALOG  /  Select multiple registered weapons, then add them together.")
+    local catalog = vgui.Create("DPanel", panel)
+    catalog:SetTall(312)
+    catalog:Dock(TOP)
+    catalog:DockMargin(0, 2, 0, 8)
+    catalog.Paint = function(self, w, h)
+        draw.RoundedBox(8, 0, 0, w, h, Color(25, 29, 38, 255))
+        surface.SetDrawColor(72, 150, 210, 200)
+        surface.DrawRect(10, 0, math.max(0, w - 20), 2)
+    end
+
+    local selectedWeapons = {}
+    local weaponButtons = {}
+    local weaponEntries = {}
+    local selectedCountLabel
+    local addSelectedButton
+    local catalogLayout
+    local searchText = ""
+    local categoryFilter = "All categories"
+
+    local function ClassOfListedWeapon(listed)
+        if not istable(listed) then return nil end
+        local class = listed.ClassName or listed.Class or listed.Classname
+        return isstring(class) and class ~= "" and class or nil
+    end
+
+    local function BuildWeaponCatalog()
+        weaponEntries = {}
+        local seen = {}
+        if weapons and isfunction(weapons.GetList) and isfunction(weapons.GetStored) then
+            for _, listed in ipairs(weapons.GetList() or {}) do
+                local class = ClassOfListedWeapon(listed)
+                local stored = class and weapons.GetStored(class) or nil
+                -- Only display registered, spawnable SWEPs. This deliberately
+                -- excludes missing classes, abstract/non-spawnable bases and
+                -- admin-only entries; manually typed classes still validate on server.
+                if not class or seen[class] or not istable(stored)
+                    or stored.Spawnable == false or stored.AdminOnly == true
+                    or stored.Abstract == true or class == "weapon_base" then
+                    continue
+                end
+                seen[class] = true
+                local primary = istable(stored.Primary) and stored.Primary or {}
+                local ammo = isstring(primary.Ammo) and primary.Ammo ~= ""
+                    and string.lower(primary.Ammo) ~= "none" and primary.Ammo or "Utility / no ammo"
+                local name = isstring(stored.PrintName) and stored.PrintName ~= ""
+                    and stored.PrintName or class
+                local category = isstring(stored.Category) and stored.Category ~= ""
+                    and stored.Category or "Other"
+                weaponEntries[#weaponEntries + 1] = {
+                    class = class,
+                    name = name,
+                    category = category,
+                    ammo = ammo
+                }
             end
         end
+        table.sort(weaponEntries, function(a, b)
+            local an = string.lower(a.name)
+            local bn = string.lower(b.name)
+            if an == bn then return a.class < b.class end
+            return an < bn
+        end)
     end
-    local ammoNames = {}
-    for ammo in pairs(poolCounts) do ammoNames[#ammoNames + 1] = ammo end
-    table.sort(ammoNames)
-    for _, ammo in ipairs(ammoNames) do
-        local alias = "Ammo:" .. ammo
-        familyPicker:AddChoice("Ammo family: " .. ammo .. " (" .. poolCounts[ammo] .. " weapons)", alias)
+
+    local function UpdateSelectionCaption()
+        local count = table.Count(selectedWeapons)
+        if IsValid(selectedCountLabel) then
+            selectedCountLabel:SetText(tostring(count) .. " selected")
+        end
+        if IsValid(addSelectedButton) then
+            addSelectedButton:SetText(count > 0
+                and ("Add selected to loadout  +" .. tostring(count))
+                or "Select weapons to add")
+            addSelectedButton:SetEnabled(count > 0)
+        end
     end
-    familyPicker:AddChoice("Pistol family: 9mm", "Pistol:9mm")
-    local selectedAlias
-    familyPicker.OnSelect = function(_, _, value, data) selectedAlias = isstring(data) and data or value end
-    local appendAlias = vgui.Create("DButton", panel)
-    appendAlias:SetText("Add selected weapon pool to inventory")
-    appendAlias:Dock(TOP)
-    appendAlias:DockMargin(0, 2, 0, 6)
-    appendAlias.DoClick = function()
-        if not isstring(selectedAlias) or selectedAlias == "" then return end
+
+    local function MakeWeaponCard(entry)
+        local class = entry.class
+        local button = vgui.Create("DButton", catalogLayout)
+        button:SetSize(145, 54)
+        button:SetText("")
+        button:SetTooltip(entry.name .. "\n" .. class .. "\nAmmo: " .. entry.ammo .. "\nClick to select")
+        button.Paint = function(self, w, h)
+            local picked = selectedWeapons[class] == true
+            local base = picked and Color(36, 102, 91, 255) or Color(42, 49, 63, 255)
+            if self:IsHovered() then
+                base = picked and Color(43, 125, 108, 255) or Color(53, 65, 84, 255)
+            end
+            draw.RoundedBox(6, 0, 0, w, h, base)
+            if picked then
+                draw.RoundedBox(4, 5, 5, 18, 18, Color(120, 220, 180, 255))
+                draw.SimpleText("✓", "DermaDefaultBold", 14, 14, Color(20, 35, 30), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            end
+            draw.SimpleText(entry.name, "DermaDefaultBold", picked and 28 or 8, 17, Color(240, 244, 250), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            draw.SimpleText(class, "DermaDefault", 8, 39, Color(180, 194, 212), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        end
+        button.DoClick = function()
+            selectedWeapons[class] = not selectedWeapons[class] or nil
+            UpdateSelectionCaption()
+            if IsValid(button) then button:InvalidateLayout(true) end
+            surface.PlaySound("buttons/button15.wav")
+        end
+        weaponButtons[class] = button
+        return button
+    end
+
+    local function RebuildCatalog()
+        if not IsValid(catalogLayout) then return end
+        catalogLayout:Clear()
+        weaponButtons = {}
+        local needle = string.lower(string.Trim(searchText or ""))
+        local matches = 0
+        for _, entry in ipairs(weaponEntries) do
+            local searchable = string.lower(entry.name .. " " .. entry.class .. " " .. entry.category .. " " .. entry.ammo)
+            local categoryMatches = categoryFilter == "All categories" or entry.category == categoryFilter
+            if categoryMatches and (needle == "" or string.find(searchable, needle, 1, true)) then
+                MakeWeaponCard(entry)
+                matches = matches + 1
+            end
+        end
+        if matches == 0 then
+            local empty = vgui.Create("DLabel", catalogLayout)
+            empty:SetSize(290, 40)
+            empty:SetText("No valid weapons match this filter.")
+            empty:SetTextColor(Color(210, 220, 232))
+        end
+        UpdateSelectionCaption()
+    end
+
+    local heading = vgui.Create("DLabel", catalog)
+    heading:Dock(TOP)
+    heading:DockMargin(10, 7, 10, 4)
+    heading:SetTall(20)
+    heading:SetFont("DermaDefaultBold")
+    heading:SetTextColor(Color(230, 240, 250))
+    heading:SetText("LOADOUT STUDIO   /   REGISTERED SWEPs")
+
+    local searchEntry = vgui.Create("DTextEntry", catalog)
+    searchEntry:Dock(TOP)
+    searchEntry:DockMargin(10, 0, 10, 5)
+    searchEntry:SetTall(24)
+    searchEntry:SetPlaceholderText("Search name, class, category or ammo…")
+    searchEntry.OnChange = function(self)
+        searchText = self:GetValue() or ""
+        RebuildCatalog()
+    end
+
+    local categoryBox = vgui.Create("DComboBox", catalog)
+    categoryBox:Dock(TOP)
+    categoryBox:DockMargin(10, 0, 10, 5)
+    categoryBox:SetTall(23)
+    categoryBox:SetValue("All categories")
+    local categories = {}
+    for _, entry in ipairs(weaponEntries) do categories[entry.category] = true end
+    local categoryNames = {}
+    for name in pairs(categories) do categoryNames[#categoryNames + 1] = name end
+    table.sort(categoryNames)
+    categoryBox:AddChoice("All categories", "All categories")
+    for _, name in ipairs(categoryNames) do categoryBox:AddChoice(name, name) end
+    categoryBox.OnSelect = function(_, _, value, data)
+        categoryFilter = isstring(data) and data or value or "All categories"
+        RebuildCatalog()
+    end
+
+    local actionBar = vgui.Create("DPanel", catalog)
+    actionBar:Dock(TOP)
+    actionBar:DockMargin(10, 0, 10, 5)
+    actionBar:SetTall(26)
+    actionBar.Paint = nil
+
+    selectedCountLabel = vgui.Create("DLabel", actionBar)
+    selectedCountLabel:Dock(LEFT)
+    selectedCountLabel:SetWide(82)
+    selectedCountLabel:SetTextColor(Color(190, 208, 226))
+    selectedCountLabel:SetContentAlignment(4)
+    selectedCountLabel:SetText("0 selected")
+
+    local clearSelection = vgui.Create("DButton", actionBar)
+    clearSelection:Dock(RIGHT)
+    clearSelection:SetWide(82)
+    clearSelection:SetText("Clear")
+    clearSelection.DoClick = function()
+        table.Empty(selectedWeapons)
+        RebuildCatalog()
+    end
+
+    addSelectedButton = vgui.Create("DButton", actionBar)
+    addSelectedButton:Dock(RIGHT)
+    addSelectedButton:DockMargin(0, 0, 5, 0)
+    addSelectedButton:SetWide(170)
+    addSelectedButton.DoClick = function()
         local convarName = "tool_bzcn_inventory_giver_weapons"
         local current = GetConVar(convarName)
         local entries = SplitList(current and current:GetString() or "", 64)
-        for _, entry in ipairs(entries) do
-            if string.lower(entry) == string.lower(selectedAlias) then
-                surface.PlaySound("buttons/button10.wav")
-                return
+        local seen = {}
+        for _, entry in ipairs(entries) do seen[string.lower(entry)] = true end
+        local added = 0
+        for class in pairs(selectedWeapons) do
+            if not seen[string.lower(class)] and #entries < 64 then
+                entries[#entries + 1] = class
+                seen[string.lower(class)] = true
+                added = added + 1
             end
         end
-        entries[#entries + 1] = selectedAlias
         RunConsoleCommand(convarName, table.concat(entries, ","))
+        if added > 0 then
+            chat.AddText(Color(125, 220, 175), "[BZCN] Added " .. tostring(added) .. " weapon(s) to the loadout.")
+        else
+            surface.PlaySound("buttons/button10.wav")
+        end
     end
 
-    panel:TextEntry("Weapon classes or ammo-family aliases (comma-separated)", "tool_bzcn_inventory_giver_weapons")
-    panel:TextEntry("Z-City scripted entity classes (comma-separated)", "tool_bzcn_inventory_giver_items")
-    panel:TextEntry("Ammo type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
-    panel:TextEntry("Attachments (comma-separated IDs)", "tool_bzcn_inventory_giver_attachments")
-    panel:TextEntry("Armor slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
-    panel:CheckBox("Automatically add reserve ammo for configured weapons", "tool_bzcn_inventory_giver_autoammo")
-    panel:Help("Aliases resolve through the live registered SWEP pool and are stored as real weapon classes. A pool alias selects one deterministic registered SWEP from that ammo family.")
-    panel:Help("Example reserve ammo: Pistol:120,SMG1:90")
-    panel:Help("Example attachments: supressor2,scope1")
-    panel:Help("Example armor: head=combine_helmet,torso=vest3")
-    panel:Help("Players receive configured live SWEPs and ammo. Their unrelated weapons are not stripped.")
-    panel:Help("Z-City has no separate Inventory.Items tab. Registered scripted entities are stored in Inventory.Weapons so the native loot menu can display and transfer them; unknown entity classes are rejected.")
+    local scroll = vgui.Create("DScrollPanel", catalog)
+    scroll:Dock(FILL)
+    scroll:DockMargin(8, 0, 8, 8)
+    catalogLayout = vgui.Create("DIconLayout", scroll:GetCanvas())
+    catalogLayout:Dock(FILL)
+    catalogLayout:SetSpaceX(5)
+    catalogLayout:SetSpaceY(5)
+
+    BuildWeaponCatalog()
+    RebuildCatalog()
+
+    panel:TextEntry("Weapons / exact SWEP classes (comma-separated)", "tool_bzcn_inventory_giver_weapons")
+    panel:TextEntry("Lootable scripted item classes (comma-separated)", "tool_bzcn_inventory_giver_items")
+    panel:TextEntry("Reserve ammo: type:amount (comma-separated)", "tool_bzcn_inventory_giver_ammo")
+    panel:TextEntry("Attachment IDs (comma-separated)", "tool_bzcn_inventory_giver_attachments")
+    panel:TextEntry("Armor assignments: slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
+    panel:CheckBox("Auto-fill reserve ammo for configured weapons", "tool_bzcn_inventory_giver_autoammo")
+    panel:Help("Catalog choices add exact weapon classes. A configured loadout can contain many entries; the NPC shows only its currently selected weapon in hand.")
+    panel:Help("Legacy aliases like Pistol:9mm or Ammo:SMG1 are still accepted in the weapon field, but each alias resolves to one concrete SWEP.")
+    panel:Help("Examples — reserve ammo: Pistol:120,SMG1:90  ·  attachments: suppressor2,scope1  ·  armor: head=combine_helmet,torso=vest3")
+    panel:Help("Players keep unrelated physical weapons. Scripted item classes must already be registered; they are stored in the native loot inventory, not spawned into the NPC's hands.")
 end
 
 if SERVER then
