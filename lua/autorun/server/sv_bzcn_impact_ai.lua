@@ -127,8 +127,7 @@ local function AttachPhysicsImpact(ent)
             -- Thrown props and vehicles share the BZCN-only impact response.
             -- Only a hard impact (the existing 620 threshold) may request the
             -- separate NPC downed/ragdoll lifecycle; ordinary collisions just
-            -- update BZCNImpactState and the BZCNImpactShock/Pain netvars.
-            if sourceIsVehicle and speed < 420 then return end
+            -- update BZCNImpactState and its replicated impact readouts.
             ApplyImpact(target, data.HitPos, velocity, "prop", owner)
         end
     end)
