@@ -458,10 +458,21 @@ function FakeActor:UpdateWeaponAim(dt)
         and istable(solution) and isangle(solution.angle) and aimUntil > now
         and not (owner.BZCNDeathHandled or owner.BZCNNPCUnconscious)
     local firing = hasAim and (tonumber(owner.BZCNActorFiringUntil) or 0) > now or false
+    local shotAt = tonumber(owner.BZCNActorLastShotAt) or 0
+    if shotAt > (tonumber(self.lastWeaponShotAt) or 0) then
+        self.lastWeaponShotAt = shotAt
+        self.weaponRecoil = 1
+    end
+    self.weaponRecoil = math.max((tonumber(self.weaponRecoil) or 0) - math.max(tonumber(dt) or 0, 0) * 5.5, 0)
+    local reloading = hasWeapon and (tonumber(weapon.BZCNReloadUntil) or 0) > now
+    self.weaponReloading = reloading == true
 
     self.weaponAiming = hasAim == true
     self.weaponFiring = firing == true
-    if owner.SetNW2Bool then owner:SetNW2Bool("BZCNFakeFiring", self.weaponFiring) end
+    if owner.SetNW2Bool then
+        owner:SetNW2Bool("BZCNFakeFiring", self.weaponFiring)
+        owner:SetNW2Bool("BZCNFakeReloading", self.weaponReloading)
+    end
     if not hasAim then return end
 
     local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
@@ -475,8 +486,13 @@ function FakeActor:UpdateWeaponAim(dt)
     local basis = Angle(0, aim.y, 0)
     local forward, right = basis:Forward(), basis:Right()
     local center = spine:GetPos()
-    local pitch = math.Clamp(aim.p, -45, 45)
-    local weaponAngle = Angle(pitch, aim.y, 0)
+    -- Drive a brief visible recoil pulse on the physics arms as well as applying
+    -- the hand force below. The hidden owner animation alone cannot animate a
+    -- visible fake-ragdoll clone.
+    local recoil = math.Clamp(tonumber(self.weaponRecoil) or 0, 0, 1)
+    if firing then recoil = math.max(recoil, 0.35) end
+    local pitch = math.Clamp(aim.p - recoil * (pistol and 6 or 3.2), -45, 45)
+    local weaponAngle = Angle(pitch + (reloading and 12 or 0), aim.y, 0)
     weaponAngle:RotateAroundAxis(weaponAngle:Forward(), 90)
     weaponAngle:RotateAroundAxis(weaponAngle:Up(), 90)
     weaponAngle:RotateAroundAxis(weaponAngle:Forward(), pistol and 180 or 120)
@@ -489,12 +505,26 @@ function FakeActor:UpdateWeaponAim(dt)
         if arm.works then
             local side = arm.side
             local shoulder = center + forward * 3 + right * (side * 9) + Vector(0, 0, 7)
-            local wrist = center + forward * (pistol and 24 or 29)
-                + right * (side * (pistol and 5 or 8)) + Vector(0, 0, 1)
-            local elbow = LerpVector(0.52, shoulder, wrist) + right * (side * 7) - Vector(0, 0, 3)
+            local wrist
+            if reloading and side < 0 then
+                -- The support hand comes inward toward the receiver/magazine,
+                -- while the firing hand stays on the grip in a compact reload pose.
+                wrist = center + forward * 15 + right * 4 + Vector(0, 0, -3)
+            else
+                wrist = center + forward * (reloading and 19 or pistol and 24 or 29)
+                    + right * (side * (reloading and 5 or pistol and 5 or 8))
+                    + Vector(0, 0, reloading and -2 or 1)
+            end
+            local elbow = LerpVector(0.52, shoulder, wrist)
+                + right * (side * (reloading and 4 or 7))
+                - Vector(0, 0, reloading and 5 or 3)
             local upperAngle = Angle(weaponAngle.p, weaponAngle.y, side * (pistol and 4 or 10))
             upperAngle:RotateAroundAxis(upperAngle:Forward(), -45)
-            if not pistol and side < 0 then upperAngle:RotateAroundAxis(upperAngle:Up(), 15) end
+            if reloading and side < 0 then
+                upperAngle:RotateAroundAxis(upperAngle:Up(), -22)
+            elseif not pistol and side < 0 then
+                upperAngle:RotateAroundAxis(upperAngle:Up(), 15)
+            end
 
             self:ShadowBone(arm.upper, upperAngle, 0.12, 62 * power, 44,
                 shoulder, 72, 48)
