@@ -383,6 +383,52 @@ local function FindCombatTarget(driver, radius)
     return best
 end
 
+local function GetDrivingSocialKind(driver)
+    if not IsManaged(driver) then return nil end
+    local profile = driver.BZCNClassProfile or {}
+    if profile.FurryStyle == true or profile.HeadcrabStyle == true or profile.ZombieStyle == true then return nil end
+    local class = string.lower(tostring(driver.BZCNClass or driver.PlayerClassName or ""))
+    local faction = string.lower(tostring(profile.Faction or driver.BZCN_Faction or ""))
+    if class == "metrocop" or class == "police" then return "metrocop" end
+    if class == "rebel" or faction == "rebel" then return "rebel" end
+    if profile.CivilianStyle == true or class == "default" or class == "citizen"
+        or class == "civilian" or faction == "civilian" then return "civilian" end
+    return nil
+end
+
+local function IsDrivingSocialKindCompatible(driverKind, spotKind)
+    if driverKind == spotKind then return true end
+    if driverKind == "civilian" then return spotKind == "metrocop" or spotKind == "rebel" end
+    if driverKind == "metrocop" then return spotKind == "civilian" or spotKind == "rebel" end
+    if driverKind == "rebel" then return spotKind == "civilian" or spotKind == "metrocop" end
+    return false
+end
+
+local function FindDrivingHangout(vehicle, driver, driverKind)
+    local spots = BZCNTaskAI and BZCNTaskAI.HangoutSpots
+        or (BZCN and BZCN.SocialWorld and BZCN.SocialWorld.HangoutSpots)
+    if not istable(spots) or not IsValid(vehicle) then return nil end
+    local now = CurTime()
+    local candidates = {}
+    for _, spot in ipairs(spots) do
+        if not istable(spot) or not isvector(spot.pos)
+            or (tonumber(spot.expiresAt) or 0) <= now
+            or not IsDrivingSocialKindCompatible(driverKind, spot.kind) then continue end
+        local distance = vehicle:GetPos():Distance(spot.pos)
+        if distance < 450 or distance > 12000 then continue end
+        local popularity = math.Clamp(tonumber(spot.score) or 0, 0, 80)
+        local visits = math.min(tonumber(spot.visits) or 0, 60)
+        local friendVisits = math.min(tonumber(spot.friendVisits) or 0, 60)
+        candidates[#candidates + 1] = {
+            spot = spot,
+            score = distance - popularity * 22 - visits * 4 - friendVisits * 8
+        }
+    end
+    table.sort(candidates, function(a, b) return a.score < b.score end)
+    if #candidates == 0 then return nil end
+    return candidates[math.random(1, math.min(3, #candidates))].spot
+end
+
 -- Prefer authored Source road paths when the map provides them. path_track
 -- nodes follow GetNext(); path_corner nodes use their target keyvalue. Navmesh
 -- remains the fallback for maps without an authored vehicle route.
@@ -623,6 +669,80 @@ local function FindRoadNodeGoal(vehicle)
     end
     return best:GetPos()
 end
+-- Route toward the closest road node to a social hotspot using the configured
+-- BZCN road graph. If the graph is absent or disconnected, the caller uses a
+-- direct free-path goal instead of abandoning the social destination.
+local function FindSocialRoadGoal(vehicle, destination)
+    if not IsValid(vehicle) or not isvector(destination) then return nil end
+    local roads = BZCNRoads
+    local graph = istable(roads) and roads.Nodes or nil
+    if not istable(graph) or table.Count(graph) < 2 then return nil end
+
+    local function NodePos(node)
+        if not istable(node) then return nil end
+        if isvector(node.pos) then return node.pos end
+        if isnumber(node.x) and isnumber(node.y) and isnumber(node.z) then
+            return Vector(node.x, node.y, node.z)
+        end
+        return nil
+    end
+
+    local startID, startDistance, goalID, goalDistance
+    for id, node in pairs(graph) do
+        local pos = NodePos(node)
+        if pos then
+            local fromVehicle = pos:DistToSqr(vehicle:GetPos())
+            if fromVehicle < 1800 * 1800 and (not startDistance or fromVehicle < startDistance) then
+                startID, startDistance = id, fromVehicle
+            end
+            local fromGoal = pos:DistToSqr(destination)
+            if fromGoal < 1800 * 1800 and (not goalDistance or fromGoal < goalDistance) then
+                goalID, goalDistance = id, fromGoal
+            end
+        end
+    end
+    if not startID or not goalID then return nil end
+    if startID == goalID then return destination end
+
+    local queue, head, parent = {startID}, 1, {[startID] = false}
+    while head <= #queue and parent[goalID] == nil do
+        local id = queue[head]
+        head = head + 1
+        local node = graph[id]
+        for _, linkedID in ipairs(istable(node) and node.links or {}) do
+            if graph[linkedID] and parent[linkedID] == nil then
+                parent[linkedID] = id
+                queue[#queue + 1] = linkedID
+                if linkedID == goalID then break end
+            end
+        end
+    end
+    if parent[goalID] == nil then return nil end
+
+    local path = {}
+    local cursor = goalID
+    while cursor do
+        path[#path + 1] = cursor
+        cursor = parent[cursor]
+    end
+    for left = 1, math.floor(#path / 2) do
+        local right = #path - left + 1
+        path[left], path[right] = path[right], path[left]
+    end
+
+    local waypointID = path[math.min(2, #path)]
+    for index = 2, #path do
+        local pos = NodePos(graph[path[index]])
+        if pos and vehicle:GetPos():DistToSqr(pos) >= 230 * 230 then
+            waypointID = path[index]
+            break
+        end
+        if index < #path then waypointID = path[index + 1] end
+    end
+    local waypoint = NodePos(graph[waypointID])
+    return waypoint or destination
+end
+
 local function FindNavPoint(vehicle, minDist, maxDist)
     if not navmesh or not navmesh.GetAllNavAreas then return nil end
     local areas = navmesh.GetAllNavAreas()
@@ -815,12 +935,24 @@ end
 local function ReleaseVehicle(vehicle, reason, keepDowned)
     if not IsValid(vehicle) then return end
     SetControls(vehicle, 0, 0, 1)
+    local socialStop = reason == "npc_parked_and_left"
+        and istable(vehicle.BZCNGlideAISocialSpot) and vehicle.BZCNGlideAISocialSpot or nil
+    local function AssignSocialTask(npc)
+        if not IsValid(npc) or not istable(socialStop) then return false end
+        npc.BZCNCurrentHangout = socialStop
+        npc.BZCNCurrentTask = "meetup"
+        npc.BZCNTaskSelectedAt = CurTime()
+        npc.BZCNTaskUntil = CurTime() + math.Rand(28, 42)
+        if npc.SetNW2String then npc:SetNW2String("BZCNCurrentTask", "meetup") end
+        hook.Run("BZCN_NPCTaskSelected", npc, "meetup", ClassInfo(npc).faction)
+        return true
+    end
     local driver = vehicle.BZCNAIDriver
     if IsValid(driver) then
         UnseatNPC(driver, reason or "vehicle_release", keepDowned == true)
-        -- A completed, parked, or interrupted drive is one finished task.
-        -- Do not immediately re-claim another car from the same stale task lease.
-        if driver.BZCNCurrentTask == "drive" then
+        -- Drivers who parked at a social hotspot continue with the meetup task;
+        -- other interrupted drives get a short hold to prevent instant re-claiming.
+        if not AssignSocialTask(driver) and driver.BZCNCurrentTask == "drive" then
             driver.BZCNCurrentTask = "hold"
             driver.BZCNTaskUntil = CurTime() + math.Rand(8, 14)
             if driver.SetNW2String then driver:SetNW2String("BZCNCurrentTask", "hold") end
@@ -828,7 +960,10 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
         end
     end
     for _, passenger in ipairs(vehicle.BZCNAIPassengers or {}) do
-        if IsValid(passenger) then UnseatNPC(passenger, reason or "vehicle_release", keepDowned == true) end
+        if IsValid(passenger) then
+            UnseatNPC(passenger, reason or "vehicle_release", keepDowned == true)
+            AssignSocialTask(passenger)
+        end
     end
     vehicle.BZCNAIDriver = nil
     vehicle.BZCNAIPassengers = nil
@@ -849,6 +984,7 @@ local function ReleaseVehicle(vehicle, reason, keepDowned)
     vehicle.BZCNGlideAIBrake = nil
     vehicle.BZCNGlideRoadCurrentID = nil
     vehicle.BZCNGlideRoadNextID = nil
+    vehicle.BZCNGlideAISocialSpot = nil
 end
 
 -- Glide's native crash ejection only processes real Player occupants. Managed
@@ -1017,6 +1153,7 @@ local function BeginVehicleAI(vehicle, driver)
     vehicle.BZCNGlideAIParkWaitUntil = nil
     vehicle.BZCNGlideAIInterestTarget = nil
     vehicle.BZCNGlideAIInterestUntil = nil
+    vehicle.BZCNGlideAISocialSpot = nil
     vehicle.BZCNGlideAINextAvoidAt = 0
     vehicle.BZCNGlideAINextThink = 0
     vehicle.BZCNGlideAIPreviousVelocity = vehicle:GetVelocity()
@@ -1121,6 +1258,38 @@ local function UpdateVehicleAI(vehicle, now)
         vehicle.BZCNGlideAINextTargetAt = 0
     end
 
+    -- Peaceful human drivers seek familiar/social hotspots between incidents.
+    -- If a hotspot is reached, switch to the parking/exit behavior; otherwise
+    -- keep that destination until reached and route over linked road nodes when
+    -- possible. Furry/headcrab/zombie drivers never use human social goals.
+    local socialKind = GetDrivingSocialKind(driver)
+    local socialSpot = vehicle.BZCNGlideAISocialSpot
+    if socialKind and not IsValid(target) and not IsValid(interest)
+        and vehicle.BZCNGlideAIMode ~= "park_approach" then
+        local usableSpot = istable(socialSpot) and isvector(socialSpot.pos)
+            and (tonumber(socialSpot.expiresAt) or 0) > now
+        if usableSpot and vehicle:GetPos():DistToSqr(socialSpot.pos) <= 440 * 440 then
+            vehicle.BZCNGlideAIMode = "park_approach"
+            vehicle.BZCNGlideAITarget = FindParkingPoint(vehicle) or socialSpot.pos
+            vehicle.BZCNGlideAINextTargetAt = now + 60
+            vehicle.BZCNGlideAIParkWaitUntil = nil
+        elseif not usableSpot then
+            socialSpot = FindDrivingHangout(vehicle, driver, socialKind)
+            vehicle.BZCNGlideAISocialSpot = socialSpot
+            if istable(socialSpot) then
+                vehicle.BZCNGlideAIMode = "social_drive"
+                vehicle.BZCNGlideAITarget = nil
+                vehicle.BZCNGlideAINextTargetAt = 0
+            elseif vehicle.BZCNGlideAIMode == "social_drive" then
+                vehicle.BZCNGlideAIMode = "wander"
+                vehicle.BZCNGlideAITarget = nil
+                vehicle.BZCNGlideAINextTargetAt = 0
+            end
+        else
+            vehicle.BZCNGlideAIMode = "social_drive"
+        end
+    end
+
     -- Sample chassis velocity at the AI cadence. A sharp high-speed velocity
     -- change is a crash, not ordinary steering; eject the entire NPC crew into
     -- the same downed/fake-ragdoll system used by Z-City combat impacts.
@@ -1142,7 +1311,7 @@ local function UpdateVehicleAI(vehicle, now)
     vehicle.BZCNGlideAIPreviousVelocityAt = now
 
     local goal = vehicle.BZCNGlideAITarget
-    local parkMode = not info.combat and vehicle.BZCNGlideAIMode == "park_approach"
+    local parkMode = vehicle.BZCNGlideAIMode == "park_approach"
     if interest and not info.combat then
         local toInterest = interest:WorldSpaceCenter() - vehicle:GetPos()
         toInterest.z = 0
@@ -1230,6 +1399,11 @@ local function UpdateVehicleAI(vehicle, now)
             goal = target:GetPos()
         elseif parkMode then
             goal = FindParkingPoint(vehicle) or FindRoadNodeGoal(vehicle) or FindNavPoint(vehicle, 260, 850) or FindWanderGoal(vehicle)
+        elseif vehicle.BZCNGlideAIMode == "social_drive"
+            and istable(vehicle.BZCNGlideAISocialSpot)
+            and isvector(vehicle.BZCNGlideAISocialSpot.pos) then
+            local destination = vehicle.BZCNGlideAISocialSpot.pos
+            goal = FindSocialRoadGoal(vehicle, destination) or destination
         else
             goal = FindRoadNodeGoal(vehicle) or FindNavPoint(vehicle, 650, 2200)
             if not isvector(goal) then goal = FindWanderGoal(vehicle) end
@@ -1257,8 +1431,11 @@ local function UpdateVehicleAI(vehicle, now)
     local steer = math.Clamp(headingError / 52, -1, 1)
     local combat = vehicle.BZCNGlideAIMode == "combat"
     local socialApproach = IsValid(interest) and not combat
+    local socialDriving = vehicle.BZCNGlideAIMode == "social_drive" and not combat
     local parkingApproach = vehicle.BZCNGlideAIMode == "park_approach" and not combat
-    local cruiseSpeed = combat and COMBAT_SPEED or (socialApproach and 145 or parkingApproach and 165 or CIVILIAN_SPEED)
+    local cruiseSpeed = combat and COMBAT_SPEED
+        or socialApproach and 145 or socialDriving and 260
+        or parkingApproach and 165 or CIVILIAN_SPEED
 
     -- Turn-aware cruise control: reduce the target speed before the corner
     -- instead of reacting to steering with repeated throttle/brake toggles.
@@ -1342,8 +1519,18 @@ local function UpdateVehicleAI(vehicle, now)
     local previousThrottle = tonumber(vehicle.BZCNGlideAIThrottle)
     if previousThrottle == nil then previousThrottle = throttle end
     local previousBrake = tonumber(vehicle.BZCNGlideAIBrake) or 0
-    throttle = Lerp(controlAlpha, previousThrottle, throttle)
-    brake = Lerp(controlAlpha, previousBrake, brake)
+
+    -- Release a stale brake command much faster than applying one. Otherwise
+    -- the old brake remains above the simultaneous-pedal guard for many AI
+    -- ticks, holding accelerate near zero even after the road is clear.
+    local brakeAlpha = brake < previousBrake and 0.82 or controlAlpha
+    brake = Lerp(brakeAlpha, previousBrake, brake)
+    if brake < 0.025 then brake = 0 end
+    local throttleAlpha = controlAlpha
+    if previousThrottle < 0.16 and throttle > previousThrottle and brake <= 0.025 then
+        throttleAlpha = 0.82
+    end
+    throttle = Lerp(throttleAlpha, previousThrottle, throttle)
     if brake > 0.025 then throttle = math.min(throttle, 0.035) end
     vehicle.BZCNGlideAIThrottle = throttle
     vehicle.BZCNGlideAIBrake = brake
