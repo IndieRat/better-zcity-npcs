@@ -324,11 +324,12 @@ end)
 local function ApplyTacticalOrder(ply, gesture)
     if not IsValid(ply) or not ply:IsPlayer() or not ply:Alive() then return end
     local order, point
-    if gesture == "wave" or gesture == "beckon" then order = "follow"
+    if gesture == "wave" then order = "follow"
+    elseif gesture == "beckon" then order = "group"
     elseif gesture == "agree" or gesture == "thumbsup" then order = "hold"
-    elseif gesture == "salute" then order = "cover"
-    elseif gesture == "point" then
-        order = "investigate"
+    elseif gesture == "salute" or gesture == "halt" then order = "halt"
+    elseif gesture == "forward" or gesture == "point" then
+        order = "forward"
         local tr = ply:GetEyeTrace()
         point = tr and tr.HitPos or ply:GetPos() + ply:GetAimVector() * 300
     else return end
@@ -341,11 +342,14 @@ local function ApplyTacticalOrder(ply, gesture)
         local kind = LineKind(ent)
         if not companion and not friendly then continue end
         if companion then
-            SetOrder(ent, order, point)
-            Companion.Say(ent, order == "follow" and "greeting" or "mood", ply)
+            local companionOrder = order == "group" and "follow"
+                or order == "halt" and "hold"
+                or order == "forward" and "investigate" or order
+            SetOrder(ent, companionOrder, point)
+            Companion.Say(ent, companionOrder == "follow" and "greeting" or "mood", ply)
         elseif kind == "combine" or kind == "metrocop" then
             local leader = IsValid(ent.BZCNSquadLeader) and ent.BZCNSquadLeader or ent
-            local command = order == "follow" and "regroup" or order
+            local command = order == "follow" and "group" or order
             for _, member in ipairs(ents.FindInSphere(leader:GetPos(), 920)) do
                 if not Managed(member) then continue end
                 local memberKind = LineKind(member)
@@ -393,7 +397,7 @@ function Companion.RunSquadTask(ent)
     local point = ent.BZCNSquadCommandPos
     local leader = IsValid(ent.BZCNSquadLeader) and ent.BZCNSquadLeader or nil
 
-    if command == "hold" then
+    if command == "hold" or command == "halt" then
         ent.loco:SetDesiredSpeed(0)
         local face = IsValid(leader) and leader:GetPos()
             or (isvector(point) and point or ent:GetPos() + ent:GetForward() * 100)
@@ -402,7 +406,7 @@ function Companion.RunSquadTask(ent)
         return true
     end
 
-    if command == "regroup" or command == "follow" then
+    if command == "regroup" or command == "follow" or command == "group" then
         if IsValid(leader) and leader ~= ent then
             point = leader:GetPos() + Vector(math.Rand(-90, 90), math.Rand(-90, 90), 0)
         elseif not isvector(point) then
@@ -445,6 +449,34 @@ function Companion.RunSquadTask(ent)
         else
             ent.loco:SetDesiredSpeed(0)
             if IsValid(threat) then ent.loco:FaceTowards(threat:GetPos()) end
+        end
+        coroutine.wait(0.2)
+        return true
+    end
+
+    if command == "forward" then
+        -- Advance to the leader's marked point/last-known threat position.
+        if not isvector(point) and IsValid(leader) then point = leader.BZCNLastAimPoint end
+        if not isvector(point) then
+            local facing = IsValid(leader) and leader:GetForward() or ent:GetForward()
+            point = (IsValid(leader) and leader:GetPos() or ent:GetPos()) + facing * 320
+        end
+        point = Vector(point.x, point.y, point.z)
+        if ent:GetPos():DistToSqr(point) > 95 * 95 then
+            local path = Path("Follow")
+            path:SetMinLookAheadDistance(120)
+            path:SetGoalTolerance(60)
+            path:Compute(ent, point)
+            if path:IsValid() then
+                ent.loco:SetDesiredSpeed(speed * 0.82)
+                path:Update(ent)
+            elseif ent.TryBZCNClimb then
+                ent:TryBZCNClimb()
+            end
+        else
+            ent.loco:SetDesiredSpeed(0)
+            ent.BZCNSquadCommand = "halt"
+            ent.BZCNSquadCommandPos = point
         end
         coroutine.wait(0.2)
         return true
@@ -1052,18 +1084,65 @@ end
 
 hook.Add("BZCN_NPCGesture", "BZCN_CombineLeaderSignals", function(leader, gesture)
     if not IsCombineUnit(leader) or leader.BZCNSquadLeader ~= leader then return end
-    local order = gesture == "point" and "investigate"
-        or gesture == "salute" and "cover"
-        or (gesture == "agree" or gesture == "thumbsup") and "hold"
-        or (gesture == "beckon" or gesture == "wave") and "regroup" or nil
+    local order = (gesture == "halt" or gesture == "salute") and "halt"
+        or (gesture == "forward" or gesture == "point") and "forward"
+        or (gesture == "group" or gesture == "beckon" or gesture == "wave") and "group"
+        or (gesture == "agree" or gesture == "thumbsup") and "hold" or nil
     if not order then return end
+    local point = isvector(leader.BZCNLastAimPoint) and leader.BZCNLastAimPoint or nil
     for _, member in ipairs(ents.FindInSphere(leader:GetPos(), 920)) do
         if not IsCombineUnit(member) or member == leader or member.BZCNSquadLeader ~= leader then continue end
         member.BZCNSquadCommand = order
-        member.BZCNSquadCommandUntil = CurTime() + 15
-        member.BZCNSquadCommandPos = isvector(leader.BZCNLastAimPoint) and leader.BZCNLastAimPoint or nil
+        member.BZCNSquadCommandUntil = CurTime() + (order == "forward" and 9 or 15)
+        member.BZCNSquadCommandPos = point
         if member.SetNW2String then member:SetNW2String("BZCNSquadCommand", order) end
+        if isvector(point) and member.SetNW2Vector then member:SetNW2Vector("BZCNSquadCommandPos", point) end
     end
+end)
+
+-- In quiet moments, Combine fireteam members acknowledge their actual leader.
+-- Combat, recent damage, downed states and obstructed sight interrupt the ritual.
+timer.Create("BZCN_CombinePeacefulSalutes", 1.25, 0, function()
+    local now = CurTime()
+    for _, member in ipairs(ents.FindByClass("npc_bzcn_*")) do
+        if not Managed(member) or LineKind(member) ~= "combine" then continue end
+        local leader = member.BZCNSquadLeader
+        if not IsValid(leader) or leader == member or LineKind(leader) ~= "combine"
+            or leader.BZCNSquadLeader ~= leader then continue end
+        if now < (member.BZCNNextSquadSaluteAt or 0) then continue end
+        if IsValid(member.BZCNEnemy) or IsValid(member.BZCNCombatTarget)
+            or IsValid(leader.BZCNEnemy) or IsValid(leader.BZCNCombatTarget) then continue end
+        if now - (tonumber(member.BZCNLastDamageTime) or 0) < 10
+            or now - (tonumber(leader.BZCNLastDamageTime) or 0) < 10 then continue end
+        if member:GetPos():DistToSqr(leader:GetPos()) > 460 * 460 then continue end
+        if member:GetNW2Bool("BZCNNPCDowned", false)
+            or member:GetNW2Bool("BZCNNPCUnconscious", false) then continue end
+        local trace = util.TraceLine({
+            start = member:WorldSpaceCenter(), endpos = leader:WorldSpaceCenter(),
+            filter = {member, leader}, mask = MASK_VISIBLE
+        })
+        if trace.Hit and trace.Fraction < 0.98 then continue end
+        local social = BZCN.Social
+        if social and isfunction(social.PlayGesture) and social.PlayGesture(member, "salute") then
+            member.BZCNNextSquadSaluteAt = now + math.Rand(28, 48)
+        else
+            member.BZCNNextSquadSaluteAt = now + 6
+        end
+    end
+end)
+
+-- A leader's physical signal and squad order are issued together. The order is
+-- still published even on a model that lacks the requested gesture sequence.
+hook.Add("BZCN_SquadCombatOrder", "BZCN_CombatLeaderHandSignals", function(leader, members, target, position)
+    if not IsCombineUnit(leader) or leader.BZCNSquadLeader ~= leader then return end
+    if isvector(position) then
+        leader.BZCNLastAimPoint = position
+    elseif IsValid(target) then
+        leader.BZCNLastAimPoint = target:WorldSpaceCenter()
+    end
+    local social = BZCN.Social
+    if not social or not isfunction(social.PlayGesture) then return end
+    social.PlayGesture(leader, IsValid(target) and "forward" or "halt")
 end)
 
 hook.Add("BZCN_EntityDamaged", "BZCN_CompanionProtectOwner", function(victim, attacker)
