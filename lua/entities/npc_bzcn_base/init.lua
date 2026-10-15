@@ -1304,6 +1304,9 @@ function ENT:PlayBZCNAttackAnimation()
     -- For guns, request the model's actual ranged-fire gesture instead, so the
     -- legs/torso don't play an unrelated swipe while the engine bullet fires.
     if ranged then
+        -- Let each selected firing gesture play instead of restarting the overlay
+        -- on every combat decision tick or every very fast automatic shot.
+        if CurTime() < (self.BZCNRangedGestureUntil or 0) then return true end
         local className = self.GetBZCNAnimationClass and self:GetBZCNAnimationClass()
         local animationClass = className and hg and hg.IXAnims and hg.IXAnims[className]
         local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
@@ -1352,7 +1355,15 @@ function ENT:PlayBZCNAttackAnimation()
 
         if sequence >= 0 and isfunction(self.AddGestureSequence) then
             local ok = pcall(self.AddGestureSequence, self, sequence)
-            if ok then return true end
+            if ok then
+                local duration = 0.32
+                local durationOK, value = pcall(self.SequenceDuration, self, sequence)
+                if durationOK and isnumber(value) and value > 0 then
+                    duration = math.Clamp(value, 0.18, 0.72)
+                end
+                self.BZCNRangedGestureUntil = CurTime() + duration
+                return true
+            end
         end
 
         -- A model without a ranged gesture should hold its current pose rather
