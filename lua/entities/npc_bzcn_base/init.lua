@@ -1410,6 +1410,58 @@ function ENT:PlayBZCNAttackAnimation()
     return true
 end
 
+function ENT:PlayBZCNReloadAnimation(weapon)
+    if not IsValid(self) or CurTime() < (self.BZCNReloadGestureUntil or 0) then
+        return IsValid(self)
+    end
+
+    local profile = self:GetBZCNProfile()
+    local weaponClass = self.BZCN_SelectedWeapon
+        or (IsValid(weapon) and weapon:GetClass()) or profile.WeaponClass or ""
+    local modelClass = self.GetBZCNAnimationClass and self:GetBZCNAnimationClass()
+    local animationClass = modelClass and hg and hg.IXAnims and hg.IXAnims[modelClass]
+    local holdType = BZCNCombatActor and BZCNCombatActor.GetWeaponHoldType
+        and BZCNCombatActor.GetWeaponHoldType(self, weapon, weaponClass)
+        or string.lower(tostring(profile.AnimationHoldType or "smg"))
+    local translators = {physgun = "smg", ar2 = "smg", crossbow = "shotgun", revolver = "pistol", duel = "pistol"}
+    holdType = translators[holdType] or holdType
+
+    local animationSet = istable(animationClass)
+        and (animationClass[holdType] or animationClass.normal or animationClass) or nil
+    local configured = istable(animationSet)
+        and (animationSet.reload or animationSet.reload_empty or animationSet.reloadempty) or nil
+    local sequence = -1
+    if isnumber(configured) and isfunction(self.SelectWeightedSequence) then
+        local ok, selected = pcall(self.SelectWeightedSequence, self, configured)
+        if ok and isnumber(selected) and selected >= 0 then sequence = selected end
+    elseif isstring(configured) then
+        local ok, selected = pcall(self.LookupSequence, self, configured)
+        if ok and isnumber(selected) and selected >= 0 then sequence = selected end
+    end
+    if sequence < 0 then
+        sequence = self:FindSequence({
+            "reload_" .. holdType, "reload_smg1", "reload_pistol", "reload"
+        })
+    end
+    if sequence < 0 or not isfunction(self.AddGestureSequence) then return false end
+
+    local ok = pcall(self.AddGestureSequence, self, sequence)
+    if not ok then return false end
+    local duration = 0.8
+    local durationOK, value = pcall(self.SequenceDuration, self, sequence)
+    if durationOK and isnumber(value) and value > 0 then
+        duration = math.Clamp(value, 0.35, 1.8)
+    end
+    self.BZCNReloadGestureUntil = CurTime() + duration
+    return true
+end
+
+hook.Add("BZCN_NPCWeaponReload", "BZCN_PlayReloadGesture", function(ent, weapon)
+    if IsValid(ent) and isfunction(ent.PlayBZCNReloadAnimation) then
+        ent:PlayBZCNReloadAnimation(weapon)
+    end
+end)
+
 function ENT:PlayBZCNKickAnimation()
     for _, name in ipairs({
         "kick_pistol_base",
@@ -1595,22 +1647,21 @@ function ENT:AttackTarget(target)
         -- when a real shot is emitted by the runtime weapon adapter.
         self.LastAttack = now + 0.08
         local weapon = self.BZCNRuntimeWeapon
-        local fireReady = not (BZCNCombatActor and BZCNCombatActor.CanFire)
-            or BZCNCombatActor.CanFire(self, weapon)
-        -- Refresh the aim every combat tick, not only when the gun can
-        -- fire. Cooldown frames still need a valid NW2 aim angle for client TPIK.
+        -- Refresh aim every combat tick, not only when the gun can fire.
+        -- Cooldown frames still need a valid NW2 aim angle for client TPIK.
         if BZCNCombatActor and BZCNCombatActor.UpdateAim then
             BZCNCombatActor.UpdateAim(self, target, weapon)
-        end
-        if fireReady then
-            self:PlayBZCNAttackAnimation()
         end
 
         -- Homigrad weapons use their native PrimaryAttack -> PrimaryShoot ->
         -- FireBullet path. The combat actor controls aim/cadence, with a
         -- conservative stat-based fallback for unrelated SWEPs.
+        local previousShotAt = tonumber(self.BZCNActorLastShotAt) or 0
         if BZCN and isfunction(BZCN.FireRuntimeWeapon)
             and BZCN.FireRuntimeWeapon(self, target) then
+            if (tonumber(self.BZCNActorLastShotAt) or 0) ~= previousShotAt then
+                self:PlayBZCNAttackAnimation()
+            end
             hook.Run("BZCN_NPCFiredFakeWeapon", self, target, nil)
             return
         end
@@ -1620,6 +1671,8 @@ function ENT:AttackTarget(target)
         and BZCNCombatActor.GetTargetAimPoint(target)) or target:WorldSpaceCenter()
         local trace = util.TraceLine({start = source, endpos = destination, filter = {self}, mask = MASK_SHOT})
         self:EmitSound(profile.FireSound or "Weapon_SMG1.Single", 72, math.random(95, 105), 0.7)
+        self.BZCNActorLastShotAt = CurTime()
+        self:PlayBZCNAttackAnimation()
         local body = BZCNCombatActor and BZCNCombatActor.GetVisibleBody
             and BZCNCombatActor.GetVisibleBody(target) or target
         local hitTarget = trace.Entity == target or trace.Entity == body
