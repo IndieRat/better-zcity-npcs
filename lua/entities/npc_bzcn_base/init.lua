@@ -657,6 +657,34 @@ function ENT:HasRecentAllyThreat(target)
     return false
 end
 
+function ENT:RecordCombatGrudge(target, points, reason)
+    if not IsValid(target) or target == self or (target.IsWorld and target:IsWorld()) then return 0 end
+    local now = CurTime()
+    if not istable(self.BZCNCombatGrudges) then
+        self.BZCNCombatGrudges = setmetatable({}, {__mode = "k"})
+    end
+
+    local grudges = self.BZCNCombatGrudges
+    local entry = grudges[target]
+    if not istable(entry) then entry = {score = 0, lastAt = now} end
+    local score = math.max(tonumber(entry.score) or 0, 0)
+    if now - (tonumber(entry.lastAt) or now) > 45 then score = score * 0.45 end
+    entry.score = math.Clamp(score + math.Clamp(tonumber(points) or 0.75, 0, 2), 0, 8)
+    entry.lastAt = now
+    entry.untilAt = now + math.Clamp(75 + entry.score * 25, 90, 270)
+    entry.reason = reason or "hostile_incident"
+    grudges[target] = entry
+
+    -- A grudge is earned over repeated harm, not just by one stray hit. Once it
+    -- crosses the threshold it lasts long enough to affect a later encounter.
+    if entry.score >= 3 then
+        self.BZCNCombatGrudgeTarget = target
+        self.BZCNCombatGrudgeUntil = entry.untilAt
+        hook.Run("BZCN_NPCGrudgeChanged", self, target, entry.score, entry.reason)
+    end
+    return entry.score
+end
+
 function ENT:IsBZCNEnemy(target)
     if not IsValid(target) or target == self or target:Health() <= 0 then return false end
     local companionOwner = self.BZCNCompanionOwner
@@ -668,6 +696,13 @@ function ENT:IsBZCNEnemy(target)
         and self:GetBZCNEntityFaction(target) == "default" then return false end
     if BZCNCombatActor and BZCNCombatActor.IsIncapacitated
         and BZCNCombatActor.IsIncapacitated(target) then return false end
+
+    -- Repeated attacks can turn a neutral or former ally into a lasting enemy.
+    -- This is checked before forgiveness: helping someone once doesn't erase a
+    -- grudge that was earned by subsequent violence.
+    local grudge = self.BZCNCombatGrudges and self.BZCNCombatGrudges[target]
+    if istable(grudge) and (tonumber(grudge.untilAt) or 0) > CurTime()
+        and (tonumber(grudge.score) or 0) >= 3 then return true end
 
     -- A recent rescue can override the target's default faction hostility.
     local forgivenUntil = self.BZCNBefriendedPlayers and self.BZCNBefriendedPlayers[target]
@@ -2500,6 +2535,9 @@ function ENT:OnInjured(damageInfo)
     local attacker = damageInfo:GetAttacker()
     if IsValid(attacker) and attacker ~= self and not attacker:IsWorld() then
         self.BZCNLastAttacker = attacker
+        local damage = isfunction(damageInfo.GetDamage) and (tonumber(damageInfo:GetDamage()) or 0) or 0
+        local maximum = math.max(tonumber(self:GetMaxHealth()) or 100, 1)
+        self:RecordCombatGrudge(attacker, damage >= maximum * 0.18 and 1.2 or 0.75, "repeated_attacks")
         local profile = self:GetBZCNProfile()
         local faction = string.lower(tostring(profile.Faction or self.BZCN_Faction or ""))
         local className = string.lower(tostring(profile.ClassName or self.BZCNClass or ""))
