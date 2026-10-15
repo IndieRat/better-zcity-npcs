@@ -1107,13 +1107,69 @@ hook.Add("BZCN_EntityDamaged", "BZCN_CombatProneResponse", function(victim, atta
         "prone_aim", "prone_aim_smg1", "prone", "crouch_aim",
         "crouch_idle", "crouch_walk", "crouchwalk_all", "crouch_walk_smg1"
     })
-    if not isnumber(sequence) or sequence < 0 then return end
 
+    local now = CurTime()
+    local maximum = math.max(tonumber(victim:GetMaxHealth()) or 100, 1)
+    local healthFraction = math.Clamp(victim:Health() / maximum, 0, 1)
+    local damage = damageInfo and isfunction(damageInfo.GetDamage)
+        and (tonumber(damageInfo:GetDamage()) or 0) or 0
     local chance = kind == "combine" and 0.2 or kind == "rebel" and 0.32 or 0.22
+    if healthFraction < 0.55 then chance = chance + 0.18 end
+    if healthFraction < 0.3 then chance = chance + 0.18 end
+    if damage >= maximum * 0.18 then chance = chance + 0.12 end
+    chance = math.Clamp(chance, 0.12, 0.82)
     if math.Rand(0, 1) > chance then return end
+
+    -- Try to move behind real world/prop occlusion first. The trace is from the
+    -- attacker toward the candidate, so a blocked lane means the position can
+    -- actually break line of sight instead of merely moving a few units away.
+    local cover
+    if IsValid(attacker) and attacker ~= victim then
+        local away = victim:GetPos() - attacker:GetPos()
+        away.z = 0
+        if away:LengthSqr() < 1 then away = victim:GetForward() * -1 end
+        away:Normalize()
+        local angles = {0, 45, -45, 90, -90, 135, -135, 180}
+        for _, radius in ipairs({135, 205, 275}) do
+            for _, yaw in ipairs(angles) do
+                local direction = Vector(away.x, away.y, 0)
+                direction:Rotate(Angle(0, yaw, 0))
+                local candidate = NavPoint(victim, victim:GetPos() + direction * radius, 300)
+                local trace = util.TraceLine({
+                    start = attacker:WorldSpaceCenter(),
+                    endpos = candidate + Vector(0, 0, 42),
+                    filter = {attacker, victim},
+                    mask = MASK_VISIBLE
+                })
+                if trace.Hit and trace.Fraction < 0.96 then
+                    cover = candidate
+                    break
+                end
+            end
+            if isvector(cover) then break end
+        end
+        -- If the map has no usable occluder, reposition out of the current
+        -- firing lane; a valid prone/crouch sequence is the final fallback.
+        if not isvector(cover) then
+            local destination = victim:GetPos() + away * 185
+            cover = NavPoint(victim, destination, 300)
+        end
+    end
+
+    victim.BZCNCombatProneCooldownAt = now + math.Rand(5.5, 9.0)
+    if isvector(cover) then
+        victim.BZCNCombatCoverPos = cover
+        victim.BZCNCombatCoverThreat = IsValid(attacker) and attacker or nil
+        victim.BZCNCombatCoverUntil = now + math.Rand(1.7, 3.2)
+        if victim.SetNW2Vector then victim:SetNW2Vector("BZCNCombatCoverPos", cover) end
+        if victim.SetNW2Float then victim:SetNW2Float("BZCNCombatCoverUntil", victim.BZCNCombatCoverUntil) end
+        hook.Run("BZCN_NPCCombatCover", victim, attacker, cover, kind)
+        return
+    end
+
+    if not isnumber(sequence) or sequence < 0 then return end
     victim.BZCNCombatProneSequence = sequence
-    victim.BZCNCombatProneUntil = CurTime() + math.Rand(1.4, 2.8)
-    victim.BZCNCombatProneCooldownAt = CurTime() + math.Rand(5.5, 9.0)
+    victim.BZCNCombatProneUntil = now + math.Rand(1.4, 2.8)
     if victim.SetNW2Float then
         victim:SetNW2Float("BZCNCombatProneUntil", victim.BZCNCombatProneUntil)
     end
