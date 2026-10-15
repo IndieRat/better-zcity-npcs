@@ -3,7 +3,14 @@ TOOL.Name = "#tool.bzcn_inventory_giver.name"
 TOOL.Command = nil
 TOOL.ConfigName = ""
 TOOL.ClientConVar = {
+    -- Keep the original CSV field for hand-edited/legacy configurations, while
+    -- giving catalog-selected weapons independent tool convars. This avoids a
+    -- single DTextEntry/convar becoming the bottleneck for multi-entry loadouts.
     weapons = "weapon_hands_sh",
+    weapon1 = "", weapon2 = "", weapon3 = "", weapon4 = "",
+    weapon5 = "", weapon6 = "", weapon7 = "", weapon8 = "",
+    weapon9 = "", weapon10 = "", weapon11 = "", weapon12 = "",
+    weapon13 = "", weapon14 = "", weapon15 = "", weapon16 = "",
     items = "",
     ammo = "",
     attachments = "",
@@ -42,6 +49,11 @@ if CLIENT then
         local attachmentsText = net.ReadString() or ""
         local armorText = net.ReadString() or ""
 
+        -- Imported snapshots use the legacy CSV field. Clear the separate
+        -- catalog slots so old slot contents cannot silently add unrelated items.
+        for slot = 1, 16 do
+            RunConsoleCommand("tool_bzcn_inventory_giver_weapon" .. slot, "")
+        end
         RunConsoleCommand("tool_bzcn_inventory_giver_weapons", weaponsText)
         RunConsoleCommand("tool_bzcn_inventory_giver_items", itemsText)
         RunConsoleCommand("tool_bzcn_inventory_giver_ammo", ammoText)
@@ -189,7 +201,24 @@ local function ParseConfiguredInventory(tool)
     local rejectedWeapons = {}
     local explicitAmmo = {}
 
-    for _, configured in ipairs(SplitList(tool:GetClientInfo("weapons"), 64)) do
+    local configuredWeapons, configuredSeen = {}, {}
+    local function AddConfiguredWeaponText(text, limit)
+        for _, configured in ipairs(SplitList(text, limit or 64)) do
+            local normalized = string.lower(configured)
+            if not configuredSeen[normalized] and #configuredWeapons < 64 then
+                configuredSeen[normalized] = true
+                configuredWeapons[#configuredWeapons + 1] = configured
+            end
+        end
+    end
+
+    -- Backward-compatible CSV field plus one independent class per catalog slot.
+    AddConfiguredWeaponText(tool:GetClientInfo("weapons"), 64)
+    for slot = 1, 16 do
+        AddConfiguredWeaponText(tool:GetClientInfo("weapon" .. slot), 16)
+    end
+
+    for _, configured in ipairs(configuredWeapons) do
         -- Resolve family aliases before validation, ammo calculation, inventory
         -- publication, or active-weapon selection. The stored key is always a
         -- real registered SWEP class, never the display alias.
@@ -520,10 +549,26 @@ function TOOL:LeftClick(trace)
     end
 
     local inventory, rejected = ParseConfiguredInventory(self)
+    local configuredEntries = table.Count(inventory.Weapons or {})
     WriteInventory(target, inventory)
-    local entriesApplied = table.Count(inventory.Weapons or {})
+
+    -- Report the table the NPC/player can actually read after all weapon
+    -- selection and runtime-SWEP callbacks have run, not only the input table.
+    local appliedInventory = inventory
+    if BZCN and isfunction(BZCN.GetNetVar) and BZCN.IsManaged
+        and BZCN.IsManaged(target) then
+        local stored = BZCN.GetNetVar(target, "Inventory", nil)
+        if istable(stored) then appliedInventory = stored end
+    elseif isfunction(target.GetNetVar) then
+        local ok, stored = pcall(target.GetNetVar, target, "Inventory", nil)
+        if ok and istable(stored) then appliedInventory = stored end
+    else
+        appliedInventory = target.inventory or target.Inventory or inventory
+    end
+    local entriesApplied = table.Count(istable(appliedInventory.Weapons) and appliedInventory.Weapons or {})
     local resultText = "[BZCN] Loadout applied to " .. target:Nick()
-        .. " (" .. tostring(entriesApplied) .. " inventory entries)."
+        .. " (" .. tostring(entriesApplied) .. "/" .. tostring(configuredEntries)
+        .. " configured inventory entries remain stored)."
     if BZCN and BZCN.IsManaged and BZCN.IsManaged(target) then
         resultText = resultText .. " The NPC holds one selected weapon at a time; the remaining entries stay in its inventory."
     end
@@ -780,20 +825,46 @@ function TOOL.BuildCPanel(panel)
         local entries = SplitList(current and current:GetString() or "", 64)
         local seen = {}
         for _, entry in ipairs(entries) do seen[string.lower(entry)] = true end
-        local added = 0
+
+        local slots, emptySlots = {}, {}
+        for slot = 1, 16 do
+            local slotName = "tool_bzcn_inventory_giver_weapon" .. slot
+            local variable = GetConVar(slotName)
+            local value = variable and string.Trim(variable:GetString() or "") or ""
+            slots[slot] = value
+            if value == "" then emptySlots[#emptySlots + 1] = slot end
+            for _, entry in ipairs(SplitList(value, 16)) do seen[string.lower(entry)] = true end
+        end
+
+        local added, slotCursor = 0, 1
         local classes = {}
         for class in pairs(selectedWeapons) do classes[#classes + 1] = class end
         table.sort(classes)
         for _, class in ipairs(classes) do
-            if not seen[string.lower(class)] and #entries < 64 then
-                entries[#entries + 1] = class
-                seen[string.lower(class)] = true
-                added = added + 1
+            local key = string.lower(class)
+            if not seen[key] then
+                local slot = emptySlots[slotCursor]
+                if slot then
+                    slots[slot] = class
+                    slotCursor = slotCursor + 1
+                    seen[key] = true
+                    added = added + 1
+                elseif #entries < 64 then
+                    -- Overflow remains supported through the legacy CSV field.
+                    entries[#entries + 1] = class
+                    seen[key] = true
+                    added = added + 1
+                end
             end
+        end
+
+        for slot = 1, 16 do
+            RunConsoleCommand("tool_bzcn_inventory_giver_weapon" .. slot, slots[slot] or "")
         end
         RunConsoleCommand(convarName, table.concat(entries, ","))
         if added > 0 then
-            chat.AddText(Color(125, 220, 175), "[BZCN] Added " .. tostring(added) .. " weapon(s) to the loadout.")
+            chat.AddText(Color(125, 220, 175), "[BZCN] Added " .. tostring(added)
+                .. " weapon(s) to individual loadout slots.")
         else
             surface.PlaySound("buttons/button10.wav")
         end
@@ -815,7 +886,7 @@ function TOOL.BuildCPanel(panel)
     panel:TextEntry("Attachment IDs (comma-separated)", "tool_bzcn_inventory_giver_attachments")
     panel:TextEntry("Armor assignments: slot=item (comma-separated)", "tool_bzcn_inventory_giver_armor")
     panel:CheckBox("Auto-fill reserve ammo for configured weapons", "tool_bzcn_inventory_giver_autoammo")
-    panel:Help("Catalog choices add exact weapon classes. A configured loadout can contain many entries; the NPC shows only its currently selected weapon in hand.")
+    panel:Help("Each catalog choice is stored in its own weapon slot (16 independent slots); the CSV field remains supported for legacy/manual loadouts. The NPC shows only its currently selected weapon in hand.")
     panel:Help("Legacy aliases like Pistol:9mm or Ammo:SMG1 are still accepted in the weapon field, but each alias resolves to one concrete SWEP.")
     panel:Help("Examples — reserve ammo: Pistol:120,SMG1:90  ·  attachments: suppressor2,scope1  ·  armor: head=combine_helmet,torso=vest3")
     panel:Help("Players keep unrelated physical weapons. Scripted item classes must already be registered; they are stored in the native loot inventory, not spawned into the NPC's hands.")
