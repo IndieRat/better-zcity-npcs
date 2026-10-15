@@ -89,7 +89,7 @@ local function ThinkPresentation()
         if not IsManaged(ent) then continue end
         local weapon = RuntimeWeapon(ent)
         if IsValid(weapon) then
-            if weapon.BZCNNativeFireWasCalled and not weapon.BZCNPresentationFireSeen then
+            if weapon.BZCNNativeFireSucceeded and not weapon.BZCNPresentationFireSeen then
                 weapon.BZCNPresentationFireSeen = true
                 BRIDGE.OnWeaponFired(ent, weapon)
             elseif not weapon.BZCNNativeFireWasCalled then
