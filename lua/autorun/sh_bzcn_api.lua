@@ -179,6 +179,8 @@ BZCN.RegisterClass("default", {
     Faction = "civilian", EnemyPlayers = false, EnemyFactions = {},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1200, HelpMemory = 10,
     CivilianStyle = true, MoodSystem = true, RareGunChance = 0.12,
+    ExtraConsumableChance = 0.42,
+    ExtraConsumables = {"weapon_painkillers", "weapon_naloxone", "weapon_tourniquet", "weapon_bigbandage_sh"},
     AnimationClass = nil, AnimationHoldType = "normal", Ranged = false, WeaponDamage = 9, WeaponRange = 950, AttackDelay = 0.55,
     MedicalRange = 320, WeaponClass = "weapon_hands_sh",
     Inventory = {Weapons = {weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true}, Items = {}, Armor = {}}
@@ -192,8 +194,10 @@ BZCN.RegisterClass("Combine", {
     Faction = "Combine", EnemyPlayers = true, EnemyFactions = {"default", "Rebel", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1100, FollowDistance = 175, HelpRange = 1400, HelpMemory = 10,
     CanScavengeWeapons = true, AnimationClass = "overwatch", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 12, WeaponRange = 1400, AttackDelay = 0.32,
-    MedicalRange = 300, WeaponClass = "weapon_mp7", WeaponModel = "models/weapons/w_smg_mp5.mdl",
-    Inventory = {Weapons = {weapon_mp7 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {head = "combine_helmet"}}
+    MedicalRange = 300, WeaponClass = "Ammo:SMG1",
+    -- Use the same randomized family alias for both the default weapon and
+    -- the inventory entry. The resolved SWEP supplies its own world model.
+    Inventory = {Weapons = {["Ammo:SMG1"] = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {head = "combine_helmet"}}
 })
 
 -- Z-City has a separate Metrocop player class, but it belongs to the same
@@ -225,8 +229,8 @@ BZCN.RegisterClass("Rebel", {
     Faction = "Rebel", EnemyPlayers = false, EnemyFactions = {"Combine", "furry", "zombie"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1300, HelpMemory = 10,
     AnimationClass = "citizen_male", AnimationHoldType = "smg", Ranged = true, WeaponDamage = 10, WeaponRange = 1200, AttackDelay = 0.38,
-    MedicalRange = 320, CanScavengeWeapons = true, WeaponClass = "weapon_ak74", WeaponModel = "models/weapons/w_rif_ak47.mdl",
-    Inventory = {Weapons = {weapon_ak74 = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {}}
+    MedicalRange = 320, CanScavengeWeapons = true, WeaponClass = "Ammo:AR2",
+    Inventory = {Weapons = {["Ammo:AR2"] = true, weapon_hands_sh = true, weapon_medkit_sh = true, weapon_bandage_sh = true, weapon_adrenaline = true, weapon_bloodbag = true}, Items = {}, Armor = {}}
 })
 
 -- Model and claw model checked against Z-City's own furry class. Its player-only
@@ -257,6 +261,8 @@ BZCN.RegisterClass("civilian_companion", {
     -- make them intervene when someone nearby is actually attacked.
     Faction = "civilian", EnemyPlayers = false, EnemyFactions = {},
     Companion = true, CivilianStyle = true, MoodSystem = true, RareGunChance = 0.08,
+    ExtraConsumableChance = 0.38,
+    ExtraConsumables = {"weapon_painkillers", "weapon_naloxone", "weapon_tourniquet", "weapon_bigbandage_sh"},
     FollowAllies = true, FollowRange = 2400, FollowDistance = 130, HelpRange = 1800, HelpMemory = 15,
     AnimationClass = "citizen_male", AnimationHoldType = "normal", Ranged = false,
     WeaponDamage = 8, WeaponRange = 900, AttackDelay = 0.55, MedicalRange = 420,
@@ -435,8 +441,9 @@ function BZCN.ResolveInventoryWeaponAlias(alias)
             end
         end
         table.sort(candidates)
-        -- Stable resolution keeps profile WeaponClass and Inventory.Weapons in sync.
-        if #candidates > 0 then return candidates[1] end
+        -- Randomize after sorting so the pool is reproducible for debugging,
+        -- but never bias every NPC toward the alphabetically first SWEP.
+        if #candidates > 0 then return candidates[math.random(#candidates)] end
         return nil
     end
 
@@ -453,7 +460,7 @@ function BZCN.ResolveInventoryWeaponAlias(alias)
             end
         end
         table.sort(candidates)
-        if #candidates > 0 then return candidates[1] end
+        if #candidates > 0 then return candidates[math.random(#candidates)] end
     end
     return nil
 end
@@ -1006,6 +1013,38 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     local definition = BZCN.GetClass(className)
     if not definition then return false end
     local profile = CopyTable(definition)
+
+    -- Resolve each alias once for this NPC, then reuse that exact result in
+    -- both WeaponClass and Inventory.Weapons. Resolving each field separately
+    -- could otherwise choose different random members of the same weapon pool.
+    local resolvedLoadoutAliases = {}
+    local function ResolveLoadoutAlias(class)
+        if not isstring(class) then return nil end
+        if resolvedLoadoutAliases[class] ~= nil then
+            return resolvedLoadoutAliases[class] ~= false and resolvedLoadoutAliases[class] or nil
+        end
+        local resolved = BZCN.ResolveInventoryWeaponAlias
+            and BZCN.ResolveInventoryWeaponAlias(class) or nil
+        resolvedLoadoutAliases[class] = resolved or false
+        return resolved
+    end
+    profile.WeaponClass = ResolveLoadoutAlias(profile.WeaponClass) or profile.WeaponClass
+    if istable(profile.Inventory) and istable(profile.Inventory.Weapons) then
+        local configuredWeapons = profile.Inventory.Weapons
+        for class, value in pairs(table.Copy(configuredWeapons)) do
+            local resolved = ResolveLoadoutAlias(class)
+            if resolved then
+                configuredWeapons[class] = nil
+                if configuredWeapons[resolved] == nil then configuredWeapons[resolved] = value end
+            end
+        end
+    end
+    if istable(profile.WeaponChoices) then
+        for index, class in ipairs(profile.WeaponChoices) do
+            profile.WeaponChoices[index] = ResolveLoadoutAlias(class) or class
+        end
+    end
+
     BZCN.InstallAdapter(ent)
 
     ent.BZCNManaged = true
