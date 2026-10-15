@@ -1316,27 +1316,61 @@ for _, className in ipairs({"default", "Combine", "Metrocop", "Rebel", "civilian
     end
 end
 
+local function IsHomigradWeaponClass(class)
+    local current, seen = class, {}
+    for _ = 1, 12 do
+        if not isstring(current) or current == "" or seen[current] then return false end
+        if current == "homigrad_base" then return true end
+        seen[current] = true
+        local definition = weapons and weapons.GetStored and weapons.GetStored(current)
+        if not istable(definition) then return false end
+        if definition.ishgwep == true then return true end
+        current = definition.Base
+    end
+    return false
+end
+
+local function IsUsableWeaponModel(model)
+    return isstring(model) and model ~= "" and string.EndsWith(string.lower(model), ".mdl")
+        and (not util.IsValidModel or util.IsValidModel(model))
+end
+
 function BZCN.GetWeaponModel(ent, weaponClass)
     if not IsValid(ent) then return nil end
     local profile = ent.BZCNClassProfile or BZCN.GetClass(ent.BZCNClass or ent.PlayerClassName)
-    weaponClass = weaponClass or ent.BZCN_SelectedWeapon
+    local runtime = IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon or nil
+
+    -- The runtime SWEP is the source of truth. A stale selected/NW class can
+    -- survive an inventory switch for a frame and otherwise display the prior gun.
+    weaponClass = (runtime and runtime:GetClass()) or weaponClass or ent.BZCN_SelectedWeapon
         or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
 
-    -- A profile override is appropriate only while its configured weapon is
-    -- selected. Otherwise use the selected Z-City SWEP's real world model
-    -- (medkits/bandages included), rather than continuing to show the old gun.
-    if profile and isstring(profile.WeaponModel) and profile.WeaponModel ~= ""
-        and (not weaponClass or weaponClass == "" or weaponClass == profile.WeaponClass) then
+    -- Profile art is only valid for that exact configured weapon, never as a
+    -- fallback for an unrelated SWEP (for example a medkit after a rifle).
+    if profile and IsUsableWeaponModel(profile.WeaponModel)
+        and weaponClass == profile.WeaponClass then
         return profile.WeaponModel
     end
     if not isstring(weaponClass) or weaponClass == "" then return nil end
-    local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local model = istable(stored) and stored.WorldModel or nil
-    if istable(stored) and isfunction(stored.GetWeaponWorldModel) then
-        local ok, result = pcall(stored.GetWeaponWorldModel, stored)
-        if ok and isstring(result) and result ~= "" then model = result end
+
+    local stored = (runtime and runtime:GetClass() == weaponClass and runtime)
+        or (weapons and weapons.GetStored and weapons.GetStored(weaponClass))
+    if not istable(stored) then return nil end
+
+    -- Homigrad/Z-City weapons often inherit a generic Source WorldModel while
+    -- WorldModelFake names the weapon's actual Z-City presentation model.
+    -- Prefer that model for Homigrad weapons, but fall back safely when absent.
+    if IsHomigradWeaponClass(weaponClass) then
+        local fakeModel = stored.WorldModelFake
+        if IsUsableWeaponModel(fakeModel) then return fakeModel end
     end
-    if isstring(model) and model ~= "" and string.EndsWith(string.lower(model), ".mdl") then return model end
+
+    local model = stored.WorldModel
+    if isfunction(stored.GetWeaponWorldModel) then
+        local ok, result = pcall(stored.GetWeaponWorldModel, stored)
+        if ok and IsUsableWeaponModel(result) then model = result end
+    end
+    if IsUsableWeaponModel(model) then return model end
     return nil
 end
 
@@ -1537,7 +1571,8 @@ if SERVER then
         end
         proxy:SetNoDraw(false)
 
-        local weaponClass = ent.BZCN_SelectedWeapon
+        local runtime = IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon or nil
+        local weaponClass = (runtime and runtime:GetClass()) or ent.BZCN_SelectedWeapon
             or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
         local runtime = isentity(ent.BZCNRuntimeWeapon) and IsValid(ent.BZCNRuntimeWeapon)
             and ent.BZCNRuntimeWeapon or nil
