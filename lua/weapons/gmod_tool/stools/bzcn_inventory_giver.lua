@@ -881,14 +881,6 @@ function TOOL.BuildCPanel(panel)
         end
     end
 
-    local scroll = vgui.Create("DScrollPanel", catalog)
-    scroll:Dock(FILL)
-    scroll:DockMargin(8, 0, 8, 8)
-    catalogLayout = vgui.Create("DIconLayout", scroll:GetCanvas())
-    catalogLayout:Dock(FILL)
-    catalogLayout:SetSpaceX(5)
-    catalogLayout:SetSpaceY(5)
-
     local clearStoredLoadout = vgui.Create("DButton", catalog)
     clearStoredLoadout:Dock(TOP)
     clearStoredLoadout:DockMargin(10, 0, 10, 6)
@@ -901,6 +893,15 @@ function TOOL.BuildCPanel(panel)
         end
         chat.AddText(Color(220, 190, 130), "[BZCN] Cleared the configured weapon list. Select weapons again to rebuild it.")
     end
+
+    local scroll = vgui.Create("DScrollPanel", catalog)
+    scroll:Dock(FILL)
+    scroll:DockMargin(8, 0, 8, 8)
+    catalogLayout = vgui.Create("DIconLayout", scroll:GetCanvas())
+    catalogLayout:Dock(FILL)
+    catalogLayout:SetSpaceX(5)
+    catalogLayout:SetSpaceY(5)
+
     catalog:SetTall(338)
 
     RebuildCatalog()
