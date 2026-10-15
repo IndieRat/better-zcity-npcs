@@ -1121,6 +1121,14 @@ local function BeginVehicleAI(vehicle, driver)
     local info = ClassInfo(driver)
     if not info.civilian and not info.combat then return false end
 
+    -- Start the engine while the driver walks to the door. Starting only
+    -- after the seated fake is built adds the entire Glide crank delay to the
+    -- first movement, making the NPC appear to hesitate before using the gas.
+    local engineState = isfunction(vehicle.GetEngineState) and vehicle:GetEngineState() or nil
+    if (engineState == 0 or engineState == 3) and isfunction(vehicle.TurnOn) then
+        pcall(vehicle.TurnOn, vehicle)
+    end
+
     -- Walking to the vehicle is part of boarding; never snap a distant NPC into a seat.
     local distanceSqr = driver:GetPos():DistToSqr(seat:GetPos())
     if distanceSqr > 105 * 105 then
