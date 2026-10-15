@@ -2611,6 +2611,30 @@ end
 function ENT:OnKilled(damageInfo)
     if self.BZCNDeathHandled then return end
     self.BZCNDeathHandled = true
+
+    -- Losing a squadmate deepens nearby allies' grievance toward the killer.
+    -- The killer must already be hostile to each witness; accidents and friendly
+    -- fire do not manufacture an enemy out of a friendly faction member.
+    local killer = damageInfo and isfunction(damageInfo.GetAttacker)
+        and damageInfo:GetAttacker() or nil
+    if IsValid(killer) and killer ~= self and not killer:IsWorld() and self.GetBZCNProfile then
+        local victimProfile = self:GetBZCNProfile()
+        local victimFaction = CanonicalFaction(victimProfile.Faction or self.BZCN_Faction)
+        if victimFaction then
+            for _, ally in ipairs(ents.FindInSphere(self:GetPos(), 850)) do
+                if ally == self or not IsValid(ally) or not BZCN.IsManaged(ally)
+                    or not isfunction(ally.RecordCombatGrudge) or not isfunction(ally.IsBZCNEnemy) then continue end
+                local allyProfile = ally.BZCNClassProfile or {}
+                local allyFaction = CanonicalFaction(allyProfile.Faction or ally.BZCN_Faction)
+                if allyFaction ~= victimFaction then continue end
+                local ok, hostile = pcall(ally.IsBZCNEnemy, ally, killer)
+                if ok and hostile == true then
+                    ally:RecordCombatGrudge(killer, 2.3, "squadmate_killed")
+                end
+            end
+        end
+    end
+
     self:SetHealth(0)
     if BZCN and isfunction(BZCN.StopFurryAssimilation) then
         BZCN.StopFurryAssimilation(self)
