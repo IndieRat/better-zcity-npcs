@@ -1633,7 +1633,8 @@ if SERVER then
         -- A headcrab has no hands to hold the base hands SWEP world model.
         -- Keep the real hidden melee adapter, but never draw a floating weapon proxy.
         if profile.HeadcrabStyle == true then return end
-        local weaponClass = ent.BZCN_SelectedWeapon
+        local runtime = IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon or nil
+        local weaponClass = (runtime and runtime:GetClass()) or ent.BZCN_SelectedWeapon
             or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
         local model = BZCN.GetWeaponModel(ent, weaponClass)
         if not isstring(model) or model == "" then return end
