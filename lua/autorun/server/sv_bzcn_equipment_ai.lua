@@ -893,48 +893,76 @@ function BZCN.AttackRuntimeMelee(ent, target, trace)
     if not IsValid(ent) or not IsValid(target) or not BZCN.IsManaged(ent) then return false end
     local selectedClass = ent.BZCN_SelectedWeapon
         or (ent.BZCNClassProfile and ent.BZCNClassProfile.WeaponClass)
-    -- weapon_hands_sh is Player-oriented: its PrimaryAttack may simply raise
-    -- fists and its real hit test depends on Player aim state. Do not call that
-    -- path from a NextBot; the caller already supplied a validated trace.
-    if selectedClass ~= "weapon_hands_sh" then return false end
+    -- weapon_hands_sh and many Z-City melee SWEPs are Player-oriented: their
+    -- PrimaryAttack relies on Player input/viewmodel state. Bridge their authored
+    -- reach/damage/sound metadata against the already validated NPC contact trace
+    -- instead of invoking an unsafe Player-only attack function.
+    local handsWeapon = selectedClass == "weapon_hands_sh"
+    local stored = isstring(selectedClass) and GetStored(selectedClass) or nil
+    local primaryDef = istable(stored) and istable(stored.Primary) and stored.Primary or {}
+    local holdType = string.lower(tostring((stored and (stored.HoldType or stored.holdtype)) or ""))
+    local classLower = string.lower(tostring(selectedClass or ""))
+    local namedMelee = string.find(classLower, "knife", 1, true)
+        or string.find(classLower, "crowbar", 1, true)
+        or string.find(classLower, "melee", 1, true)
+        or string.find(classLower, "machete", 1, true)
+        or string.find(classLower, "bat", 1, true)
+        or string.find(classLower, "axe", 1, true)
+    local noAmmo = not isstring(primaryDef.Ammo) or primaryDef.Ammo == ""
+        or string.lower(primaryDef.Ammo) == "none"
+    if not handsWeapon and not (holdType == "melee" or namedMelee) then return false end
     if not istable(trace) or not trace.Hit or not IsValid(trace.Entity) then return true end
 
     local profile = ent.BZCNClassProfile or {}
-    local distance = ent:WorldSpaceCenter():Distance(target:WorldSpaceCenter())
     local weapon = ent.BZCNRuntimeWeapon
-    if not IsValid(weapon) or weapon:GetClass() ~= "weapon_hands_sh" then
-        weapon = ConfigureWeaponEntity(ent, "weapon_hands_sh", "BZCNRuntimeWeapon")
+    if not IsValid(weapon) or weapon:GetClass() ~= selectedClass then
+        weapon = ConfigureWeaponEntity(ent, selectedClass, "BZCNRuntimeWeapon")
     end
     if not IsValid(weapon) then return false end
 
-    local reach = math.min(tonumber(weapon.ReachDistance) or 40, 40)
+    local primary = istable(weapon.Primary) and weapon.Primary or primaryDef
+    local reach = tonumber(weapon.ReachDistance) or tonumber(weapon.Range)
+        or tonumber(primary.Range) or tonumber(primary.Reach) or tonumber(profile.MeleeRange) or 48
+    reach = math.Clamp(reach, 24, 110)
     local tracePoint = isvector(trace.HitPos) and trace.HitPos or target:WorldSpaceCenter()
     local handOrigin = isfunction(ent.EyePos) and ent:EyePos() or ent:WorldSpaceCenter()
-    -- A fake-ragdolled target's hidden owner origin can be metres away from the
-    -- arm that was actually hit. Validate reach against the traced hand contact,
-    -- not the hidden living entity's center.
     if not isvector(tracePoint) or not isvector(handOrigin)
-        or handOrigin:Distance(tracePoint) > reach + 3 then return true end
+        or handOrigin:Distance(tracePoint) > reach + 8 then return true end
     PlaceRuntimeWeapon(ent, weapon)
-    if isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, true) end
-    timer.Simple(0.35, function()
-        if IsValid(ent) and not ent.BZCNFurryGrab and IsValid(weapon)
-            and isfunction(weapon.SetFists) then
-            pcall(weapon.SetFists, weapon, false)
-        end
-    end)
+    if handsWeapon and isfunction(weapon.SetFists) then
+        pcall(weapon.SetFists, weapon, true)
+        timer.Simple(0.35, function()
+            if IsValid(ent) and not ent.BZCNFurryGrab and IsValid(weapon)
+                and isfunction(weapon.SetFists) then pcall(weapon.SetFists, weapon, false) end
+        end)
+    end
 
     local source = ent:WorldSpaceCenter()
     local destination = target:WorldSpaceCenter()
+    local rawDamage = tonumber(primary.Damage) or tonumber(primary.DamagePrimary)
+        or tonumber(weapon.DamagePrimary) or tonumber(profile.MeleeDamage) or 10
     local damage = DamageInfo()
     damage:SetAttacker(ent)
     damage:SetInflictor(weapon)
-    damage:SetDamage(math.Clamp(tonumber(profile.MeleeDamage) or tonumber(weapon.DamagePrimary) or 10, 1, 250))
-    damage:SetDamageType(profile.FurryStyle and DMG_SLASH or DMG_CLUB)
+    damage:SetDamage(math.Clamp(rawDamage, 1, 250))
+    local damageType = tonumber(primary.DamageType)
+    if damageType then
+        damage:SetDamageType(damageType)
+    else
+        damage:SetDamageType((profile.FurryStyle or string.find(classLower, "knife", 1, true)
+            or string.find(classLower, "machete", 1, true)) and DMG_SLASH or DMG_CLUB)
+    end
     damage:SetDamagePosition(trace.HitPos or destination)
-    damage:SetDamageForce((destination - source):GetNormalized() * 600)
+    local force = tonumber(primary.Force) or 600
+    local direction = destination - source
+    if direction:LengthSqr() < 1 then direction = ent:GetForward() else direction:Normalize() end
+    damage:SetDamageForce(direction * force)
     target:TakeDamageInfo(damage)
-    ent:EmitSound(profile.MeleeSound or "Flesh.ImpactHard", 72, math.random(92, 108), 0.8)
+
+    local sound = primary.HitSound or primary.Sound or profile.MeleeSound
+    if istable(sound) then sound = sound[1] end
+    if not isstring(sound) or sound == "" then sound = "Flesh.ImpactHard" end
+    ent:EmitSound(sound, 72, math.random(92, 108), 0.8)
     hook.Run("BZCN_NPCMeleeWeaponAttack", ent, target, weapon, trace)
     return true
 end
