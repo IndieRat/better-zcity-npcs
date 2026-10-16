@@ -71,6 +71,17 @@ local function ReadInventoryAmmo(inventory, ammoKey)
     return tonumber(value)
 end
 
+-- SWEPs such as weapon_hands_sh declare Primary.Ammo = "none". That is a
+-- no-ammo sentinel, not a missing Z-City ammo registration and must never be
+-- seeded, logged as an error, or sent through the reserve reload path.
+local function HasInventoryAmmoType(ammoName)
+    if isnumber(ammoName) then return ammoName >= 0 end
+    if not isstring(ammoName) then return false end
+    local label = string.Trim(string.lower(ammoName))
+    return label ~= "" and label ~= "none" and label ~= "null" and label ~= "nil"
+        and label ~= "false" and label ~= "0"
+end
+
 local function GetStored(class)
     if not isstring(class) or class == "" or not weapons or not weapons.GetStored then return nil end
     local stored = weapons.GetStored(class)
@@ -342,7 +353,7 @@ function BZCN.EquipRuntimeWeapon(ent, class)
     local primary = istable(weapon.Primary) and weapon.Primary or {}
     local ammoName = primary.Ammo
     local clipSize = tonumber(primary.ClipSize) or 0
-    local ammoKey = ResolveInventoryAmmoKey(ammoName)
+    local ammoKey = HasInventoryAmmoType(ammoName) and ResolveInventoryAmmoKey(ammoName) or nil
     if ammoKey ~= nil and clipSize > 0 then
         ent.BZCNAmmoSeededClasses = ent.BZCNAmmoSeededClasses or {}
         if not ent.BZCNAmmoSeededClasses[class] then
@@ -359,7 +370,7 @@ function BZCN.EquipRuntimeWeapon(ent, class)
             end
             ent.BZCNAmmoSeededClasses[class] = true
         end
-    elseif isstring(ammoName) and ammoName ~= "" then
+    elseif HasInventoryAmmoType(ammoName) then
         local logAt = tonumber(ent.BZCNAmmoResolveLogAt) or 0
         if CurTime() >= logAt then
             ent.BZCNAmmoResolveLogAt = CurTime() + 10
@@ -672,6 +683,13 @@ function BZCN.FireRuntimeWeapon(ent, target)
         -- Reloads consume the NPC's own Z-City reserve-ammo inventory. A gun
         -- with no reserve stays empty until its carrier scavenges more ammo.
         local ammoName = primary.Ammo
+        -- Some utility/melee SWEPs expose a positive ClipSize despite having no
+        -- ammunition type. Do not let a "none" sentinel trap their AI in reload.
+        if not HasInventoryAmmoType(ammoName) then
+            weapon.BZCNReloadUntil = nil
+            weapon.BZCNOutOfAmmo = false
+            return FireStatBasedShot(ent, target, weapon)
+        end
         local ammoKey = ResolveInventoryAmmoKey(ammoName)
         local inventory = GetInventory(ent)
         inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
@@ -722,11 +740,16 @@ function BZCN.FireRuntimeWeapon(ent, target)
         weapon:SetClip1(loaded)
         if weapon.SetNWInt then weapon:SetNWInt("Clip1", weapon:Clip1()) end
         weapon.drawBullet = true
-        weapon.BZCNNextFire = now + 0.2
-        if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(weapon.BZCNNextFire) end
-        weapon.BZCNReloadUntil = nil
-        PublishNPCReloadPose(ent, 0, 0)
         weapon.BZCNOutOfAmmo = false
+        weapon.BZCNReloadUntil = nil
+        -- Clear stale fire/reload gates on both the SWEP and actor. Otherwise a
+        -- previous native SWEP cooldown can survive the reload and look like a
+        -- permanently jammed AI weapon.
+        weapon.BZCNNextFire = now + 0.12
+        if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(weapon.BZCNNextFire) end
+        ent.BZCNNextShotAt = weapon.BZCNNextFire
+        if ent.SetNW2Bool then ent:SetNW2Bool("BZCNOutOfAmmo", false) end
+        PublishNPCReloadPose(ent, 0, 0)
         return true
     end
 
