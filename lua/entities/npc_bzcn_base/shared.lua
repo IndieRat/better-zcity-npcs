@@ -49,6 +49,8 @@ local function GetWeaponHoldType(self)
         or (self.GetNW2String and self:GetNW2String("BZCNWeaponClass", ""))
         or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
+    -- The registered SWEP HoldType is the authored standing stance. Runtime
+    -- holdtype may temporarily become "slam"/"melee" for sprint or attack.
     local holdType = runtime and (runtime.HoldType or runtime.holdtype)
         or (istable(stored) and (stored.HoldType or stored.holdtype))
         or (profile and profile.AnimationHoldType) or "normal"
@@ -293,10 +295,14 @@ function ENT:GetBZCNMovementSequence(speed, state)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
     local combatHold = self.BZCNCombatHoldWeaponClass == weaponClass
         and self.BZCNCombatHoldType or nil
-    local holdType = combatHold
-        or (runtime and (runtime.HoldType or runtime.holdtype))
+    local authoredHoldType = (runtime and runtime.HoldType)
         or (istable(stored) and (stored.HoldType or stored.holdtype))
         or (profile and profile.AnimationHoldType) or "normal"
+    local runtimeHoldType = runtime and (runtime.holdtype or runtime.HoldType) or nil
+    -- Standing uses the weapon's authored Homigrad stance; moving states can
+    -- use a runtime hold selected by AnimHold (for example, a sprint stance).
+    local holdType = combatHold or (state == "standing" and authoredHoldType)
+        or runtimeHoldType or authoredHoldType
     holdType = isstring(holdType) and string.lower(holdType) or "normal"
     -- A combat actor can cache a hold type while fighting. Do not reuse that
     -- cached pose after a weapon swap; use the active SWEP's vanilla hold type.
