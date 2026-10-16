@@ -43,6 +43,11 @@ end
 local function ResolveInventoryAmmoKey(ammoName)
     if isnumber(ammoName) then return ammoName >= 0 and ammoName or nil end
     if not isstring(ammoName) or ammoName == "" then return nil end
+    -- Z-City loot stores ammo under game.GetAmmoID(hg.ammotypes[key].name),
+    -- so test the weapon's actual Primary.Ammo display name first.
+    local ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
+    if isnumber(ammoID) and ammoID >= 0 then return ammoID end
+
     local canonicalName = ammoName
     if hg and istable(hg.ammotypeshuy) then
         local mapped = hg.ammotypeshuy[ammoName]
@@ -52,10 +57,8 @@ local function ResolveInventoryAmmoKey(ammoName)
         local mapped = hg.ammotypes[ammoName]
         if istable(mapped) and isstring(mapped.name) and mapped.name ~= "" then canonicalName = mapped.name end
     end
-    local ammoID = game and game.GetAmmoID and game.GetAmmoID(canonicalName) or -1
-    if isnumber(ammoID) and ammoID >= 0 then return ammoID end
     if canonicalName ~= ammoName then
-        ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
+        ammoID = game and game.GetAmmoID and game.GetAmmoID(canonicalName) or -1
         if isnumber(ammoID) and ammoID >= 0 then return ammoID end
     end
     return nil
