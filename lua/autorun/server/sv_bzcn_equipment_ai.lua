@@ -678,7 +678,9 @@ function BZCN.FireRuntimeWeapon(ent, target)
             end
             return true
         end
-        if reserve ~= nil and reserve <= 0 then
+        -- Missing reserve entries mean zero rounds, not unlimited reloads.
+        reserve = reserve or 0
+        if reserve <= 0 then
             weapon.BZCNReloadUntil = nil
             PublishNPCReloadPose(ent, 0, 0)
             weapon.BZCNOutOfAmmo = true
@@ -697,14 +699,14 @@ function BZCN.FireRuntimeWeapon(ent, target)
         local defaultClip = tonumber(primary.DefaultClip)
         if not defaultClip or defaultClip < 1 then defaultClip = clipSize end
         local loaded = math.Clamp(defaultClip, 1, clipSize)
-        if reserve ~= nil then loaded = math.min(loaded, reserve) end
+        loaded = math.min(loaded, reserve)
         if loaded <= 0 then
             weapon.BZCNReloadUntil = nil
             PublishNPCReloadPose(ent, 0, 0)
             weapon.BZCNOutOfAmmo = true
             return true
         end
-        inventory.Ammo[ammoKey] = math.max((reserve or 0) - loaded, 0)
+        inventory.Ammo[ammoKey] = math.max(reserve - loaded, 0)
         inventory.Ammo[tostring(ammoKey)] = nil
         if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
         weapon:SetClip1(loaded)
