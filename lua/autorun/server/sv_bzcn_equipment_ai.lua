@@ -346,7 +346,17 @@ function BZCN.EquipRuntimeWeapon(ent, class)
     if ammoKey ~= nil and clipSize > 0 then
         ent.BZCNAmmoSeededClasses = ent.BZCNAmmoSeededClasses or {}
         if not ent.BZCNAmmoSeededClasses[class] then
-            if ReadInventoryAmmo(inventory, ammoKey) == nil then inventory.Ammo[ammoKey] = clipSize * 2 end
+            if ReadInventoryAmmo(inventory, ammoKey) == nil then
+                -- Migrate a reserve count left by the previous adapter, which
+                -- incorrectly keyed ammo by Primary.Ammo's display string.
+                local legacyReserve = isstring(ammoName) and tonumber(inventory.Ammo[ammoName]) or nil
+                if legacyReserve ~= nil and ammoName ~= tostring(ammoKey) then
+                    inventory.Ammo[ammoKey] = math.max(legacyReserve, 0)
+                    inventory.Ammo[ammoName] = nil
+                else
+                    inventory.Ammo[ammoKey] = clipSize * 2
+                end
+            end
             ent.BZCNAmmoSeededClasses[class] = true
         end
     elseif isstring(ammoName) and ammoName ~= "" then
