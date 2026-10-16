@@ -248,12 +248,32 @@ local function ApplyFingerHoldPose(ent, weapon)
     local hold = weapon.hold_type or weapon.HoldType
         or (istable(definition) and (definition.HoldType or definition.holdtype))
     if not isstring(hold) or hold == "" then
+        if isfunction(weapon.GetHoldType) then
+            local ok, result = pcall(weapon.GetHoldType, weapon)
+            if ok and isstring(result) and result ~= "" then hold = result end
+        end
+    end
+    if not isstring(hold) or hold == "" then
         local ok, isPistol = false, false
         if isfunction(weapon.IsPistolHoldType) then ok, isPistol = pcall(weapon.IsPistolHoldType, weapon) end
         if not ok and istable(definition) and isfunction(definition.IsPistolHoldType) then
             ok, isPistol = pcall(definition.IsPistolHoldType, weapon)
         end
-        hold = ok and isPistol and "pistol_hold2" or "ar2"
+        local class = string.lower(weapon:GetClass())
+        if ok and isPistol then
+            hold = "pistol"
+        elseif string.find(class, "shotgun", 1, true) then
+            hold = "shotgun"
+        elseif string.find(class, "smg", 1, true) or string.find(class, "mp5", 1, true) then
+            hold = "smg"
+        elseif string.find(class, "rpg", 1, true) or string.find(class, "launcher", 1, true) then
+            hold = "rpg"
+        elseif string.find(class, "knife", 1, true) or string.find(class, "melee", 1, true)
+            or string.find(class, "crowbar", 1, true) then
+            hold = "melee"
+        else
+            hold = "ar2"
+        end
     end
     if isfunction(hg.set_hold) then pcall(hg.set_hold, ent, hold) end
     if isfunction(hg.set_holdrh) then pcall(hg.set_holdrh, ent, hold) end
@@ -342,9 +362,15 @@ local function UpdateRenderedWeapon(ent)
     -- models additionally require FakePos/FakeAng. Omitting these is what
     -- leaves several models rolled downward or floating away from the grip.
     local source = IsValid(weapon) and weapon or definition
-    local offsetPos = isvector(source.WorldPos) and source.WorldPos or vector_origin
-    local offsetAng = isangle(source.WorldAng) and source.WorldAng or angle_zero
-    local extraAng = isangle(source.WorldAng2) and source.WorldAng2 or angle_zero
+    -- A spawned SWEP instance does not always expose inherited world-model
+    -- offsets on its entity table. Resolve each field independently so a nil
+    -- runtime field cannot erase the registered weapon's authored grip offset.
+    local offsetPos = isvector(source.WorldPos) and source.WorldPos
+        or (isvector(definition.WorldPos) and definition.WorldPos or vector_origin)
+    local offsetAng = isangle(source.WorldAng) and source.WorldAng
+        or (isangle(definition.WorldAng) and definition.WorldAng or angle_zero)
+    local extraAng = isangle(source.WorldAng2) and source.WorldAng2
+        or (isangle(definition.WorldAng2) and definition.WorldAng2 or angle_zero)
     local pos, ang = LocalToWorld(offsetPos, offsetAng + extraAng,
         matrix:GetTranslation(), matrix:GetAngles())
     ang:RotateAroundAxis(ang:Forward(), 180)
