@@ -24,7 +24,9 @@ local function GetRuntimeWeapon(ent)
 end
 
 local function GetWeaponDefinition(ent)
-    local class = ent:GetNW2String("BZCNWeaponClass", "")
+    local runtime = GetRuntimeWeapon(ent)
+    local class = IsValid(runtime) and runtime:GetClass()
+        or ent:GetNW2String("BZCNWeaponClass", "")
     if class == "" then return nil, class end
     return weapons and weapons.GetStored and weapons.GetStored(class) or nil, class
 end
@@ -335,17 +337,32 @@ local function UpdateRenderedWeapon(ent)
     local matrix = ent:GetBoneMatrix(hand)
     if not matrix then return end
 
-    -- Prefer offsets on the actual runtime SWEP instance: Z-City may compute
-    -- these from the active hold type, while the stored definition is only a
-    -- default. Reading the definition first caused a visible idle/firing snap.
-    local offsetPos = IsValid(weapon) and isvector(weapon.WorldPos) and weapon.WorldPos
-        or isvector(definition.WorldPos) and definition.WorldPos or vector_origin
-    local offsetAng = IsValid(weapon) and isangle(weapon.WorldAng) and weapon.WorldAng
-        or isangle(definition.WorldAng) and definition.WorldAng or angle_zero
-    local pos, ang = LocalToWorld(offsetPos, offsetAng, matrix:GetTranslation(), matrix:GetAngles())
+    -- Match Z-City's sh_worldmodel.lua: WorldAng2 and the 180-degree
+    -- correction are part of the native transform, and custom Z-City fake
+    -- models additionally require FakePos/FakeAng. Omitting these is what
+    -- leaves several models rolled downward or floating away from the grip.
+    local source = IsValid(weapon) and weapon or definition
+    local offsetPos = isvector(source.WorldPos) and source.WorldPos or vector_origin
+    local offsetAng = isangle(source.WorldAng) and source.WorldAng or angle_zero
+    local extraAng = isangle(source.WorldAng2) and source.WorldAng2 or angle_zero
+    local pos, ang = LocalToWorld(offsetPos, offsetAng + extraAng,
+        matrix:GetTranslation(), matrix:GetAngles())
+    ang:RotateAroundAxis(ang:Forward(), 180)
 
-    -- Homigrad's world-model transform intentionally omits the player-only
-    -- 180 degree correction for NPC owners; preserve that convention here.
+    local useFake = false
+    if IsValid(weapon) and isfunction(weapon.ShouldUseFakeModel) then
+        local ok, result = pcall(weapon.ShouldUseFakeModel, weapon)
+        useFake = ok and result == true
+    elseif isfunction(definition.ShouldUseFakeModel) then
+        local ok, result = pcall(definition.ShouldUseFakeModel, definition)
+        useFake = ok and result == true
+    end
+    if useFake then
+        local fakePos = isvector(source.FakePos) and source.FakePos or vector_origin
+        local fakeAng = isangle(source.FakeAng) and source.FakeAng or angle_zero
+        pos, ang = LocalToWorld(fakePos, fakeAng, pos, ang)
+    end
+
     proxy:SetRenderOrigin(pos)
     proxy:SetRenderAngles(ang)
     proxy:SetupBones()
