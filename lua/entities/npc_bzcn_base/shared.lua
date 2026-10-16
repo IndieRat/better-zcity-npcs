@@ -281,15 +281,16 @@ function ENT:GetBZCNMovementSequence(speed, state)
         or (self.GetNW2String and self:GetNW2String("BZCNWeaponClass", ""))
         or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local holdType = self.BZCNCombatHoldType
+    local combatHold = self.BZCNCombatHoldWeaponClass == weaponClass
+        and self.BZCNCombatHoldType or nil
+    local holdType = combatHold
         or (runtime and (runtime.HoldType or runtime.holdtype))
         or (istable(stored) and (stored.HoldType or stored.holdtype))
         or (profile and profile.AnimationHoldType) or "normal"
     holdType = isstring(holdType) and string.lower(holdType) or "normal"
-    -- Let the equipped SWEP drive the vanilla/IX hold animation. Class-level
-    -- AnimationHoldType is only a fallback for virtual/unregistered weapons.
-    self.ixAnimHoldType = self.BZCNCombatHoldType
-        or HOLDTYPE_TRANSLATOR[holdType] or holdType
+    -- A combat actor can cache a hold type while fighting. Do not reuse that
+    -- cached pose after a weapon swap; use the active SWEP's vanilla hold type.
+    self.ixAnimHoldType = combatHold or HOLDTYPE_TRANSLATOR[holdType] or holdType
     local animationSet = animClass[self.ixAnimHoldType] or animClass.normal or animClass
     if not istable(animationSet) then return -1 end
 
@@ -387,7 +388,14 @@ function ENT:GetBZCNMovementSequence(speed, state)
     if sequence < 0 then
         local aliases
         if state == "standing" then
-            aliases = {"idle_all_01", "idle_all", "idle_unarmed", "idle", "idle01", "idle_subtle"}
+            local hold = string.lower(tostring(self.ixAnimHoldType or GetWeaponHoldType(self)))
+            if hold == "pistol" or hold == "revolver" or hold == "duel" then
+                aliases = {"idle_pistol", "idle_revolver", "idle_angry_pistol", "idle_all_01", "idle_all", "idle"}
+            elseif hold == "smg" or hold == "ar2" or hold == "shotgun" then
+                aliases = {"idle_ar2", "idle_smg1", "idle_angry", "idle_all_01", "idle_all", "idle"}
+            else
+                aliases = {"idle_all_01", "idle_all", "idle_unarmed", "idle", "idle01", "idle_subtle"}
+            end
         elseif state == "walking" then
             aliases = {"walk_all", "walk_all_moderate", "walk_all_01", "walk_unarmed", "walk"}
         elseif state == "running" or state == "climbing" then
