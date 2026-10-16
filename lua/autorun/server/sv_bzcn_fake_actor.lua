@@ -563,10 +563,16 @@ function FakeActor:UpdateSit(dt)
     -- Angle-only control prevents the torso controller from dragging the body.
     self:ShadowBone("ValveBiped.Bip01_Spine2", upright, 0.22, 42 * power, 34)
     if IsValid(head) and self.physiology.canMoveHead then
-        local headAngle = Angle(-10, yaw, 0)
+        -- Seated recovery still looks around instead of locking the head
+        -- straight ahead. This mirrors the native fake controller's E-look.
+        local look = self:GetLookAngles()
+        local headAngle = Angle(look.p, look.y, 0)
         headAngle:RotateAroundAxis(headAngle:Forward(), 90)
         headAngle:RotateAroundAxis(headAngle:Up(), 90)
         self:ShadowBone("ValveBiped.Bip01_Head1", headAngle, 0.18, 58 * power, 40)
+        if rag.SetEyeTarget then
+            rag:SetEyeTarget(rag:WorldSpaceCenter() + look:Forward() * 10000)
+        end
     end
 
     local basis = Angle(0, yaw, 0)
@@ -587,13 +593,21 @@ function FakeActor:UpdateSit(dt)
         {side = 1, upper = "ValveBiped.Bip01_R_UpperArm", forearm = "ValveBiped.Bip01_R_Forearm", hand = "ValveBiped.Bip01_R_Hand"}
     }) do
         if (tonumber(self.injury[arm.side < 0 and "leftarm" or "rightarm"]) or 0) < 90 then
-            local brace = pelvis:GetPos() - forward * 4 + right * (arm.side * 13) - Vector(0, 0, 9)
-            local armAngle = Angle(0, yaw, arm.side * 15)
+            -- Put the hands forward as a stabilizing brace, rather than
+            -- leaving both arms hanging beside the hips. Position targets are
+            -- deliberately modest so the arms don't drag the seated torso.
+            local shoulder = spine:GetPos() + forward * 2 + right * (arm.side * 9) - Vector(0, 0, 1)
+            local wrist = pelvis:GetPos() + forward * 15 + right * (arm.side * 10) - Vector(0, 0, 7)
+            local elbow = LerpVector(0.55, shoulder, wrist) - Vector(0, 0, 3)
+            local armAngle = Angle(0, yaw, arm.side * 8)
             armAngle:RotateAroundAxis(armAngle:Forward(), 90)
             armAngle:RotateAroundAxis(armAngle:Up(), 90)
-            self:ShadowBone(arm.upper, armAngle, 0.2, 36 * power, 32)
-            self:ShadowBone(arm.forearm, armAngle, 0.22, 32 * power, 30)
-            self:ShadowBone(arm.hand, armAngle, 0.2, 34 * power, 32)
+            self:ShadowBone(arm.upper, armAngle, 0.2, 42 * power, 34,
+                shoulder, 52, 36)
+            self:ShadowBone(arm.forearm, armAngle, 0.18, 38 * power, 32,
+                elbow, 58, 38)
+            self:ShadowBone(arm.hand, armAngle, 0.16, 40 * power, 32,
+                wrist, 62, 40)
         end
     end
 end
@@ -683,6 +697,18 @@ function FakeActor:UpdateCrawl(dt)
             -- Z-City reaches with a short arrival time and high capped hand
             -- speed; the forearm follows the upper arm rather than being
             -- independently speed-limited.
+            -- Reach from the shoulder, not just the hand. Without an
+            -- upper-arm target the wrist can snap forward while the shoulder
+            -- stays tucked against the torso, so the crawl stroke has no leverage.
+            local torso = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2") or pelvis
+            local handSide = string.find(reachState.boneName, "_R_", 1, true) and 1 or -1
+            local basis = direction:Angle()
+            local shoulderPos = torso:GetPos() + direction * 2
+                + basis:Right() * (handSide * 9) + Vector(0, 0, 5)
+            local upperName = handSide > 0
+                and "ValveBiped.Bip01_R_UpperArm" or "ValveBiped.Bip01_L_UpperArm"
+            self:ShadowBone(upperName, reachState.angle, 0.001, 900, 420,
+                shoulderPos, 260, 45)
             self:ShadowBone(reachState.boneName, reachState.angle,
                 0.001, 1200, 450, reachState.position, 500, 50)
             self:ShadowBone(reachState.forearmName, reachState.angle,
