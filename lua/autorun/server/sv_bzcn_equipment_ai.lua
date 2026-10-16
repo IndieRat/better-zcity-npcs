@@ -37,6 +37,37 @@ local function GetInventory(ent)
     return istable(ent.inventory) and ent.inventory or {}
 end
 
+-- Resolve a weapon ammo label to the engine ammo ID used by Z-City inventory.
+-- hg.ammotypeshuy translates weapon display labels into canonical ammo names.
+-- Never invent a string key when an ammo label cannot be resolved.
+local function ResolveInventoryAmmoKey(ammoName)
+    if isnumber(ammoName) then return ammoName >= 0 and ammoName or nil end
+    if not isstring(ammoName) or ammoName == "" then return nil end
+    local canonicalName = ammoName
+    if hg and istable(hg.ammotypeshuy) then
+        local mapped = hg.ammotypeshuy[ammoName]
+        if istable(mapped) and isstring(mapped.name) and mapped.name ~= "" then canonicalName = mapped.name end
+    end
+    if hg and istable(hg.ammotypes) then
+        local mapped = hg.ammotypes[ammoName]
+        if istable(mapped) and isstring(mapped.name) and mapped.name ~= "" then canonicalName = mapped.name end
+    end
+    local ammoID = game and game.GetAmmoID and game.GetAmmoID(canonicalName) or -1
+    if isnumber(ammoID) and ammoID >= 0 then return ammoID end
+    if canonicalName ~= ammoName then
+        ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
+        if isnumber(ammoID) and ammoID >= 0 then return ammoID end
+    end
+    return nil
+end
+
+local function ReadInventoryAmmo(inventory, ammoKey)
+    if not istable(inventory) or not istable(inventory.Ammo) or ammoKey == nil then return nil end
+    local value = inventory.Ammo[ammoKey]
+    if value == nil then value = inventory.Ammo[tostring(ammoKey)] end
+    return tonumber(value)
+end
+
 local function GetStored(class)
     if not isstring(class) or class == "" or not weapons or not weapons.GetStored then return nil end
     local stored = weapons.GetStored(class)
@@ -308,15 +339,19 @@ function BZCN.EquipRuntimeWeapon(ent, class)
     local primary = istable(weapon.Primary) and weapon.Primary or {}
     local ammoName = primary.Ammo
     local clipSize = tonumber(primary.ClipSize) or 0
-    if isstring(ammoName) and ammoName ~= "" and clipSize > 0 then
-        local ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName)
-        local ammoKey = isnumber(ammoID) and ammoID >= 0 and ammoID or ammoName
+    local ammoKey = ResolveInventoryAmmoKey(ammoName)
+    if ammoKey ~= nil and clipSize > 0 then
         ent.BZCNAmmoSeededClasses = ent.BZCNAmmoSeededClasses or {}
         if not ent.BZCNAmmoSeededClasses[class] then
-            if inventory.Ammo[ammoKey] == nil and inventory.Ammo[tostring(ammoKey)] == nil then
-                inventory.Ammo[ammoKey] = clipSize * 2
-            end
+            if ReadInventoryAmmo(inventory, ammoKey) == nil then inventory.Ammo[ammoKey] = clipSize * 2 end
             ent.BZCNAmmoSeededClasses[class] = true
+        end
+    elseif isstring(ammoName) and ammoName ~= "" then
+        local logAt = tonumber(ent.BZCNAmmoResolveLogAt) or 0
+        if CurTime() >= logAt then
+            ent.BZCNAmmoResolveLogAt = CurTime() + 10
+            ErrorNoHalt("[BZCN] Could not resolve Z-City inventory ammo for " .. tostring(class)
+                .. " (Primary.Ammo=" .. tostring(ammoName) .. "); no inventory key created.\\n")
         end
     end
     if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
@@ -623,15 +658,22 @@ function BZCN.FireRuntimeWeapon(ent, target)
     if clipSize > 0 and beforeClip == 0 then
         -- Reloads consume the NPC's own Z-City reserve-ammo inventory. A gun
         -- with no reserve stays empty until its carrier scavenges more ammo.
-        local ammoName = isstring(primary.Ammo) and primary.Ammo or nil
-        local ammoID = ammoName and game and game.GetAmmoID and game.GetAmmoID(ammoName) or nil
-        local ammoKey = isnumber(ammoID) and ammoID >= 0 and ammoID or ammoName
+        local ammoName = primary.Ammo
+        local ammoKey = ResolveInventoryAmmoKey(ammoName)
         local inventory = GetInventory(ent)
         inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
-        local reserve
-        if ammoKey ~= nil then
-            reserve = tonumber(inventory.Ammo[ammoKey] or inventory.Ammo[tostring(ammoKey)])
-            if reserve == nil and ammoName then reserve = tonumber(inventory.Ammo[ammoName]) end
+        local reserve = ReadInventoryAmmo(inventory, ammoKey)
+        if ammoKey == nil then
+            weapon.BZCNReloadUntil = nil
+            PublishNPCReloadPose(ent, 0, 0)
+            weapon.BZCNOutOfAmmo = true
+            local logAt = tonumber(ent.BZCNAmmoResolveLogAt) or 0
+            if CurTime() >= logAt then
+                ent.BZCNAmmoResolveLogAt = CurTime() + 10
+                ErrorNoHalt("[BZCN] Refusing reload with unregistered ammo label " .. tostring(ammoName)
+                    .. " for " .. tostring(class) .. "; inventory left unchanged.\\n")
+            end
+            return true
         end
         if reserve ~= nil and reserve <= 0 then
             weapon.BZCNReloadUntil = nil
@@ -659,11 +701,9 @@ function BZCN.FireRuntimeWeapon(ent, target)
             weapon.BZCNOutOfAmmo = true
             return true
         end
-        if reserve ~= nil and ammoKey ~= nil then
-            inventory.Ammo[ammoKey] = math.max(reserve - loaded, 0)
-            inventory.Ammo[tostring(ammoKey)] = nil
-            if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
-        end
+        inventory.Ammo[ammoKey] = math.max((reserve or 0) - loaded, 0)
+        inventory.Ammo[tostring(ammoKey)] = nil
+        if BZCN.SetNetVar then BZCN.SetNetVar(ent, "Inventory", inventory) end
         weapon:SetClip1(loaded)
         if weapon.SetNWInt then weapon:SetNWInt("Clip1", weapon:Clip1()) end
         weapon.drawBullet = true
