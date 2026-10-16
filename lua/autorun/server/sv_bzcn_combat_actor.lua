@@ -240,6 +240,86 @@ local function GetLeadTime(attacker, target, weapon, distance, isRagdoll)
     return math.Clamp(lead, 0.025, Actor.MaxLeadTime)
 end
 
+-- Friendly-fire guard shared by aim selection and the final fire gate.
+local function IsFriendlyActor(attacker, candidate)
+    if not IsValidEntity(candidate) or candidate == attacker then return false end
+    local resolved = Actor.ResolveTarget(candidate) or candidate
+    if resolved == attacker then return false end
+    if isfunction(attacker.IsBZCNAlly) then
+        local ok, ally = pcall(attacker.IsBZCNAlly, attacker, resolved)
+        if ok and ally == true then return true end
+    end
+    if BZCN and isfunction(BZCN.IsManaged) and BZCN.IsManaged(resolved) then
+        local own = attacker.BZCNClassProfile or {}
+        local other = resolved.BZCNClassProfile or {}
+        local a = own.Faction or attacker.BZCN_Faction or attacker.BZCNClass
+        local b = other.Faction or resolved.BZCN_Faction or resolved.BZCNClass
+        if a ~= nil and b ~= nil and tostring(a) == tostring(b) then return true end
+    end
+    return false
+end
+
+local function IsExplosiveWeapon(weapon)
+    local stored = isstring(weapon) and weapons and weapons.GetStored and weapons.GetStored(weapon) or nil
+    if not isstring(weapon) and not IsValidEntity(weapon) then return false end
+    local class = string.lower(isstring(weapon) and weapon or weapon:GetClass() or "")
+    local definition = IsValidEntity(weapon) and weapon or stored
+    local hold = string.lower(tostring(definition and (definition.HoldType or definition.holdtype) or ""))
+    local primary = definition and istable(definition.Primary) and definition.Primary or {}
+    return hold == "rpg" or hold == "grenade"
+        or string.find(class, "grenade", 1, true) ~= nil
+        or string.find(class, "launcher", 1, true) ~= nil
+        or string.find(class, "rpg", 1, true) ~= nil
+        or string.find(class, "rocket", 1, true) ~= nil
+        or string.find(class, "explosive", 1, true) ~= nil
+        or primary.BlastRadius ~= nil or primary.ExplosionRadius ~= nil
+        or primary.ProjectileClass ~= nil or primary.Projectile ~= nil
+end
+
+local function TraceShotLane(attacker, target, startPos, endPos, weapon)
+    local filter = {attacker}
+    if IsValidEntity(weapon) then filter[#filter + 1] = weapon end
+    if IsValidEntity(attacker.BZCNHeldWeaponProxy) then filter[#filter + 1] = attacker.BZCNHeldWeaponProxy end
+    local tr = util.TraceLine({start = startPos, endpos = endPos, filter = filter, mask = MASK_SHOT})
+    if IsFriendlyActor(attacker, tr.Entity) then return false, tr.Entity end
+    if tr.Hit and tr.Entity ~= target then
+        if Actor.ResolveTarget(tr.Entity) ~= target then return false, tr.Entity end
+    end
+    return true, nil
+end
+
+function Actor.GetFriendlyFireStatus(attacker, target, weapon, aimPoint)
+    if not IsValidEntity(attacker) or not IsValidEntity(target) then return true end
+    local source = attacker.EyePos and attacker:EyePos() or attacker:WorldSpaceCenter()
+    local point = isvector(aimPoint) and aimPoint or Actor.GetTargetAimPoint(target)
+    if not isvector(point) then return false, nil, "invalid-aim" end
+    local safe, ally = TraceShotLane(attacker, target, source, point, weapon)
+    if not safe then
+        local right = (point - source):Angle():Right()
+        local alternate
+        for _, offset in ipairs({48, -48, 76, -76, 104, -104}) do
+            local candidate = point + right * offset
+            local laneSafe = TraceShotLane(attacker, target, source, candidate, weapon)
+            if laneSafe then alternate = candidate break end
+        end
+        if not alternate then return false, ally, "ally-in-line" end
+        point = alternate
+    end
+    if IsExplosiveWeapon(weapon) then
+        local stored = isstring(weapon) and weapons and weapons.GetStored and weapons.GetStored(weapon) or nil
+        local definition = IsValidEntity(weapon) and weapon or stored
+        local primary = definition and istable(definition.Primary) and definition.Primary or {}
+        local radius = math.Clamp(tonumber(primary.BlastRadius) or tonumber(primary.ExplosionRadius)
+            or tonumber(primary.Radius) or 220, 96, 600)
+        for _, candidate in ipairs(ents.FindInSphere(point, radius)) do
+            if IsFriendlyActor(attacker, candidate) then
+                return false, candidate, "ally-in-blast-radius"
+            end
+        end
+    end
+    return true, nil, nil, point
+end
+
 function Actor.UpdateAim(attacker, target, weapon)
     if not IsValidEntity(attacker) or not IsValidEntity(target) then return nil end
     local point, body = Actor.GetTargetAimPoint(target)
@@ -255,6 +335,8 @@ function Actor.UpdateAim(attacker, target, weapon)
     local leadTime = GetLeadTime(attacker, target, weapon, distance, ragdoll)
     local lead = ClampVectorLength(velocity * leadTime, ragdoll and 24 or 96)
     local predicted = point + lead
+    local safe, blockingAlly, safetyReason, alternatePoint = Actor.GetFriendlyFireStatus(attacker, target, weapon, predicted)
+    if alternatePoint then predicted = alternatePoint end
     local direction = predicted - source
     if direction:LengthSqr() < 1 then direction = attacker:GetForward() end
     local aimAngle = direction:Angle()
@@ -299,8 +381,13 @@ function Actor.UpdateAim(attacker, target, weapon)
         leadTime = leadTime,
         downed = ragdoll or (target.GetNW2Bool and target:GetNW2Bool("BZCNNPCDowned", false))
             or target.BZCNNPCDowned == true,
-        weaponClass = attacker.BZCN_SelectedWeapon or profile.WeaponClass
+        weaponClass = attacker.BZCN_SelectedWeapon or profile.WeaponClass,
+        friendlyFireSafe = safe,
+        friendlyFireBlocker = IsValidEntity(blockingAlly) and blockingAlly or nil,
+        friendlyFireReason = safetyReason
     }
+    if attacker.SetNW2Bool then attacker:SetNW2Bool("BZCNFriendlyFireBlocked", not safe) end
+    if attacker.SetNW2Entity then attacker:SetNW2Entity("BZCNFriendlyFireBlocker", IsValidEntity(blockingAlly) and blockingAlly or NULL) end
     attacker.BZCNCombatAimSolution = solution
     Actor.ApplyWeaponAnimationPool(attacker, weapon, solution.weaponClass)
     hook.Run("BZCN_CombatActorAimUpdated", attacker, target, solution)
