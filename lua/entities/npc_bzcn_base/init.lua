@@ -2793,25 +2793,41 @@ if not BZCN_CivilProtectionDamageHookInstalled then
         else
             return
         end
-        if victimFaction ~= "default" and victimFaction ~= "civilian" then return end
-
         for _, officer in ipairs(ents.FindByClass("npc_bzcn_base")) do
-            if not IsValid(officer) or officer == attacker or officer:Health() <= 0 then continue end
+            if not IsValid(officer) or officer == attacker or officer == victim or officer:Health() <= 0 then continue end
             local profile = officer.BZCNClassProfile or GetProfile(officer) or {}
             local className = string.lower(tostring(officer.BZCNClass
                 or officer.PlayerClassName or profile.ClassName or ""))
-            local faction = string.lower(tostring(profile.Faction or officer.BZCN_Faction or ""))
+            local faction = CanonicalFaction(profile.Faction or officer.BZCN_Faction
+                or officer.BZCNClass or officer.PlayerClassName) or "default"
             local isMetro = string.find(className, "metrocop", 1, true) ~= nil
                 or className == "police" or faction == "metrocop" or faction == "police"
             local isCombine = className == "combine"
                 or string.find(className, "combine", 1, true) ~= nil or faction == "combine"
-            if not isMetro and not isCombine then continue end
+            local isCivilian = faction == "default" or faction == "civilian"
+            -- Defend your own people. Civil Protection also reacts to attacks
+            -- on civilians; ordinary civilians defend nearby civilians only
+            -- when armed, avoiding unarmed NPCs suicidally joining gunfights.
+            local sameFaction = faction == victimFaction
+                or (isCivilian and (victimFaction == "default" or victimFaction == "civilian"))
+            local civilProtectionWitness = (isMetro or isCombine)
+                and (victimFaction == "default" or victimFaction == "civilian")
+            if not sameFaction and not civilProtectionWitness then continue end
+            if isCivilian then
+                local weaponClass = string.lower(tostring(officer.BZCN_SelectedWeapon
+                    or (officer.GetNW2String and officer:GetNW2String("BZCNWeaponClass", "")) or ""))
+                local active = isfunction(officer.GetActiveWeapon) and officer:GetActiveWeapon() or nil
+                local armed = profile.Ranged == true
+                    or (weaponClass ~= "" and not IsBZCNNonCombatWeapon(weaponClass))
+                    or (IsValid(active) and not IsBZCNNonCombatWeapon(active:GetClass()))
+                    or (IsValid(officer.BZCNRuntimeWeapon)
+                        and not IsBZCNNonCombatWeapon(officer.BZCNRuntimeWeapon:GetClass()))
+                if not armed then continue end
+            end
             if officer:GetPos():DistToSqr(victim:GetPos()) > 2200 * 2200 then continue end
             local attackerFaction = officer.GetBZCNEntityFaction
                 and officer:GetBZCNEntityFaction(attacker) or nil
-            local officerFaction = CanonicalFaction(profile.Faction or officer.BZCN_Faction
-                or officer.BZCNClass or officer.PlayerClassName)
-            if attackerFaction and officerFaction and attackerFaction == officerFaction then continue end
+            if attackerFaction and attackerFaction == faction then continue end
 
             officer.BZCNHostileOffender = attacker
             officer.BZCNHostileOffenderUntil = CurTime() + 90
