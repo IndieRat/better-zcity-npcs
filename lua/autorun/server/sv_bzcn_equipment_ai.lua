@@ -908,8 +908,6 @@ function BZCN.AttackRuntimeMelee(ent, target, trace)
         or string.find(classLower, "machete", 1, true)
         or string.find(classLower, "bat", 1, true)
         or string.find(classLower, "axe", 1, true)
-    local noAmmo = not isstring(primaryDef.Ammo) or primaryDef.Ammo == ""
-        or string.lower(primaryDef.Ammo) == "none"
     if not handsWeapon and not (holdType == "melee" or namedMelee) then return false end
     if not istable(trace) or not trace.Hit or not IsValid(trace.Entity) then return true end
 
