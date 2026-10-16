@@ -185,10 +185,9 @@ function FakeActor:RefreshPhysiology()
 
     -- Respect Z-City's movement gates where available, but also apply the
     -- same spinal thresholds to the addon fallback injury table.
-    local canMoveHead = conscious and spine3OK and org.canmovehead ~= false
-    -- Z-City's fake controller gates the whole-body movement loop on spine1
-    -- damage too. A major spine1 injury must not leave the NPC crawling,
-    -- reaching, or sitting itself upright just because spine2/spine3 still pass.
+    -- Z-City gates the fake-control loop on spine1 before it reaches either
+    -- torso/head control. Keep that same hard stop for both movement channels.
+    local canMoveHead = conscious and spine1OK and spine3OK and org.canmovehead ~= false
     local canMove = conscious and spine1OK and spine2OK and spine3OK and org.canmove ~= false
     local leftArmWorks = (tonumber(injury.leftarm) or 0) < 92
         and injury.leftArmAmputated ~= true and org.larmamputated ~= true
