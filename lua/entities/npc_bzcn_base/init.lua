@@ -708,11 +708,16 @@ function ENT:IsBZCNEnemy(target)
     local forgivenUntil = self.BZCNBefriendedPlayers and self.BZCNBefriendedPlayers[target]
     if tonumber(forgivenUntil) and forgivenUntil > CurTime() then return false end
 
-    -- Rudeness creates a short, explicit grievance even for factions that
-    -- would otherwise treat the target as neutral.
+    -- Witnessed violence and direct assaults are remembered by every managed
+    -- faction, not just Civil Protection. Keep the memory time-bounded and do
+    -- not let it override an explicit companion-owner protection rule above.
     if self.BZCNHostileOffender == target
         and (self.BZCNHostileOffenderUntil or 0) > CurTime()
         and (self.BZCNOffendedAttackAt or 0) <= CurTime() then
+        return true
+    end
+    if self.BZCNLastAttacker == target
+        and CurTime() - (tonumber(self.BZCNLastDamageTime) or 0) <= 18 then
         return true
     end
 
@@ -2723,14 +2728,37 @@ function ENT:OnInjured(damageInfo)
         local civilian = profile.CivilianStyle == true or faction == "civilian"
             or faction == "default" or className == "civilian" or className == "default"
         if civilian and attacker:Health() > 0 then
-            -- A gunshot is an immediate survival threat, not a minor grievance.
-            self.BZCNFleeThreat = attacker
-            self.BZCNFleeUntil = CurTime() + math.Rand(9, 16)
-            self.BZCNFearAttacker = attacker
-            self.BZCNFearUntil = self.BZCNFleeUntil
-            self.BZCNCurrentTask = "flee"
-            self.BZCNTaskUntil = self.BZCNFleeUntil
-            if self.SetNW2String then self:SetNW2String("BZCNCurrentTask", "flee") end
+            local weaponClass = string.lower(tostring(self.BZCN_SelectedWeapon
+                or (self.GetNW2String and self:GetNW2String("BZCNWeaponClass", "")) or ""))
+            local activeWeapon = isfunction(self.GetActiveWeapon) and self:GetActiveWeapon() or nil
+            local armed = profile.Ranged == true
+                or (weaponClass ~= "" and not IsBZCNNonCombatWeapon(weaponClass))
+                or (IsValid(activeWeapon) and not IsBZCNNonCombatWeapon(activeWeapon:GetClass()))
+                or (IsValid(self.BZCNRuntimeWeapon)
+                    and not IsBZCNNonCombatWeapon(self.BZCNRuntimeWeapon:GetClass()))
+            if armed then
+                -- Armed civilians defend themselves instead of entering the
+                -- unarmed panic loop; their actual ammo/LOS gates still apply.
+                self.BZCNHostileOffender = attacker
+                self.BZCNHostileOffenderUntil = CurTime() + 45
+                self.BZCNOffendedAttackAt = 0
+                self.BZCNFleeThreat = nil
+                self.BZCNFleeUntil = nil
+                self.BZCNFearAttacker = nil
+                self.BZCNFearUntil = nil
+                self.BZCNCurrentTask = "combat"
+                self.BZCNTaskUntil = CurTime() + 45
+                if self.SetNW2String then self:SetNW2String("BZCNCurrentTask", "combat") end
+            else
+                -- An unarmed civilian still prioritizes survival over fighting.
+                self.BZCNFleeThreat = attacker
+                self.BZCNFleeUntil = CurTime() + math.Rand(9, 16)
+                self.BZCNFearAttacker = attacker
+                self.BZCNFearUntil = self.BZCNFleeUntil
+                self.BZCNCurrentTask = "flee"
+                self.BZCNTaskUntil = self.BZCNFleeUntil
+                if self.SetNW2String then self:SetNW2String("BZCNCurrentTask", "flee") end
+            end
         end
         hook.Run("BZCN_EntityDamaged", self, attacker, damageInfo, true)
     end
