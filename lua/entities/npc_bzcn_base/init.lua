@@ -1691,8 +1691,12 @@ function ENT:AttackTarget(target)
             end
         end
         if not desired then
-            for _, candidate in ipairs({preferredPrimary, preferredSecondary, profile.WeaponClass}) do
-                if isstring(candidate) and inventory[candidate] ~= nil and IsRangedClass(candidate) then
+            local rangedPreferences = {}
+            if isstring(preferredPrimary) then rangedPreferences[#rangedPreferences + 1] = preferredPrimary end
+            if isstring(preferredSecondary) then rangedPreferences[#rangedPreferences + 1] = preferredSecondary end
+            if isstring(profile.WeaponClass) then rangedPreferences[#rangedPreferences + 1] = profile.WeaponClass end
+            for _, candidate in ipairs(rangedPreferences) do
+                if inventory[candidate] ~= nil and IsRangedClass(candidate) then
                     desired = candidate
                     break
                 end
