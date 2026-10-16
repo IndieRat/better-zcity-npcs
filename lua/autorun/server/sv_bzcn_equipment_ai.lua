@@ -440,8 +440,15 @@ local function FireStatBasedShot(ent, target, weapon)
     local direction = solution and solution.direction
         or (aim:LengthSqr() > 0 and aim:GetNormalized() or ent:GetForward())
     local targetBody = solution and solution.body or target
-    local spread = tonumber(primary.Cone) or tonumber(primary.Spread) or 0.012
-    spread = math.Clamp(spread, 0, 0.15)
+    local spreadX, spreadY
+    local spreadValue = primary.Cone or primary.Spread
+    if isvector(spreadValue) then
+        spreadX = math.Clamp(math.abs(spreadValue.x), 0, 0.15)
+        spreadY = math.Clamp(math.abs(spreadValue.y), 0, 0.15)
+    else
+        local spread = math.Clamp(tonumber(spreadValue) or 0.012, 0, 0.15)
+        spreadX, spreadY = spread, spread
+    end
     local force = tonumber(primary.Force) or damage * 25
 
     local sound = primary.Sound
@@ -460,7 +467,7 @@ local function FireStatBasedShot(ent, target, weapon)
             Num = math.max(math.floor(tonumber(primary.NumShots) or 1), 1),
             Src = source,
             Dir = direction,
-            Spread = Vector(spread, spread, 0),
+            Spread = Vector(spreadX, spreadY, 0),
             Tracer = 1,
             TracerName = isstring(primary.TracerName) and primary.TracerName or "Tracer",
             Force = force,
