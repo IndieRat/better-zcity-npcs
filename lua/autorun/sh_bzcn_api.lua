@@ -1576,20 +1576,23 @@ if SERVER then
         local runtime = IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon or nil
         local weaponClass = (runtime and runtime:GetClass()) or ent.BZCN_SelectedWeapon
             or (ent.GetNW2String and ent:GetNW2String("BZCNWeaponClass", ""))
-        local runtime = isentity(ent.BZCNRuntimeWeapon) and IsValid(ent.BZCNRuntimeWeapon)
-            and ent.BZCNRuntimeWeapon or nil
-        local definition = isstring(weaponClass) and weapons and weapons.GetStored
-            and weapons.GetStored(weaponClass) or nil
-        local worldPos = runtime and runtime.WorldPos or (istable(definition) and definition.WorldPos)
-        local worldAng = runtime and runtime.WorldAng or (istable(definition) and definition.WorldAng)
+        local definition = weapons and weapons.GetStored and weapons.GetStored(weaponClass) or nil
+        local weapon = runtime or definition
+        if not istable(weapon) and not IsValid(weapon) then return false end
+
+        -- Match Z-City's sh_worldmodel.lua transform instead of applying only
+        -- WorldPos/WorldAng. Z-City also adds WorldAng2, its 180-degree model
+        -- correction, and FakePos/FakeAng when the SWEP chooses its fake model.
+        local worldPos = weapon.WorldPos
+        local worldAng = weapon.WorldAng
         if not isvector(worldPos) then worldPos = vector_origin end
         if not isangle(worldAng) then worldAng = angle_zero end
-
-        if ent.SetupBones then pcall(ent.SetupBones, ent) end
+        local extraAng = isangle(weapon.WorldAng2) and weapon.WorldAng2 or angle_zero
         local hand = ent:LookupBone("ValveBiped.Bip01_R_Hand")
             or ent:LookupBone("ValveBiped.Bip01_L_Hand")
         if not hand then return false end
 
+        if ent.SetupBones then pcall(ent.SetupBones, ent) end
         local matrix = ent.GetBoneMatrix and ent:GetBoneMatrix(hand)
         local handPos, handAng
         if matrix then
@@ -1599,14 +1602,17 @@ if SERVER then
         end
         if not isvector(handPos) or not isangle(handAng) then return false end
 
-        -- Match Homigrad's NPC transform branch. Its player/fake-ragdoll
-        -- branch adds a 180-degree correction, but its NPC branch deliberately
-        -- adds zero; applying the player correction here is the observed roll bug.
-        local pos, ang = LocalToWorld(worldPos, worldAng, handPos, handAng)
-        local npcOwner = ent.IsNPC and ent:IsNPC()
-        if not npcOwner then
-            ang:RotateAroundAxis(ang:Forward(), 180)
+        local pos, ang = LocalToWorld(worldPos, worldAng + extraAng, handPos, handAng)
+        ang:RotateAroundAxis(ang:Forward(), 180)
+
+        local useFake = isfunction(weapon.ShouldUseFakeModel)
+            and select(2, pcall(weapon.ShouldUseFakeModel, weapon)) == true
+        if useFake then
+            local fakePos = isvector(weapon.FakePos) and weapon.FakePos or vector_origin
+            local fakeAng = isangle(weapon.FakeAng) and weapon.FakeAng or angle_zero
+            pos, ang = LocalToWorld(fakePos, fakeAng, pos, ang)
         end
+
         proxy:SetPos(pos)
         proxy:SetAngles(ang)
         return true
