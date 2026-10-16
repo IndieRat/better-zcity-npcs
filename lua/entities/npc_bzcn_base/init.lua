@@ -903,7 +903,12 @@ function ENT:FindEnemy()
     local rememberedSquadTarget, rememberedSquadPosition, rememberedSquadSeenAt
 
     local function IsVisibleHostile(target)
-        for _, record in ipairs(hostiles) do
+        -- The adapter builds Hostiles before this NPC evaluates recent-ally
+        -- threats. An attacker can therefore be visible in Targets but absent
+        -- from the precomputed Hostiles list until IsBZCNEnemy promotes it.
+        -- Recheck the NPC's own visible sense records after that promotion;
+        -- this is not shared squad vision and never accepts an unseen target.
+        for _, record in ipairs(targets) do
             if record.Entity == target and record.Visible and self:IsBZCNEnemy(target) then
                 return true
             end
