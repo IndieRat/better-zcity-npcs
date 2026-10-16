@@ -1644,6 +1644,68 @@ function ENT:AttackTarget(target)
 
     if now < (self.LastAttack or 0) then return end
 
+    -- Pick a combat weapon from the NPC's real inventory for this engagement.
+    -- Profile preferences are honored first; otherwise discover compatible
+    -- ranged/melee SWEPs from the actual owned entries (never invent a loadout).
+    if BZCN and isfunction(BZCN.SelectWeapon) then
+        local inventory = {}
+        local ok, saved = pcall(function()
+            if isfunction(self.GetNetVar) then return self:GetNetVar("Inventory", {}) end
+            return self.inventory or {}
+        end)
+        if ok and istable(saved) and istable(saved.Weapons) then inventory = saved.Weapons end
+
+        local function IsRangedClass(class)
+            if not isstring(class) then return false end
+            local def = weapons and weapons.GetStored and weapons.GetStored(class) or nil
+            local primary = istable(def) and istable(def.Primary) and def.Primary or {}
+            return isstring(primary.Ammo) and primary.Ammo ~= ""
+                and string.lower(primary.Ammo) ~= "none"
+                and math.max(tonumber(primary.ClipSize) or 0, tonumber(primary.DefaultClip) or 0) > 0
+        end
+        local function IsMeleeClass(class)
+            if not isstring(class) then return false end
+            if class == "weapon_hands_sh" then return true end
+            local def = weapons and weapons.GetStored and weapons.GetStored(class) or nil
+            local hold = string.lower(tostring(istable(def) and (def.HoldType or def.holdtype) or ""))
+            local lower = string.lower(class)
+            return hold == "melee" or string.find(lower, "knife", 1, true) ~= nil
+                or string.find(lower, "crowbar", 1, true) ~= nil
+                or string.find(lower, "machete", 1, true) ~= nil
+                or string.find(lower, "melee", 1, true) ~= nil
+                or string.find(lower, "weapon_bat", 1, true) ~= nil
+        end
+        local currentClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
+        local preferredMelee = profile.MeleeWeaponClass or profile.MeleeClass
+        local preferredPrimary = profile.PrimaryWeaponClass or profile.PrimaryClass or profile.WeaponClass
+        local preferredSecondary = profile.SecondaryWeaponClass or profile.SecondaryClass
+        local distanceToTarget = distance
+        local desired
+        if distanceToTarget <= (tonumber(profile.MeleeSwitchRange) or 112) then
+            if isstring(preferredMelee) and inventory[preferredMelee] ~= nil and IsMeleeClass(preferredMelee) then
+                desired = preferredMelee
+            else
+                for ownedClass in pairs(inventory) do
+                    if IsMeleeClass(ownedClass) then desired = ownedClass break end
+                end
+            end
+        end
+        if not desired then
+            for _, candidate in ipairs({preferredPrimary, preferredSecondary, profile.WeaponClass}) do
+                if isstring(candidate) and inventory[candidate] ~= nil and IsRangedClass(candidate) then
+                    desired = candidate
+                    break
+                end
+            end
+            if not desired then
+                for ownedClass in pairs(inventory) do
+                    if IsRangedClass(ownedClass) then desired = ownedClass break end
+                end
+            end
+        end
+        if desired and desired ~= currentClass then BZCN.SelectWeapon(self, desired) end
+    end
+
     local weaponClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
     -- Treat a valid Homigrad firearm as ranged even if a class profile omitted Ranged=true.
     local rangedWeapon = false
