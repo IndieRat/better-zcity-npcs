@@ -564,6 +564,25 @@ function BZCN.FireRuntimeWeapon(ent, target)
     local class = ent.BZCN_SelectedWeapon or profile.WeaponClass
     if not isstring(class) or class == "" or MEDICAL_WEAPONS[class] then return false end
 
+    local weaponForSafety = IsValid(ent.BZCNRuntimeWeapon) and ent.BZCNRuntimeWeapon or class
+    local safetyPoint = BZCNCombatActor and BZCNCombatActor.GetTargetAimPoint
+        and BZCNCombatActor.GetTargetAimPoint(target) or target:WorldSpaceCenter()
+    if BZCNCombatActor and isfunction(BZCNCombatActor.GetFriendlyFireStatus) then
+        local safe, blocker, reason = BZCNCombatActor.GetFriendlyFireStatus(ent, target, weaponForSafety, safetyPoint)
+        if not safe then
+            ent.BZCNCombatTarget = nil
+            ent.BZCN_SimulatedButtons = 0
+            ent.BZCNFriendlyFireBlockedUntil = CurTime() + 0.18
+            if ent.SetNW2Bool then ent:SetNW2Bool("BZCNFriendlyFireBlocked", true) end
+            if ent.SetNW2Entity then ent:SetNW2Entity("BZCNFriendlyFireBlocker", IsValid(blocker) and blocker or NULL) end
+            ent.BZCNFriendlyFireReason = reason
+            return true -- never let a fallback bullet bypass the safety check
+        end
+        if ent.SetNW2Bool then ent:SetNW2Bool("BZCNFriendlyFireBlocked", false) end
+        if ent.SetNW2Entity then ent:SetNW2Entity("BZCNFriendlyFireBlocker", NULL) end
+        ent.BZCNFriendlyFireReason = nil
+    end
+
     local now = CurTime()
     -- This owner-level gate also covers the rare case where no runtime SWEP
     -- entity can be created and the stat-based fallback has to fire directly.
