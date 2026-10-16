@@ -44,10 +44,15 @@ local HOLDTYPE_TRANSLATOR = {
 
 local function GetWeaponHoldType(self)
     local profile = self.BZCNClassProfile or (BZCN and BZCN.GetClass and BZCN.GetClass(self.BZCNClass))
-    local weaponClass = self.BZCN_SelectedWeapon or (profile and profile.WeaponClass)
+    local runtime = IsValid(self.BZCNRuntimeWeapon) and self.BZCNRuntimeWeapon or nil
+    local weaponClass = (runtime and runtime:GetClass()) or self.BZCN_SelectedWeapon
+        or (self.GetNW2String and self:GetNW2String("BZCNWeaponClass", ""))
+        or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local holdType = istable(stored) and (stored.HoldType or stored.holdtype) or "normal"
-    holdType = isstring(holdType) and holdType or "normal"
+    local holdType = runtime and (runtime.HoldType or runtime.holdtype)
+        or (istable(stored) and (stored.HoldType or stored.holdtype))
+        or (profile and profile.AnimationHoldType) or "normal"
+    holdType = isstring(holdType) and string.lower(holdType) or "normal"
     return HOLDTYPE_TRANSLATOR[holdType] or holdType
 end
 
@@ -271,12 +276,19 @@ function ENT:GetBZCNMovementSequence(speed, state)
         self.BZCNAnimCacheModel = modelPath
     end
 
-    local weaponClass = self.BZCN_SelectedWeapon or (profile and profile.WeaponClass)
+    local runtime = IsValid(self.BZCNRuntimeWeapon) and self.BZCNRuntimeWeapon or nil
+    local weaponClass = (runtime and runtime:GetClass()) or self.BZCN_SelectedWeapon
+        or (self.GetNW2String and self:GetNW2String("BZCNWeaponClass", ""))
+        or (profile and profile.WeaponClass)
     local stored = isstring(weaponClass) and weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local holdType = self.BZCNCombatHoldType or profile.AnimationHoldType
-        or (istable(stored) and (stored.HoldType or stored.holdtype)) or "normal"
+    local holdType = self.BZCNCombatHoldType
+        or (runtime and (runtime.HoldType or runtime.holdtype))
+        or (istable(stored) and (stored.HoldType or stored.holdtype))
+        or (profile and profile.AnimationHoldType) or "normal"
     holdType = isstring(holdType) and string.lower(holdType) or "normal"
-    self.ixAnimHoldType = self.BZCNCombatHoldType or profile.AnimationHoldType
+    -- Let the equipped SWEP drive the vanilla/IX hold animation. Class-level
+    -- AnimationHoldType is only a fallback for virtual/unregistered weapons.
+    self.ixAnimHoldType = self.BZCNCombatHoldType
         or HOLDTYPE_TRANSLATOR[holdType] or holdType
     local animationSet = animClass[self.ixAnimHoldType] or animClass.normal or animClass
     if not istable(animationSet) then return -1 end
