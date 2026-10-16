@@ -1653,12 +1653,15 @@ function ENT:AttackTarget(target)
     -- Profile preferences are honored first; otherwise discover compatible
     -- ranged/melee SWEPs from the actual owned entries (never invent a loadout).
     if BZCN and isfunction(BZCN.SelectWeapon) then
-        local inventory = {}
+        local inventory, inventoryAmmo = {}, {}
         local ok, saved = pcall(function()
             if isfunction(self.GetNetVar) then return self:GetNetVar("Inventory", {}) end
             return self.inventory or {}
         end)
-        if ok and istable(saved) and istable(saved.Weapons) then inventory = saved.Weapons end
+        if ok and istable(saved) then
+            if istable(saved.Weapons) then inventory = saved.Weapons end
+            if istable(saved.Ammo) then inventoryAmmo = saved.Ammo end
+        end
 
         local function IsRangedClass(class)
             if not isstring(class) then return false end
@@ -1690,7 +1693,7 @@ function ENT:AttackTarget(target)
             local ammoName = primary.Ammo
             local ammoID = isstring(ammoName) and game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
             if not isnumber(ammoID) or ammoID < 0 then return false end
-            local ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+            local ammo = inventoryAmmo
             return (tonumber(ammo[ammoID]) or tonumber(ammo[tostring(ammoID)]) or 0) > 0
         end
         local currentClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
