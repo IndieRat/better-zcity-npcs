@@ -719,10 +719,16 @@ function ENT:IsBZCNEnemy(target)
     local profile = self:GetBZCNProfile()
     if self:HasRecentAllyThreat(target) then return true end
 
-    local ownClass = string.lower(tostring(self.BZCNClass or self.PlayerClassName or ""))
-    -- A direct attacker is a confirmed hostile regardless of class label or current weapon.
-    if (ownClass == "combine" or ownClass == "metrocop" or ownClass == "police")
-        and self.BZCNLastAttacker == target
+    local profile = self:GetBZCNProfile()
+    local ownClass = string.lower(tostring(self.BZCNClass or self.PlayerClassName
+        or profile.ClassName or ""))
+    local ownFaction = string.lower(tostring(profile.Faction or self.BZCN_Faction or ""))
+    local isMetro = string.find(ownClass, "metrocop", 1, true) ~= nil
+        or ownClass == "police" or ownFaction == "metrocop" or ownFaction == "police"
+    local isCombine = ownClass == "combine" or string.find(ownClass, "combine", 1, true) ~= nil
+        or ownFaction == "combine"
+    -- A direct attacker is a confirmed hostile regardless of class alias or current weapon.
+    if (isCombine or isMetro) and self.BZCNLastAttacker == target
         and CurTime() - (tonumber(self.BZCNLastDamageTime) or 0) <= 18 then
         return true
     end
@@ -2729,6 +2735,63 @@ function ENT:OnInjured(damageInfo)
         hook.Run("BZCN_EntityDamaged", self, attacker, damageInfo, true)
     end
     hook.Run("BZCN_NPCInjured", self, damageInfo)
+end
+
+
+
+-- Civil Protection reacts to actual violence against civilians, including
+-- players and native Z-City citizens that do not carry BZCN damage-memory fields.
+-- The offender is still required to pass each officer's own LOS check before firing.
+if not BZCN_CivilProtectionDamageHookInstalled then
+    BZCN_CivilProtectionDamageHookInstalled = true
+    hook.Add("EntityTakeDamage", "BZCN_CivilProtectionWitnessedAssault", function(victim, damageInfo)
+        if not IsValid(victim) or not damageInfo or damageInfo:GetDamage() <= 0 then return end
+        local attacker = damageInfo:GetAttacker()
+        if not IsValid(attacker) or attacker == victim or attacker:IsWorld()
+            or attacker:Health() <= 0 or (attacker:IsPlayer() and not attacker:Alive()) then return end
+
+        local victimFaction
+        if victim:IsPlayer() then
+            local class = victim.PlayerClassName
+                or (victim.GetNW2String and victim:GetNW2String("PlayerClassName", ""))
+            victimFaction = CanonicalFaction(class) or "default"
+        elseif BZCN and BZCN.IsManaged and BZCN.IsManaged(victim) then
+            local profile = victim.BZCNClassProfile
+                or (BZCN.GetClass and BZCN.GetClass(victim.BZCNClass or victim.PlayerClassName)) or {}
+            victimFaction = CanonicalFaction(profile.Faction or profile.ClassName
+                or victim.BZCN_Faction or victim.PlayerClassName) or "default"
+        elseif victim:IsNPC() then
+            victimFaction = CanonicalFaction(nativeNPCFaction[victim:GetClass()]) or "default"
+        else
+            return
+        end
+        if victimFaction ~= "default" and victimFaction ~= "civilian" then return end
+
+        for _, officer in ipairs(ents.FindByClass("npc_bzcn_base")) do
+            if not IsValid(officer) or officer == attacker or officer:Health() <= 0 then continue end
+            local profile = officer.BZCNClassProfile or GetProfile(officer) or {}
+            local className = string.lower(tostring(officer.BZCNClass
+                or officer.PlayerClassName or profile.ClassName or ""))
+            local faction = string.lower(tostring(profile.Faction or officer.BZCN_Faction or ""))
+            local isMetro = string.find(className, "metrocop", 1, true) ~= nil
+                or className == "police" or faction == "metrocop" or faction == "police"
+            local isCombine = className == "combine"
+                or string.find(className, "combine", 1, true) ~= nil or faction == "combine"
+            if not isMetro and not isCombine then continue end
+            if officer:GetPos():DistToSqr(victim:GetPos()) > 2200 * 2200 then continue end
+            local attackerFaction = officer.GetBZCNEntityFaction
+                and officer:GetBZCNEntityFaction(attacker) or nil
+            local officerFaction = CanonicalFaction(profile.Faction or officer.BZCN_Faction
+                or officer.BZCNClass or officer.PlayerClassName)
+            if attackerFaction and officerFaction and attackerFaction == officerFaction then continue end
+
+            officer.BZCNHostileOffender = attacker
+            officer.BZCNHostileOffenderUntil = CurTime() + 90
+            officer.BZCNOffendedAttackAt = 0
+            officer.BZCNLastCivilianAssaultAt = CurTime()
+            if officer.SetNW2Entity then officer:SetNW2Entity("BZCNHostileOffender", attacker) end
+        end
+    end)
 end
 
 function ENT:OnKilled(damageInfo)
