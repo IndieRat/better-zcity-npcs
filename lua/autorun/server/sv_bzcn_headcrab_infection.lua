@@ -157,6 +157,17 @@ local function HandlePounce(ent, now)
     ent.BZCNHeadcrabPounce = nil
     ent.BZCNNextPounceAt = math.max(ent.BZCNNextPounceAt or 0, now + 1.15)
     ent:EmitSound("npc/headcrab/attack1.wav", 68, math.random(95, 108), 0.8)
+
+    -- A successful attachment consumes the headcrab. Player targets retain
+    -- Z-City's native AddHeadcrab/Org Think conversion; managed NPC targets
+    -- continue through ConvertManagedInfected and become headcrab_zombie.
+    -- Defer removal until after this contact callback has finished.
+    if infected and IsValid(ent) then
+        ent.BZCNHeadcrabLatched = true
+        timer.Simple(0, function()
+            if IsValid(ent) and ent.BZCNHeadcrabLatched then ent:Remove() end
+        end)
+    end
 end
 
 local function ConvertManagedInfected(target, organism, now)
