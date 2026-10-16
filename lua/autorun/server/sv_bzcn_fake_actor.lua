@@ -650,16 +650,22 @@ function FakeActor:UpdateCrawl(dt)
     local attacker = owner.BZCNLastAttacker
     local damageAt = tonumber(owner.BZCNLastDamageTime) or 0
     local direction
-    if IsValid(attacker) and attacker ~= owner and now - damageAt <= 5.5 then
-        direction = pelvis:GetPos() - attacker:WorldSpaceCenter()
-    elseif isvector(self.moveVelocity) and self.moveVelocity:LengthSqr() > 1 then
-        direction = self.moveVelocity
+    -- Prefer explicit AI movement intent; ragdoll yaw can be sideways after an impact.
+    if isvector(self.moveVelocity) and self.moveVelocity:Length2DSqr() > 64 then
+        direction = Vector(self.moveVelocity.x, self.moveVelocity.y, 0)
     else
-        direction = rag:GetForward()
+        local ownerVelocity = owner.GetVelocity and owner:GetVelocity() or vector_origin
+        if isvector(ownerVelocity) and ownerVelocity:Length2DSqr() > 100 then
+            direction = Vector(ownerVelocity.x, ownerVelocity.y, 0)
+        elseif IsValid(attacker) and attacker ~= owner and now - damageAt <= 5.5 then
+            direction = pelvis:GetPos() - attacker:WorldSpaceCenter()
+        else
+            direction = owner:GetForward()
+        end
     end
     direction.z = 0
     if direction:LengthSqr() < 1 then
-        direction = rag:GetAngles():Forward()
+        direction = owner:GetForward()
         direction.z = 0
     end
     direction:Normalize()
@@ -719,58 +725,53 @@ function FakeActor:UpdateCrawl(dt)
         end
     end
 
-    -- Z-City's controller pulls through a planted hand: apply equal/opposing
-    -- forces to the anchored hand and torso, scale by frame time and power,
-    -- and taper the pull as forward velocity rises.
-    if grip then
-        local strength = math.Clamp(tonumber(grip.strength) or 1, 0.1, 1)
-        local torso = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2") or pelvis
-        local hand = grip.hand
-        local power = math.Clamp(tonumber(self.controlPower) or 1, 0.05, 1)
-        local force = direction * (2700 * (dt / 0.015) * power * strength)
-
-        if IsValid(hand) then
-            local handOffset = hand:GetPos() - torso:GetPos()
-            local alignment = handOffset:LengthSqr() > 1
-                and math.max(handOffset:GetNormalized():Dot(direction) + 0.1, 0)
-                or 0
-            local velocityScale = 1 / math.max(torso:GetVelocity():Dot(direction) / 25, 1)
-            force = force * alignment * velocityScale
-            hand:ApplyForceCenter(-force)
-        end
-        torso:ApplyForceCenter(force)
-    else
-        if now >= (self.nextCrawlNudge or 0) then
-            self.nextCrawlNudge = now + math.Rand(0.10, 0.14)
-            -- Apply translation to both pelvis and torso. Correcting only the
-            -- pelvis is often absorbed by ragdoll constraints/floor friction,
-            -- leaving a convincing crawl pose that barely changes position.
-            local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 78, 58, 92)
-            local velocity = pelvis:GetVelocity()
+    -- Always drive torso/pelvis translation. The planted-hand weld is only
+    -- traction: relying on its force alone can anchor a hand without moving the body.
+    local torso = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2") or pelvis
+    local power = math.Clamp(tonumber(self.controlPower) or 1, 0.05, 1)
+    local speed = math.Clamp(tonumber(self.config.crawlSpeed) or 82, 58, 110) * math.max(0.45, power)
+    if now >= (self.nextCrawlNudge or 0) then
+        self.nextCrawlNudge = now + math.Rand(0.045, 0.075)
+        local acceleration = math.Clamp(tonumber(self.config.crawlAcceleration) or 180, 100, 260)
+        local maxChange = math.Clamp(acceleration * math.max(dt, 0.01) * 1.5, 4, 18)
+        local function DrivePhysics(phys, scale)
+            if not IsValid(phys) then return end
+            local velocity = phys:GetVelocity()
             local horizontal = Vector(velocity.x, velocity.y, 0)
             local correction = direction * speed - horizontal
-            local maxChange = math.Clamp((tonumber(self.config.crawlAcceleration) or 100) * 0.14, 9, 16)
             if correction:Length() > maxChange then
                 correction:Normalize()
                 correction = correction * maxChange
             end
-            pelvis:SetVelocity(Vector(
-                velocity.x + correction.x,
-                velocity.y + correction.y,
+            phys:SetVelocity(Vector(
+                velocity.x + correction.x * scale,
+                velocity.y + correction.y * scale,
                 velocity.z
             ))
-            local torso = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
-            if IsValid(torso) then
-                local torsoVelocity = torso:GetVelocity()
-                torso:SetVelocity(Vector(
-                    torsoVelocity.x + correction.x * 0.55,
-                    torsoVelocity.y + correction.y * 0.55,
-                    torsoVelocity.z
-                ))
-            end
+            phys:Wake()
         end
+        DrivePhysics(pelvis, 1)
+        DrivePhysics(torso, 0.8)
     end
 
+    -- A planted hand adds a short pull. Measure forward reach in world space
+    -- instead of a normalized dot product that nearly vanishes for lateral hands.
+    if grip then
+        local strength = math.Clamp(tonumber(grip.strength) or 1, 0.1, 1)
+        local hand = grip.hand
+        local force = direction * (2100 * (dt / 0.015) * power * strength)
+        if IsValid(hand) then
+            local handOffset = hand:GetPos() - torso:GetPos()
+            local forwardReach = handOffset:Dot(direction)
+            local alignment = math.Clamp((forwardReach + 4) / 18, 0.2, 1)
+            local forwardSpeed = torso:GetVelocity():Dot(direction)
+            local velocityScale = math.Clamp(1 - math.max(forwardSpeed, 0) / (speed * 1.6), 0.15, 1)
+            force = force * alignment * velocityScale
+            hand:ApplyForceCenter(-force)
+        end
+        torso:ApplyForceCenter(force)
+        pelvis:ApplyForceCenter(force * 0.45)
+    end
     pelvis:ApplyForceCenter(Vector(0, 0, -110))
     local spine = GetPhysicsForBone(rag, "ValveBiped.Bip01_Spine2")
     if now < (self.nextCrawlStroke or 0) then return end
