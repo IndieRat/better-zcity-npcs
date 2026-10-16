@@ -153,8 +153,18 @@ function ENT:UpdateBZCNMovementState(speed)
         -- running speed, rather than switching the animation on a sprint flag.
         local baseSpeed = BZCN and isfunction(BZCN.GetBaseMoveSpeed)
             and BZCN.GetBaseMoveSpeed(self) or (BZCN and BZCN.BaseMoveSpeed) or 190
+        local sprintSpeed = BZCN and isfunction(BZCN.GetSprintMoveSpeed)
+            and BZCN.GetSprintMoveSpeed(self) or (BZCN and BZCN.SprintMoveSpeed) or (baseSpeed * 1.55)
         local sprintThreshold = (previous == "sprinting" and 1.00 or 1.08) * baseSpeed
-        if self.BZCN_Sprinting and speed > sprintThreshold then
+        local desiredSpeed = self.loco and isfunction(self.loco.GetDesiredSpeed)
+            and tonumber(self.loco:GetDesiredSpeed()) or 0
+        -- Combat coroutines can command a sprint-speed gait without setting the
+        -- player-only sprint flag. Infer sprint from actual velocity or the
+        -- NextBot locomotor's requested speed, while requiring real movement.
+        local sprintRequested = self.BZCN_Sprinting == true
+            or desiredSpeed >= sprintSpeed * 0.88
+            or speed >= baseSpeed * 1.15
+        if sprintRequested and speed > sprintThreshold then
             state = "sprinting"
         elseif speed > runThreshold then
             state = "running"
