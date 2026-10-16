@@ -1680,6 +1680,19 @@ function ENT:AttackTarget(target)
                 or string.find(lower, "melee", 1, true) ~= nil
                 or string.find(lower, "weapon_bat", 1, true) ~= nil
         end
+        local function HasUsableAmmo(class)
+            local def = weapons and weapons.GetStored and weapons.GetStored(class) or nil
+            local primary = istable(def) and istable(def.Primary) and def.Primary or {}
+            if not IsRangedClass(class) then return false end
+            local runtime = IsValid(self.BZCNRuntimeWeapon)
+                and self.BZCNRuntimeWeapon:GetClass() == class and self.BZCNRuntimeWeapon or nil
+            if IsValid(runtime) and runtime.Clip1 and runtime:Clip1() > 0 then return true end
+            local ammoName = primary.Ammo
+            local ammoID = isstring(ammoName) and game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
+            if not isnumber(ammoID) or ammoID < 0 then return false end
+            local ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+            return (tonumber(ammo[ammoID]) or tonumber(ammo[tostring(ammoID)]) or 0) > 0
+        end
         local currentClass = self.BZCN_SelectedWeapon or profile.WeaponClass or ""
         local preferredMelee = profile.MeleeWeaponClass or profile.MeleeClass
         local preferredPrimary = profile.PrimaryWeaponClass or profile.PrimaryClass or profile.WeaponClass
@@ -1701,15 +1714,24 @@ function ENT:AttackTarget(target)
             if isstring(preferredSecondary) then rangedPreferences[#rangedPreferences + 1] = preferredSecondary end
             if isstring(profile.WeaponClass) then rangedPreferences[#rangedPreferences + 1] = profile.WeaponClass end
             for _, candidate in ipairs(rangedPreferences) do
-                if inventory[candidate] ~= nil and IsRangedClass(candidate) then
+                if inventory[candidate] ~= nil and HasUsableAmmo(candidate) then
                     desired = candidate
                     break
                 end
             end
             if not desired then
                 for ownedClass in pairs(inventory) do
-                    if IsRangedClass(ownedClass) then desired = ownedClass break end
+                    if IsRangedClass(ownedClass) and HasUsableAmmo(ownedClass) then
+                        desired = ownedClass
+                        break
+                    end
                 end
+            end
+            -- If every owned gun is empty, retain the current ranged weapon so
+            -- its reload/out-of-ammo state remains authoritative instead of
+            -- oscillating between empty inventory entries.
+            if not desired and inventory[currentClass] ~= nil and IsRangedClass(currentClass) then
+                desired = currentClass
             end
         end
         if desired and desired ~= currentClass then BZCN.SelectWeapon(self, desired) end
