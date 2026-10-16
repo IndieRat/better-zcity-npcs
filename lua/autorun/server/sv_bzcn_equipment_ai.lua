@@ -175,6 +175,23 @@ local function ConfigureWeaponEntity(owner, class, slotKey)
     end
 
     if not MEDICAL_WEAPONS[class] then
+        local originalPrimaryAttack = weapon.PrimaryAttack
+        local primaryDef = istable(weapon.Primary) and weapon.Primary or {}
+        local lowerClass = string.lower(class)
+        local hold = string.lower(tostring(weapon.HoldType or weapon.holdtype or ""))
+        local projectileWeapon = hold == "rpg" or hold == "grenade"
+            or string.find(lowerClass, "grenade", 1, true) ~= nil
+            or string.find(lowerClass, "launcher", 1, true) ~= nil
+            or string.find(lowerClass, "rocket", 1, true) ~= nil
+            or string.find(lowerClass, "rpg", 1, true) ~= nil
+            or primaryDef.ProjectileClass ~= nil or primaryDef.Projectile ~= nil
+            or primaryDef.BlastRadius ~= nil or primaryDef.ExplosionRadius ~= nil
+        if projectileWeapon and isfunction(originalPrimaryAttack) then
+            -- Preserve Z-City's native projectile spawn path. We only shim the
+            -- minimal Player aim/input accessors for this call and restore them
+            -- immediately; arbitrary SWEPs still use the conservative fallback.
+            weapon.BZCNNativeProjectileAttack = originalPrimaryAttack
+        end
         -- The actor invokes fire on its own cadence. Do not run a Player input
         -- loop from Think, but keep Homigrad's native PrimaryAttack -> PrimaryShoot
         -- -> FireBullet path for weapons based on homigrad_base.
@@ -637,7 +654,52 @@ function BZCN.FireRuntimeWeapon(ent, target)
     local fired = false
     local nativeHandled = false
 
-    if weapon.BZCNNativeHomigradFire and isfunction(weapon.BZCNNativePrimaryAttack) then
+    if not weapon.BZCNNativeHomigradFire and isfunction(weapon.BZCNNativeProjectileAttack) then
+        local owner = ent
+        local saved = {}
+        local function InstallShim(name, fn)
+            saved[name] = owner[name]
+            owner[name] = fn
+        end
+        local solution = BZCNCombatActor and BZCNCombatActor.UpdateAim
+            and BZCNCombatActor.UpdateAim(ent, target, weapon) or nil
+        local aimAngle = solution and solution.angle or ent:GetAngles()
+        InstallShim("GetAimVector", function() return aimAngle:Forward() end)
+        InstallShim("EyeAngles", function() return aimAngle end)
+        InstallShim("GetShootPos", function() return solution and solution.source
+            or (isfunction(ent.EyePos) and ent:EyePos() or ent:WorldSpaceCenter()) end)
+        InstallShim("KeyDown", function(_, key) return key == IN_ATTACK end)
+        weapon.BZCNActorTrigger = true
+        local ok, err = pcall(weapon.BZCNNativeProjectileAttack, weapon)
+        weapon.BZCNActorTrigger = nil
+        for name, value in pairs(saved) do owner[name] = value end
+        if ok then
+            nativeHandled = true
+            fired = true
+            local firedAt = CurTime()
+            local delay = BZCNCombatActor and BZCNCombatActor.GetFireDelay
+                and BZCNCombatActor.GetFireDelay(ent, weapon) or math.max(tonumber(profile.AttackDelay) or 0.7, 0.55)
+            ent.BZCNActorFiringUntil = firedAt + 0.16
+            ent.BZCNActorLastShotAt = firedAt
+            ent.BZCNNextShotAt = firedAt + delay
+            weapon.BZCNNextFire = ent.BZCNNextShotAt
+            if weapon.SetNextPrimaryFire then weapon:SetNextPrimaryFire(ent.BZCNNextShotAt) end
+            if ent.SetNW2Float then
+                ent:SetNW2Float("BZCNActorFiringUntil", ent.BZCNActorFiringUntil)
+                ent:SetNW2Float("BZCNActorLastShotAt", firedAt)
+            end
+            hook.Run("BZCN_NPCWeaponAttack", ent, target, weapon, nil)
+        else
+            weapon.BZCNNativeProjectileError = tostring(err)
+            ErrorNoHalt("[BZCN] Native projectile attack failed for " .. tostring(class)
+                .. ": " .. tostring(err) .. "\\n")
+            -- Do not downgrade a launcher/grenade to a hitscan bullet. That
+            -- would silently change damage, blast radius, and projectile behavior.
+            nativeHandled = true
+        end
+    end
+
+    if not nativeHandled and weapon.BZCNNativeHomigradFire and isfunction(weapon.BZCNNativePrimaryAttack) then
         local solution = BZCNCombatActor and BZCNCombatActor.UpdateAim
             and BZCNCombatActor.UpdateAim(ent, target, weapon) or nil
         weapon.BZCNCombatAimSolution = solution
