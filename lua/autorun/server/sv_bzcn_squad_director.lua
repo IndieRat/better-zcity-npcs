@@ -119,6 +119,29 @@ local function ElectLeaders(groups)
             table.sort(squad, StableOrder)
             local leader = squad[1]
             if not IsValid(leader) then continue end
+
+            -- Player-owned squadmates can use their actual owner as the squad
+            -- leader. Only promote a player when every member in this fireteam
+            -- has the same companion owner; unrelated nearby NPCs never get
+            -- silently folded into a player's squad.
+            local playerLeader
+            for _, member in ipairs(squad) do
+                local owner = member.BZCNCompanionOwner
+                if not IsValid(owner) and member.GetNW2Entity then
+                    owner = member:GetNW2Entity("BZCNCompanionOwner")
+                end
+                if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then
+                    playerLeader = nil
+                    break
+                end
+                if playerLeader and playerLeader ~= owner then
+                    playerLeader = nil
+                    break
+                end
+                playerLeader = owner
+            end
+            if IsValid(playerLeader) then leader = playerLeader end
+
             local squadID = faction .. ":" .. tostring(leader:EntIndex())
             for index, member in ipairs(squad) do
                 member.BZCNSquadFaction = faction
