@@ -7,6 +7,7 @@ if not SERVER then return end
 BZCN = BZCN or {}
 BZCNGlideBridge = BZCNGlideBridge or {}
 local Bridge = BZCNGlideBridge
+Bridge.Occupants = Bridge.Occupants or setmetatable({}, {__mode = "k"})
 if BZCN.AIManager then BZCN.AIManager.RegisterSubsystem("glideBridge", Bridge) end
 
 local function GetSeatIndex(vehicle, seat)
@@ -110,6 +111,7 @@ end
 
 hook.Add("BZCN_NPCEnteredGlideVehicle", "BZCN_GlideNativeOccupantBridge", function(npc, vehicle)
     if not IsValid(npc) or not IsValid(vehicle) then return end
+    Bridge.Occupants[npc] = true
     local seat = npc.BZCNGlideSeat
     local ragdoll = npc.BZCNNPCRagdoll or npc.FakeRagdoll
         or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
@@ -117,6 +119,7 @@ hook.Add("BZCN_NPCEnteredGlideVehicle", "BZCN_GlideNativeOccupantBridge", functi
 end)
 
 hook.Add("BZCN_NPCExitedGlideVehicle", "BZCN_GlideNativeOccupantBridge", function(npc)
+    if IsValid(npc) then Bridge.Occupants[npc] = nil end
     if not IsValid(npc) then return end
     local ragdoll = npc.BZCNNPCRagdoll or npc.FakeRagdoll
         or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
@@ -126,10 +129,18 @@ end)
 -- Keep the bridge correct if Z-City replaces the fake ragdoll during a downed
 -- transition. The authoritative organism ragdoll, not a stale proxy, is exposed.
 hook.Add("Think", "BZCN_GlideNativeOccupantSync", function()
-    for _, npc in ipairs(ents.GetAll()) do
-        if not IsValid(npc) or not npc.BZCNGlideVehicle then continue end
+    -- Only seated NPCs can need this repair. Tracking them from the enter/exit
+    -- hooks avoids scanning every entity on every server frame.
+    for npc in pairs(Bridge.Occupants) do
+        if not IsValid(npc) then
+            Bridge.Occupants[npc] = nil
+            continue
+        end
+        if not IsValid(npc.BZCNGlideVehicle) or not IsValid(npc.BZCNGlideSeat) then
+            Bridge.Occupants[npc] = nil
+            continue
+        end
         local vehicle, seat = npc.BZCNGlideVehicle, npc.BZCNGlideSeat
-        if not IsValid(vehicle) or not IsValid(seat) then continue end
         local ragdoll = npc.BZCNNPCRagdoll or npc.FakeRagdoll
             or (npc.GetNWEntity and npc:GetNWEntity("FakeRagdoll"))
         if not IsValid(ragdoll) then continue end
