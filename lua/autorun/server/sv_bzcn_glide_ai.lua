@@ -1625,8 +1625,11 @@ local function UpdateVehicleAI(vehicle, now)
     SetControls(vehicle, throttle, steer, brake)
 end
 
-local function ProcessBoardingApproaches(now)
-    for _, npc in ipairs(ents.GetAll()) do
+local function ProcessBoardingApproaches(now, entities)
+    -- Reuse the frame's entity snapshot instead of walking the full entity list
+    -- independently for boarding, vehicle discovery, and draw-state maintenance.
+    entities = entities or ents.GetAll()
+    for _, npc in ipairs(entities) do
         local vehicle = npc.BZCNGlideApproachVehicle
         local seat = npc.BZCNGlideApproachSeat
         if not IsValid(vehicle) or not IsValid(seat) or not IsManaged(npc) then
@@ -1683,8 +1686,9 @@ local function ProcessBoardingApproaches(now)
     end
 end
 
-local function ScanVehicles(now)
-    for _, vehicle in ipairs(ents.GetAll()) do
+local function ScanVehicles(now, entities)
+    entities = entities or ents.GetAll()
+    for _, vehicle in ipairs(entities) do
         if IsCar(vehicle) then
             if IsValid(vehicle.BZCNAIDriver) then
                 UpdateVehicleAI(vehicle, now)
@@ -1701,21 +1705,23 @@ end
 
 hook.Add("Think", "BZCN_GlideVehicleAI", function()
     local now = CurTime()
+    -- This subsystem does not need per-frame entity enumeration. Run the
+    -- visual-state guard at the same bounded cadence as vehicle AI, then share
+    -- one snapshot across all three passes. This removes multiple full
+    -- ents.GetAll() traversals from every AI update and the per-frame traversal.
+    if now < (AI.nextScan or 0) then return end
+    AI.nextScan = now + 0.25
 
-    -- Drawing suppression must run every frame, independently of the slower
-    -- route/AI scan. Appearance hooks can otherwise briefly resurrect the
-    -- original standing NextBot beside the seated physics ragdoll.
-    for _, npc in ipairs(ents.GetAll()) do
+    local entities = ents.GetAll()
+    for _, npc in ipairs(entities) do
         if IsManaged(npc) and IsValid(npc.BZCNGlideVehicle)
             and npc.BZCNGlideSeatedFake == true and not npc:GetNoDraw() then
             npc:SetNoDraw(true)
         end
     end
 
-    if now < (AI.nextScan or 0) then return end
-    AI.nextScan = now + 0.25
-    ProcessBoardingApproaches(now)
-    ScanVehicles(now)
+    ProcessBoardingApproaches(now, entities)
+    ScanVehicles(now, entities)
 end)
 
 hook.Add("EntityRemoved", "BZCN_GlideVehicleCleanup", function(ent)
