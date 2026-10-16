@@ -1646,7 +1646,7 @@ if SERVER then
         local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass) or nil
         if IsHomigradWeaponClass(weaponClass) then
             local source = runtime or stored
-            local scale = source and tonumber(source.FakeScale)
+            local scale = source and tonumber(source.FakeScale) or tonumber(stored and stored.FakeScale)
             if scale and scale > 0 then proxy:SetModelScale(math.Clamp(scale, 0.1, 4), 0) end
         end
         proxy:SetPos(ent:GetPos())
@@ -1654,8 +1654,10 @@ if SERVER then
         proxy:Spawn()
         if IsHomigradWeaponClass(weaponClass) then
             local source = runtime or stored
-            if source and isstring(source.FakeBodyGroups) and isfunction(proxy.SetBodyGroups) then
-                pcall(proxy.SetBodyGroups, proxy, source.FakeBodyGroups)
+            local fakeBodyGroups = source and source.FakeBodyGroups
+                or (stored and stored.FakeBodyGroups)
+            if isstring(fakeBodyGroups) and isfunction(proxy.SetBodyGroups) then
+                pcall(proxy.SetBodyGroups, proxy, fakeBodyGroups)
             end
         end
         proxy:SetSolid(SOLID_NONE)
