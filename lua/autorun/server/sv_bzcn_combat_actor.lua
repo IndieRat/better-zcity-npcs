@@ -197,6 +197,9 @@ function Actor.ApplyWeaponAnimationPool(owner, weapon, weaponClass)
     if not IsValidEntity(owner) then return "normal" end
     local hold = Actor.GetWeaponHoldType(owner, weapon, weaponClass)
     owner.BZCNCombatHoldType = hold
+    owner.BZCNCombatHoldWeaponClass = weaponClass
+        or (IsValidEntity(weapon) and weapon:GetClass())
+        or (IsValidEntity(owner) and owner.BZCN_SelectedWeapon) or ""
     owner.ixAnimHoldType = hold
     return hold
 end
