@@ -56,6 +56,14 @@ local function SquadFaction(ent)
     return nil
 end
 
+local function GetCompanionOwner(ent)
+    local owner = IsValid(ent) and ent.BZCNCompanionOwner or nil
+    if not IsValid(owner) and IsValid(ent) and ent.GetNW2Entity then
+        owner = ent:GetNW2Entity("BZCNCompanionOwner")
+    end
+    return IsValid(owner) and owner:IsPlayer() and owner:Alive() and owner or nil
+end
+
 local function StableOrder(a, b)
     local ai = tonumber(a.BZCNSquadJoinedAt) or a:EntIndex()
     local bi = tonumber(b.BZCNSquadJoinedAt) or b:EntIndex()
@@ -99,8 +107,12 @@ local function ElectLeaders(groups)
 
             while #squad < MAX_SQUAD_SIZE do
                 local closest, closestDistance
+                local seedOwner = GetCompanionOwner(seed)
                 for _, candidate in ipairs(members) do
                     if not pending[candidate] then continue end
+                    -- Keep player-owned companions in their own fireteam so a
+                    -- nearby unowned actor cannot strip their player leader.
+                    if GetCompanionOwner(candidate) ~= seedOwner then continue end
                     local distance
                     for _, existing in ipairs(squad) do
                         local candidateDistance = candidate:GetPos():DistToSqr(existing:GetPos())
@@ -124,21 +136,14 @@ local function ElectLeaders(groups)
             -- leader. Only promote a player when every member in this fireteam
             -- has the same companion owner; unrelated nearby NPCs never get
             -- silently folded into a player's squad.
-            local playerLeader
-            for _, member in ipairs(squad) do
-                local owner = member.BZCNCompanionOwner
-                if not IsValid(owner) and member.GetNW2Entity then
-                    owner = member:GetNW2Entity("BZCNCompanionOwner")
+            local playerLeader = GetCompanionOwner(squad[1])
+            if playerLeader then
+                for _, member in ipairs(squad) do
+                    if GetCompanionOwner(member) ~= playerLeader then
+                        playerLeader = nil
+                        break
+                    end
                 end
-                if not IsValid(owner) or not owner:IsPlayer() or not owner:Alive() then
-                    playerLeader = nil
-                    break
-                end
-                if playerLeader and playerLeader ~= owner then
-                    playerLeader = nil
-                    break
-                end
-                playerLeader = owner
             end
             if IsValid(playerLeader) then leader = playerLeader end
 
