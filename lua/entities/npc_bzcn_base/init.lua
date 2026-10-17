@@ -62,17 +62,36 @@ local function HasSenseRecord(self, target, requireHostile)
 end
 
 local function GetWaterSurfacePosition(self)
-    if self:WaterLevel() <= 0 then return nil end
+    if self:WaterLevel() <= 0 then
+        self.BZCNWaterSurfaceSampleAt = nil
+        self.BZCNWaterSurfaceOffset = nil
+        return nil
+    end
+
+    local now = CurTime()
     local pos = self:WorldSpaceCenter()
+    -- PointContents is much cheaper than a trace, but doing up to 96 samples
+    -- every behavior tick still scales poorly when many NPCs are swimming.
+    -- Cache the sampled vertical offset briefly and reuse it between samples.
+    local sampledAt = tonumber(self.BZCNWaterSurfaceSampleAt) or 0
+    local cachedOffset = tonumber(self.BZCNWaterSurfaceOffset)
+    if cachedOffset and now - sampledAt < 0.3 then
+        return pos + Vector(0, 0, cachedOffset)
+    end
+
     local contentsMask = CONTENTS_WATER or 32
     -- Water brushes are not consistently returned by TraceLine. Sample point
     -- contents upward instead and use the first dry point as the surface.
     for height = 8, 768, 8 do
         local sample = pos + Vector(0, 0, height)
         if bit.band(util.PointContents(sample), contentsMask) == 0 then
+            self.BZCNWaterSurfaceSampleAt = now
+            self.BZCNWaterSurfaceOffset = height
             return sample
         end
     end
+    self.BZCNWaterSurfaceSampleAt = now
+    self.BZCNWaterSurfaceOffset = nil
     return nil
 end
 
