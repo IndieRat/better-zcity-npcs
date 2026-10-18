@@ -891,10 +891,20 @@ function ENT:FindBZCNImpulsePrey()
 
     -- The furry's visor scans in recurring impulses. This scan intentionally
     -- tracks positions even without line of sight; the normal visibility test
-    -- still governs whether it can immediately attack a target.
+    -- still governs whether it can immediately attack a target. Stagger the
+    -- first scan and query the spatial index rather than walking every entity
+    -- on the server, including props and NPCs on the other side of the map.
+    if self.BZCNNextImpulseScan == nil then
+        self.BZCNNextImpulseScan = now + ((self:EntIndex() % 10) * 0.025)
+        return nil
+    end
     self.BZCNNextImpulseScan = now + 0.4
+    local scanRadius = math.Clamp(math.max(
+        tonumber(self.LoseTargetDist) or 1400,
+        tonumber(profile.WeaponRange) or 900
+    ), 900, 3600)
     local best, bestDistance
-    for _, candidate in ipairs(ents.GetAll()) do
+    for _, candidate in ipairs(ents.FindInSphere(self:GetPos(), scanRadius)) do
         if not IsValid(candidate) or candidate == self or candidate:Health() <= 0 then continue end
         if candidate:IsPlayer() and not candidate:Alive() then continue end
         if not (candidate:IsPlayer() or candidate:IsNPC()
