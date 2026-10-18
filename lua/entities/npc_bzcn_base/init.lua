@@ -2,6 +2,14 @@ AddCSLuaFile("cl_init.lua")
 AddCSLuaFile("shared.lua")
 include("shared.lua")
 
+-- Server owners can trade fallback target reacquisition frequency for CPU
+-- headroom. The adapter's normal sensing/combat path remains unchanged.
+if not GetConVar("bzcn_ai_direct_scan_interval") then
+    CreateConVar("bzcn_ai_direct_scan_interval", "0.3", FCVAR_ARCHIVE,
+        "Seconds between expensive BZCN direct enemy fallback scans (0.15-1.0).",
+        0.15, 1.0)
+end
+
 local function GetProfile(self)
     return (BZCN and BZCN.GetClass and BZCN.GetClass(self.BZCNClass or self.PlayerClassName))
         or {Name = "ZCity NPC", Health = 100, Speed = 175, Faction = "civilian", Ranged = false}
@@ -1023,9 +1031,20 @@ function ENT:FindEnemy()
         or classKey == "combine" or classKey == "rebel" or classKey == "metrocop"
         or (IsValid(self.BZCNHostileOffender)
             and (self.BZCNHostileOffenderUntil or 0) > CurTime())
+    local scanNow = CurTime()
+    local scanInterval = GetConVar("bzcn_ai_direct_scan_interval")
+    scanInterval = scanInterval and math.Clamp(scanInterval:GetFloat(), 0.15, 1.0) or 0.3
+
+    -- Stagger first fallback scans by entity index so a wave of NPCs spawned
+    -- together does not all perform their broad-phase search and LOS traces
+    -- on the same server tick. Adapter-provided visible targets are unaffected.
+    if self.BZCNNextDirectEnemyScan == nil then
+        self.BZCNNextDirectEnemyScan = scanNow + ((self:EntIndex() % 10) * 0.025)
+    end
+
     if not IsValid(best) and isCombatSearcher
-        and CurTime() >= (self.BZCNNextDirectEnemyScan or 0) then
-        self.BZCNNextDirectEnemyScan = CurTime() + 0.3
+        and scanNow >= self.BZCNNextDirectEnemyScan then
+        self.BZCNNextDirectEnemyScan = scanNow + scanInterval
         local scanRadius = math.Clamp(math.max(
             tonumber(self.LoseTargetDist) or 1400,
             tonumber(profile.WeaponRange) or 900
