@@ -10,7 +10,6 @@ local MAX_RATE = 60
 local CRITICAL_BLOOD = 2000
 
 local pendingHits = setmetatable({}, {__mode = "k"})
-local managedNPCs = setmetatable({}, {__mode = "k"})
 
 local function IsManagedNPC(ent)
     return IsValid(ent) and not ent:IsPlayer()
@@ -228,27 +227,10 @@ hook.Add("PostEntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Record", function(tar
     state.bleedActive = true
 end)
 
--- Keep a small registry so the recurring blood simulation does not scan
--- every prop, ragdoll, weapon and map entity twice per second.
-for _, ent in ipairs(ents.GetAll()) do
-    if IsManagedNPC(ent) then managedNPCs[ent] = true end
-end
-
-hook.Add("BZCN_NPCSpawned", "BZCN_NaturalNPCBloodLoss_Registry", function(ent)
-    if IsManagedNPC(ent) then managedNPCs[ent] = true end
-end)
-
-hook.Add("EntityRemoved", "BZCN_NaturalNPCBloodLoss_Registry", function(ent)
-    managedNPCs[ent] = nil
-end)
-
 timer.Create("BZCN_NaturalNPCBloodLoss", TICK, 0, function()
     local now = CurTime()
-    for owner in pairs(managedNPCs) do
-        if not IsManagedNPC(owner) then
-            managedNPCs[owner] = nil
-            continue
-        end
+    for _, owner in ipairs(ents.GetAll()) do
+        if not IsManagedNPC(owner) then continue end
         local state = GetState(owner)
         if not state then continue end
 
@@ -299,7 +281,6 @@ end)
 
 hook.Add("BZCN_NPCSpawned", "BZCN_NaturalNPCBloodLoss_Init", function(owner)
     if not IsManagedNPC(owner) then return end
-    managedNPCs[owner] = true
     timer.Simple(0, function()
         if not IsValid(owner) then return end
         local state = GetState(owner)
