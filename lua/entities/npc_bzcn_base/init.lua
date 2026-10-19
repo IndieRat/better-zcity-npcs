@@ -2,14 +2,6 @@ AddCSLuaFile("cl_init.lua")
 AddCSLuaFile("shared.lua")
 include("shared.lua")
 
--- Server owners can trade fallback target reacquisition frequency for CPU
--- headroom. The adapter's normal sensing/combat path remains unchanged.
-if not GetConVar("bzcn_ai_direct_scan_interval") then
-    CreateConVar("bzcn_ai_direct_scan_interval", "0.3", FCVAR_ARCHIVE,
-        "Seconds between expensive BZCN direct enemy fallback scans (0.15-1.0).",
-        0.15, 1.0)
-end
-
 local function GetProfile(self)
     return (BZCN and BZCN.GetClass and BZCN.GetClass(self.BZCNClass or self.PlayerClassName))
         or {Name = "ZCity NPC", Health = 100, Speed = 175, Faction = "civilian", Ranged = false}
@@ -891,20 +883,10 @@ function ENT:FindBZCNImpulsePrey()
 
     -- The furry's visor scans in recurring impulses. This scan intentionally
     -- tracks positions even without line of sight; the normal visibility test
-    -- still governs whether it can immediately attack a target. Stagger the
-    -- first scan and query the spatial index rather than walking every entity
-    -- on the server, including props and NPCs on the other side of the map.
-    if self.BZCNNextImpulseScan == nil then
-        self.BZCNNextImpulseScan = now + ((self:EntIndex() % 10) * 0.025)
-        return nil
-    end
+    -- still governs whether it can immediately attack a target.
     self.BZCNNextImpulseScan = now + 0.4
-    local scanRadius = math.Clamp(math.max(
-        tonumber(self.LoseTargetDist) or 1400,
-        tonumber(profile.WeaponRange) or 900
-    ), 900, 3600)
     local best, bestDistance
-    for _, candidate in ipairs(ents.FindInSphere(self:GetPos(), scanRadius)) do
+    for _, candidate in ipairs(ents.GetAll()) do
         if not IsValid(candidate) or candidate == self or candidate:Health() <= 0 then continue end
         if candidate:IsPlayer() and not candidate:Alive() then continue end
         if not (candidate:IsPlayer() or candidate:IsNPC()
@@ -1041,20 +1023,9 @@ function ENT:FindEnemy()
         or classKey == "combine" or classKey == "rebel" or classKey == "metrocop"
         or (IsValid(self.BZCNHostileOffender)
             and (self.BZCNHostileOffenderUntil or 0) > CurTime())
-    local scanNow = CurTime()
-    local scanInterval = GetConVar("bzcn_ai_direct_scan_interval")
-    scanInterval = scanInterval and math.Clamp(scanInterval:GetFloat(), 0.15, 1.0) or 0.3
-
-    -- Stagger first fallback scans by entity index so a wave of NPCs spawned
-    -- together does not all perform their broad-phase search and LOS traces
-    -- on the same server tick. Adapter-provided visible targets are unaffected.
-    if self.BZCNNextDirectEnemyScan == nil then
-        self.BZCNNextDirectEnemyScan = scanNow + ((self:EntIndex() % 10) * 0.025)
-    end
-
     if not IsValid(best) and isCombatSearcher
-        and scanNow >= self.BZCNNextDirectEnemyScan then
-        self.BZCNNextDirectEnemyScan = scanNow + scanInterval
+        and CurTime() >= (self.BZCNNextDirectEnemyScan or 0) then
+        self.BZCNNextDirectEnemyScan = CurTime() + 0.3
         local scanRadius = math.Clamp(math.max(
             tonumber(self.LoseTargetDist) or 1400,
             tonumber(profile.WeaponRange) or 900
