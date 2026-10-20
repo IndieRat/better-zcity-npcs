@@ -222,10 +222,39 @@ function ENT:GetBZCNMovementSequence(speed, state)
         end
         return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
     elseif profile.ZombieStyle == true then
-        -- Mirror Z-City's headcrabzombie CalcMainActivity behavior: its player
-        -- model is authored around HL2MP zombie activities, especially RUN_ZOMBIE
-        -- even at walking pace. A generic WALK_ZOMBIE sequence is absent on some
-        -- mounted versions of the model, which previously collapsed to an idle.
+        -- The Z-City player zombie is a playermodel, not the stock npc_zombie
+        -- model. Prefer its authored locomotion sequences before querying the
+        -- NPC-style HL2 zombie activity; the latter can resolve to an idle or
+        -- non-locomotion sequence on some mounted model revisions.
+        local zombieNames
+        if state == "standing" then
+            zombieNames = {
+                "idle_all_01", "idle_all", "idle_unarmed", "zombie_idle",
+                "idle", "idle01", "idle1", "idle2", "idle_subtle"
+            }
+        elseif state == "crawling" then
+            zombieNames = {
+                "crawl_all", "crawl_all_01", "crawl_forward", "crawl_loop",
+                "crawl", "zombie_crawl", "walk_crouch", "zombie_walk"
+            }
+        elseif state == "airborne" then
+            zombieNames = {"jump_slam", "jump", "jump_fall", "fall", "run"}
+        elseif state == "walking" then
+            zombieNames = {
+                "walk_all", "walk_all_moderate", "walk_slow", "walk_unarmed",
+                "walk", "zombie_walk", "zombie_walk_all", "run_all"
+            }
+        else
+            -- Visible-target pursuit uses the faster gait; the same model-owned
+            -- run sequence can be played faster without changing the rig.
+            zombieNames = {
+                "run_all", "run_all_01", "runfast", "zombie_run",
+                "run", "run_zombie", "zombie_run_all", "walk_all"
+            }
+        end
+        local sequence = GetFirstSequence(self, zombieNames)
+        if sequence >= 0 then return sequence end
+
         local activity
         if state == "standing" then
             activity = _G.ACT_HL2MP_IDLE_ZOMBIE or ACT_IDLE
@@ -234,6 +263,8 @@ function ENT:GetBZCNMovementSequence(speed, state)
                 or _G.ACT_HL2MP_RUN_ZOMBIE or ACT_WALK
         elseif state == "airborne" then
             activity = _G.ACT_HL2MP_JUMP_SLAM or _G.ACT_HL2MP_RUN_ZOMBIE or ACT_JUMP
+        elseif state == "walking" then
+            activity = _G.ACT_HL2MP_RUN_ZOMBIE or ACT_WALK or ACT_RUN
         else
             activity = _G.ACT_HL2MP_RUN_ZOMBIE or ACT_RUN
         end
@@ -241,23 +272,7 @@ function ENT:GetBZCNMovementSequence(speed, state)
             local ok, selected = pcall(self.SelectWeightedSequence, self, activity)
             if ok and IsUsableSequence(self, selected) then return selected end
         end
-
-        local zombieNames
-        if state == "standing" then
-            zombieNames = {"idle", "idle1", "idle2", "idle_all", "idle01", "zombie_idle"}
-        elseif state == "walking" then
-            zombieNames = {"zombie_walk", "walk", "walk_all", "walk_slow", "zombie_walk_all", "run"}
-        elseif state == "crawling" then
-            zombieNames = {"crawl", "zombie_crawl", "walk_crouch", "crawl_all", "zombie_walk"}
-        elseif state == "airborne" then
-            zombieNames = {"jump_slam", "jump", "jump_fall", "fall", "run"}
-        else
-            zombieNames = {"zombie_run", "runfast", "run", "run_all", "zombie_run_all", "walk"}
-        end
-        local sequence = GetFirstSequence(self, zombieNames)
-        if sequence >= 0 then return sequence end
         return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
-    end
 
     -- Z-City selects ACT_MP_RUN from actual velocity, and some models expose a
     -- separate sprint clip. Prefer a real sprint sequence when one exists.

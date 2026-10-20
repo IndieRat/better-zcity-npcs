@@ -308,6 +308,8 @@ BZCN.RegisterClass("headcrab_zombie", {
     Faction = "zombie", EnemyPlayers = true,
     EnemyFactions = {"default", "civilian", "Combine", "Metrocop", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 850, FollowDistance = 80, HelpRange = 600, HelpMemory = 5,
+    -- Slow search pace; the zombie horror director overrides this with a fast charge only on sight.
+    ZombieWalkSpeed = 78, ZombieSprintSpeed = 248, SenseRange = 1450,
     ZombieStyle = true, Ranged = false, MeleeDamage = 22, MeleeRange = 58, AttackDelay = 1.18,
     MeleeSound = "npc/zombie/claw_strike1.wav", MeleeMissSound = "npc/zombie/claw_miss1.wav",
     AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",

@@ -2297,9 +2297,28 @@ function ENT:ChaseEnemy(target)
         if crawling then
             desiredSpeed = baseSpeed * physiologySpeed * 0.42
         elseif profile.ZombieStyle == true then
-            -- Zombies keep a slow, dragging pursuit even when the stamina
-            -- director marks them as sprinting; never inherit human sprint speed.
-            desiredSpeed = baseSpeed * physiologySpeed * (sprinting and 1.08 or 1)
+            -- Resident Evil-style behavior: a slow dragging search, then an
+            -- unmistakable full charge once the target is actually in sight.
+            -- This intentionally overrides human stamina sprint caps for zombies.
+            local visibleCharge = visible and distance > 92
+            self.BZCN_Sprinting = visibleCharge
+            self.BZCNZombieHunting = visibleCharge
+            if self.SetNW2Bool then self:SetNW2Bool("BZCNZombieHunting", visibleCharge) end
+            if visibleCharge then
+                desiredSpeed = math.max(tonumber(profile.ZombieSprintSpeed) or 248, baseSpeed * 1.75)
+                    * physiologySpeed
+                if self.BZCNZombieAlertTarget ~= target then
+                    self.BZCNZombieAlertTarget = target
+                    self:EmitSound("npc/zombie/zombie_alert" .. math.random(1, 3) .. ".wav", 76,
+                        math.random(75, 88), 0.9)
+                end
+            else
+                desiredSpeed = math.min(tonumber(profile.ZombieWalkSpeed) or 78, baseSpeed)
+                    * physiologySpeed
+                if not IsValid(target) or target:Health() <= 0 then
+                    self.BZCNZombieAlertTarget = nil
+                end
+            end
         elseif profile.HeadcrabStyle == true then
             -- Headcrabs are fast little hoppers, not human sprinters.
             desiredSpeed = baseSpeed * physiologySpeed * (sprinting and 1.10 or 1)
@@ -2668,6 +2687,14 @@ function ENT:RunBehaviour()
                 self:ChaseEnemy(enemy)
             else
                 local profile = self:GetBZCNProfile()
+                if profile.ZombieStyle == true and BZCN.ZombieHorror
+                    and isfunction(BZCN.ZombieHorror.RunIdleTask) then
+                    if BZCN.AIManager then
+                        BZCN.AIManager.SetIntent(self, "zombie_search", 42,
+                            "Shamble, search for corpses, and feed", nil, 0.35, "behavior-loop")
+                    end
+                    BZCN.ZombieHorror.RunIdleTask(self)
+                else
                 local helpTarget = self.BZCNHelpTarget
                 local helping = IsValid(helpTarget)
                     and (self.BZCNHelpUntil or 0) > CurTime()
@@ -2725,6 +2752,7 @@ function ENT:RunBehaviour()
                             coroutine.wait(0.2)
                         end
                     end
+                end
                 end
             end
         end
