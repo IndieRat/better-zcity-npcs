@@ -2039,7 +2039,9 @@ local function FleeFromHorrorZombie(self, target, profile)
     path:SetMinLookAheadDistance(90)
     path:SetGoalTolerance(42)
     local computed = TryComputePathToGoal(path, self, escapePoint)
-    if not computed then return false end
+    -- If the map has no usable nav route, keep the noncombatant retreating
+    -- directly instead of falling through into a head-on melee chase.
+    local hasPath = computed == true and path:IsValid()
 
     local runSpeed = BZCN and isfunction(BZCN.GetBaseMoveSpeed)
         and BZCN.GetBaseMoveSpeed(self) or tonumber(profile.Speed) or 175
@@ -2056,9 +2058,13 @@ local function FleeFromHorrorZombie(self, target, profile)
         self.loco:FaceTowards(escapePoint)
         if path:GetAge() > 0.4 or not path:IsValid() then
             local ok = TryComputePathToGoal(path, self, escapePoint)
-            if not ok then break end
+            hasPath = ok == true and path:IsValid()
         end
-        if path:IsValid() then path:Update(self) end
+        if hasPath and path:IsValid() then
+            path:Update(self)
+        else
+            self.loco:Approach(escapePoint, 0.7)
+        end
         if self.loco:IsStuck() then
             self.loco:ClearStuck()
             break
