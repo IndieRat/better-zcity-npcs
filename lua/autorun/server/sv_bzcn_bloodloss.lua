@@ -49,17 +49,60 @@ local function GetOrganism(owner)
     return nil
 end
 
+local function GetRegisteredNativeOrganism(owner)
+    if not IsManagedNPC(owner) then return nil end
+    local organismAPI = hg and hg.organism
+    local nativeList = organismAPI and organismAPI.list
+    local organism = istable(nativeList) and nativeList[owner] or nil
+    if not istable(organism) or organism.owner ~= owner or organism.fakePlayer ~= true then
+        return nil
+    end
+
+    -- Z-City's registry is authoritative. Restore only this managed NPC's
+    -- public alias if the registered table survived but the alias was lost.
+    if owner.organism ~= organism then owner.organism = organism end
+    owner.BZCN_Organism = organism
+    return organism
+end
+
+local function GetWoundOrganism(owner)
+    local organism = GetRegisteredNativeOrganism(owner)
+    if organism then return organism end
+    if not IsManagedNPC(owner) then return nil end
+
+    -- During startup, preserve an NPC-owned organism while the native registry
+    -- is still being installed. Never borrow a table owned by another entity.
+    organism = GetOrganism(owner)
+    if istable(organism) and organism.owner == owner and organism.fakePlayer == true then
+        if owner.organism ~= organism then owner.organism = organism end
+        return organism
+    end
+    return nil
+end
+
 local function GetNativeBloodModule(owner, state)
-    local organism = GetOrganism(owner)
+    local organism = GetRegisteredNativeOrganism(owner)
     local organismAPI = hg and hg.organism
     local bloodModule = organismAPI and organismAPI.module and organismAPI.module.blood
-    local nativeList = organismAPI and organismAPI.list
-    if not organism or not istable(state) or state.usesZCityOrganism ~= true
-        or not istable(nativeList) or nativeList[owner] ~= organism
-        or not istable(bloodModule) or not isfunction(bloodModule[2]) then
+    if not organism or not istable(bloodModule) or not isfunction(bloodModule[2]) then
         return nil
     end
     return organism
+end
+
+local function GetOrAttachState(owner)
+    if not IsManagedNPC(owner) then return nil end
+    local state = GetState(owner)
+    if state and GetRegisteredNativeOrganism(owner) then return state end
+
+    -- Do not depend on an earlier EntityTakeDamage hook having run. Z-City may
+    -- short-circuit that event before this addon gets its wound snapshot.
+    local support = hg and hg.BZCNNPCSupport
+    if support and isfunction(support.Attach) then
+        local ok, attached = pcall(support.Attach, owner)
+        if ok and istable(attached) then state = attached end
+    end
+    return state
 end
 
 local function WoundStats(org)
@@ -146,6 +189,22 @@ local function AddNativeFallbackWound(owner, org, damageInfo)
     return ok
 end
 
+local function PublishWoundRegistry(owner, organism)
+    if not IsValid(owner) or not istable(organism) then return end
+    if not istable(organism.wounds) then organism.wounds = {} end
+    if not istable(organism.arterialwounds) then organism.arterialwounds = {} end
+
+    local function publish(target)
+        if not IsValid(target) or not isfunction(target.SetNetVar) then return end
+        pcall(target.SetNetVar, target, "wounds", organism.wounds)
+        pcall(target.SetNetVar, target, "arterialwounds", organism.arterialwounds)
+    end
+
+    publish(owner)
+    local rag = owner.BZCNNPCRagdoll or owner.FakeRagdoll
+    if IsValid(rag) and rag ~= owner then publish(rag) end
+end
+
 local function PublishNetworkState(owner, state, org, native)
     local blood = math.Clamp(tonumber(native and native.blood or state.blood) or 0, 0, 5000)
     if owner.SetNW2Float then
@@ -179,8 +238,8 @@ hook.Add("EntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Snapshot", function(targe
     local owner = ResolveOwner(target)
     if not IsManagedNPC(owner) then return end
 
-    local state = GetState(owner)
-    local org = state and GetNativeBloodModule(owner, state)
+    local state = GetOrAttachState(owner)
+    local org = state and GetWoundOrganism(owner)
     if not org then
         pendingHits[owner] = nil
         return
@@ -190,7 +249,7 @@ hook.Add("EntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Snapshot", function(targe
 end)
 
 hook.Add("PostEntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Record", function(target, damageInfo, tookDamage)
-    if tookDamage == false or not IsValid(target) or not damageInfo then return end
+    if not IsValid(target) or not damageInfo then return end
     local owner = ResolveOwner(target)
     if not IsManagedNPC(owner) or owner:Health() <= 0 then return end
 
@@ -199,19 +258,25 @@ hook.Add("PostEntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Record", function(tar
     local amount = math.max(tonumber(damageInfo:GetDamage()) or 0, 0)
     if amount <= 0 then return end
 
-    local state = GetState(owner)
+    local state = GetOrAttachState(owner)
     if not state then return end
+
+    -- Register/publish wounds separately from the optional blood Think module.
+    -- Z-City can cancel engine-applied health damage after its own handler, so
+    -- tookDamage=false is not enough to conclude no organism injury occurred.
+    local woundOrganism = GetWoundOrganism(owner)
+    if woundOrganism then
+        local before = pendingHits[owner]
+        pendingHits[owner] = nil
+        if not WoundsChanged(before, woundOrganism) then
+            AddNativeFallbackWound(owner, woundOrganism, damageInfo)
+        end
+        PublishWoundRegistry(owner, woundOrganism)
+    end
 
     local native = GetNativeBloodModule(owner, state)
     if native then
-        local before = pendingHits[owner]
-        pendingHits[owner] = nil
-        if not WoundsChanged(before, native) then
-            -- Homigrad's damage trace usually adds the wound itself. If this
-            -- actor path bypassed that trace, supply a real native wound record
-            -- so sv_blood.lua can handle blood loss, coagulation and effects.
-            AddNativeFallbackWound(owner, native, damageInfo)
-        end
+        state.usesZCityOrganism = true
         state.bleedRate = 0
         state.bleedActive = false
         PublishNetworkState(owner, state, native, native)
@@ -220,8 +285,9 @@ hook.Add("PostEntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Record", function(tar
         return
     end
 
-    -- Fallback for a server that has the addon but not Z-City's native
-    -- organism loop. Never use this rate drain alongside the native module.
+    -- In fallback mode only drain simulated blood when engine damage actually
+    -- landed. Any eligible wound above has already been recorded/published.
+    if tookDamage == false then return end
     state.bleedRate = math.min((tonumber(state.bleedRate) or 0) + amount * 0.8, MAX_RATE)
     state.bleedLastHit = CurTime()
     state.bleedActive = true

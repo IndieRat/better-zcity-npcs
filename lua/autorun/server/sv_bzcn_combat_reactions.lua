@@ -74,9 +74,11 @@ local function IsCivilianVictim(ent)
     if not IsValid(ent) then return false end
     if IsManagedNPC(ent) then
         local profile = ent.BZCNClassProfile or {}
+        local faction = string.lower(tostring(profile.Faction or ent.BZCN_Faction or ""))
+        local classKey = ClassKey(ent)
         return profile.CivilianStyle == true
-            or string.lower(tostring(profile.Faction or ent.BZCN_Faction or "")) == "civilian"
-            or ClassKey(ent) == "civilian_companion"
+            or faction == "civilian" or faction == "neutral" or faction == "human" or faction == "default"
+            or classKey == "civilian_companion" or classKey == "neutral" or classKey == "default"
     end
     if ent:IsPlayer() then
         local class = ClassKey(ent)
@@ -339,6 +341,117 @@ local function CivilianMurderResponse(victim, attacker)
     hook.Run("BZCN_CivilianMurderResponse", victim, attacker, metroPresent, witnesses, metroWitnesses)
 end
 
+local function FleeCivilianFromAssault(civilian, attacker)
+    if not IsManagedNPC(civilian) or not IsCivilianVictim(civilian) then return false end
+    local now = CurTime()
+    if civilian.BZCNFleeThreat == attacker
+        and (tonumber(civilian.BZCNFleeUntil) or 0) > now then
+        return true
+    end
+
+    civilian.BZCNFleeThreat = attacker
+    civilian.BZCNFleeUntil = now + math.Rand(7, 11)
+    civilian.BZCNCurrentTask = nil
+    civilian.BZCNTaskUntil = 0
+    civilian.BZCNNextDirectEnemyScan = now + 2
+    if civilian.SetNW2String then civilian:SetNW2String("BZCNCurrentTask", "flee") end
+
+    if BZCN.Social and isfunction(BZCN.Social.PanicFromThreat) then
+        pcall(BZCN.Social.PanicFromThreat, civilian, attacker)
+    end
+    hook.Run("BZCN_CivilianPanickedByAssault", civilian, attacker)
+    return true
+end
+
+local function FleeNativeCivilian(civilian, attacker)
+    if not IsValid(civilian) or not civilian:IsNPC()
+        or NATIVE_FACTIONS[civilian:GetClass()] ~= "civilian" then return end
+    if isfunction(civilian.AddEntityRelationship) then
+        pcall(civilian.AddEntityRelationship, civilian, attacker, D_HT, 90)
+    end
+    if isfunction(civilian.SetEnemy) then pcall(civilian.SetEnemy, civilian, attacker) end
+    if isfunction(civilian.UpdateEnemyMemory) then
+        pcall(civilian.UpdateEnemyMemory, civilian, attacker, attacker:GetPos())
+    end
+    local schedule = _G.SCHED_RUN_FROM_ENEMY or _G.SCHED_TAKE_COVER_FROM_ENEMY
+    if schedule and isfunction(civilian.SetSchedule) then
+        pcall(civilian.SetSchedule, civilian, schedule)
+    end
+end
+
+local function RespondToDirectAssault(victim, attacker)
+    if not IsCombatEntity(victim) or victim:Health() <= 0
+        or not IsCombatActor(attacker) or victim == attacker then return end
+
+    local faction = FactionOf(victim)
+    if IsMetroCop(victim) or faction == "Combine" or faction == "Rebel" then
+        if IsManagedNPC(victim) then
+            if victim.BZCNHostileOffender ~= attacker
+                or (tonumber(victim.BZCNHostileOffenderUntil) or 0) <= CurTime() then
+                SetHostileGrievance(victim, attacker, IsMetroCop(victim) and 45 or 32, 0.08)
+            end
+        elseif IsMetroCop(victim) then
+            EscalateNativeMetro(victim, attacker)
+        elseif victim:IsNPC() and isfunction(victim.AddEntityRelationship) then
+            pcall(victim.AddEntityRelationship, victim, attacker, D_HT, 90)
+            if isfunction(victim.SetEnemy) then pcall(victim.SetEnemy, victim, attacker) end
+            if isfunction(victim.UpdateEnemyMemory) then
+                pcall(victim.UpdateEnemyMemory, victim, attacker, attacker:GetPos())
+            end
+        end
+        return
+    end
+
+    if IsCivilianVictim(victim) then
+        if IsManagedNPC(victim) then
+            if IsArmedCivilian(victim) then
+                if victim.BZCNHostileOffender ~= attacker
+                    or (tonumber(victim.BZCNHostileOffenderUntil) or 0) <= CurTime() then
+                    SetHostileGrievance(victim, attacker, 24, 0.12)
+                end
+            else
+                FleeCivilianFromAssault(victim, attacker)
+            end
+        else
+            FleeNativeCivilian(victim, attacker)
+        end
+    end
+end
+
+local function RespondToCivilianAssaultWitnesses(victim, attacker)
+    if not IsCivilianVictim(victim) or not IsCombatActor(attacker) then return end
+    if BZCN.RuleEnabled and not BZCN.RuleEnabled("civilian_crime_response") then return end
+
+    local now = CurTime()
+    if (tonumber(victim.BZCNNextAssaultWitnessResponseAt) or 0) > now then return end
+    victim.BZCNNextAssaultWitnessResponseAt = now + 0.45
+
+    local origin = victim:WorldSpaceCenter()
+    local radius = 1450
+    local respondingOfficers = {}
+    for _, officer in ipairs(ents.FindInSphere(origin, radius)) do
+        if officer == victim or not IsMetroCop(officer) then continue end
+        if officer:GetPos():DistToSqr(origin) > radius * radius
+            or not CanWitness(officer, victim, origin) then continue end
+        respondingOfficers[#respondingOfficers + 1] = officer
+    end
+
+    for _, officer in ipairs(respondingOfficers) do
+        if IsManagedNPC(officer) then
+            if officer.BZCNHostileOffender ~= attacker
+                or (tonumber(officer.BZCNHostileOffenderUntil) or 0) <= now then
+                SetHostileGrievance(officer, attacker, 45, math.Rand(0.12, 0.3))
+            end
+        else
+            EscalateNativeMetro(officer, attacker)
+        end
+    end
+
+    if #respondingOfficers > 0 then
+        hook.Run("BZCN_CivilianAssaultResponse", victim, attacker, respondingOfficers)
+    end
+end
+
 local function OnNPCDeath(victim, attackerOrDamage)
     local attacker
     if isentity(attackerOrDamage) and IsValid(attackerOrDamage) then
@@ -401,19 +514,65 @@ local function ReactToAlliedDamage(victim, attacker)
     end
 end
 
-hook.Add("EntityTakeDamage", "BZCN_AlliedDamageReactions", function(victim, damageInfo)
-    if not IsValid(victim) or not damageInfo or not (victim:IsPlayer() or victim:IsNPC() or IsManagedNPC(victim)) then
+local function ResolveCombatVictim(target)
+    if not IsValid(target) then return nil end
+    if IsCombatEntity(target) then return target end
+
+    local owner = target.BZCNNPCOwner
+    if not IsValid(owner) and target.GetNW2Entity then
+        owner = target:GetNW2Entity("BZCNNPCOwner")
+    end
+    if not IsValid(owner) and istable(target.organism) then owner = target.organism.owner end
+    if not IsValid(owner) and hg and isfunction(hg.RagdollOwner) then
+        local ok, result = pcall(hg.RagdollOwner, target)
+        if ok then owner = result end
+    end
+    if IsCombatEntity(owner) then return owner end
+    return nil
+end
+
+local function IsDuplicateAssaultReaction(victim, attacker)
+    local memory = victim.BZCNAssaultReactionAt
+    if not istable(memory) then
+        memory = setmetatable({}, {__mode = "k"})
+        victim.BZCNAssaultReactionAt = memory
+    end
+    local now = CurTime()
+    if (tonumber(memory[attacker]) or 0) > now - 0.35 then return true end
+    memory[attacker] = now
+    return false
+end
+
+-- Z-City's damage hook can return a value that short-circuits later
+-- EntityTakeDamage hooks. Use the post-damage event for reliable offender
+-- memory, direct retaliation, civilian panic, and police witness response.
+hook.Remove("EntityTakeDamage", "BZCN_AlliedDamageReactions")
+hook.Add("PostEntityTakeDamage", "BZCN_AlliedDamageReactions", function(target, damageInfo, tookDamage)
+    if not IsValid(target) or not damageInfo then return end
+    if not (target:IsPlayer() or target:IsNPC() or IsManagedNPC(target)
+        or IsValid(target.BZCNNPCOwner)
+        or (target.GetNW2Entity and IsValid(target:GetNW2Entity("BZCNNPCOwner")))) then
         return
     end
     if (tonumber(damageInfo:GetDamage()) or 0) <= 0 then return end
+
+    local victim = ResolveCombatVictim(target)
+    if not IsValid(victim) then return end
     local attacker = damageInfo:GetAttacker()
     if not IsCombatActor(attacker) or attacker == victim then return end
 
     victim.BZCNLastAttacker = attacker
     victim.BZCNLastDamageTime = CurTime()
 
-    -- Damage callbacks may fire while entity death state is changing. Defer the
-    -- faction reaction one tick so all injury adapters have recorded the attacker.
+    -- A downed proxy and its hidden owner can see the same hit. Debounce the
+    -- nested repeat, but keep subsequent shots from the same attacker effective.
+    if IsDuplicateAssaultReaction(victim, attacker) then return end
+
+    if victim:Health() > 0 then
+        RespondToDirectAssault(victim, attacker)
+        RespondToCivilianAssaultWitnesses(victim, attacker)
+    end
+
     timer.Simple(0, function()
         if not IsValid(victim) or not IsValid(attacker) then return end
         ReactToAlliedDamage(victim, attacker)
