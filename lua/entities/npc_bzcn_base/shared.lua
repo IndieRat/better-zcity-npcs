@@ -273,6 +273,7 @@ function ENT:GetBZCNMovementSequence(speed, state)
             if ok and IsUsableSequence(self, selected) then return selected end
         end
         return GetFirstSequence(self, namedFallbacks[state] or namedFallbacks.standing)
+    end
 
     -- Z-City selects ACT_MP_RUN from actual velocity, and some models expose a
     -- separate sprint clip. Prefer a real sprint sequence when one exists.
