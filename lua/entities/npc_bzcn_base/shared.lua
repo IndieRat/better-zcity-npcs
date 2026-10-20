@@ -166,7 +166,10 @@ function ENT:UpdateBZCNMovementState(speed)
         local sprintRequested = self.BZCN_Sprinting == true
             or desiredSpeed >= sprintSpeed * 0.88
             or speed >= baseSpeed * 1.15
-        if sprintRequested and speed > sprintThreshold then
+        -- Start selecting the run/sprint gait while the locomotor accelerates.
+        -- Requiring full physical speed here delays the state until the charge is
+        -- nearly over, and some NextBot path followers never quite reach it.
+        if sprintRequested and speed > math.max(walkThreshold, baseSpeed * 0.38) then
             state = "sprinting"
         elseif speed > runThreshold then
             state = "running"
@@ -430,8 +433,15 @@ function ENT:GetBZCNMovementSequence(speed, state)
             end
         elseif state == "walking" then
             aliases = {"walk_all", "walk_all_moderate", "walk_all_01", "walk_unarmed", "walk"}
-        elseif state == "running" or state == "climbing" then
-            aliases = {"run_all", "run_all_01", "run_unarmed", "run", "walk_all", "walk"}
+        elseif state == "running" or state == "sprinting" or state == "climbing" then
+            -- Many citizen/Combine rigs have no separately named sprint clip.
+            -- Their authored run sequence is the correct fallback; BodyUpdate
+            -- increases its playback rate when the state is sprinting.
+            aliases = {
+                "run_all", "run_all_01", "run_unarmed", "run_sprint",
+                "sprint_all", "sprint_all_01", "sprint_unarmed", "sprint_forward",
+                "run", "walk_all", "walk"
+            }
         elseif state == "airborne" then
             aliases = {"jump_all", "jump", "jump_start", "jump_holding", "fall", "jump_fall", "run_all", "walk_all"}
         else
