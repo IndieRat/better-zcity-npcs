@@ -10,6 +10,7 @@ local MAX_RATE = 60
 local CRITICAL_BLOOD = 2000
 
 local pendingHits = setmetatable({}, {__mode = "k"})
+local lastWounds = setmetatable({}, {__mode = "k"})
 
 local function IsManagedNPC(ent)
     return IsValid(ent) and not ent:IsPlayer()
@@ -245,7 +246,9 @@ hook.Add("EntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Snapshot", function(targe
         return
     end
     local count, severity = WoundStats(org)
-    pendingHits[owner] = {count = count, severity = severity, time = CurTime()}
+    local snapshot = {count = count, severity = severity, time = CurTime()}
+    pendingHits[owner] = snapshot
+    lastWounds[owner] = snapshot
 end)
 
 hook.Add("PostEntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Record", function(target, damageInfo, tookDamage)
@@ -266,12 +269,21 @@ hook.Add("PostEntityTakeDamage", "BZCN_NaturalNPCBloodLoss_Record", function(tar
     -- tookDamage=false is not enough to conclude no organism injury occurred.
     local woundOrganism = GetWoundOrganism(owner)
     if woundOrganism then
-        local before = pendingHits[owner]
+        -- Use the pre-damage snapshot if our hook ran; if Z-City short-circuited
+        -- it, compare against the last completed wound state. On a fresh entity
+        -- with no baseline, only synthesize a wound if the native lists are empty
+        -- (avoids duplicating an already-created first wound).
+        local before = pendingHits[owner] or lastWounds[owner]
         pendingHits[owner] = nil
-        if not WoundsChanged(before, woundOrganism) then
+        local changed = WoundsChanged(before, woundOrganism)
+        local woundCount = #(istable(woundOrganism.wounds) and woundOrganism.wounds or {})
+            + #(istable(woundOrganism.arterialwounds) and woundOrganism.arterialwounds or {})
+        if not changed and (istable(before) or woundCount == 0) then
             AddNativeFallbackWound(owner, woundOrganism, damageInfo)
         end
         PublishWoundRegistry(owner, woundOrganism)
+        local count, severity = WoundStats(woundOrganism)
+        lastWounds[owner] = {count = count, severity = severity, time = CurTime()}
     end
 
     local native = GetNativeBloodModule(owner, state)
@@ -299,6 +311,14 @@ timer.Create("BZCN_NaturalNPCBloodLoss", TICK, 0, function()
         if not IsManagedNPC(owner) then continue end
         local state = GetState(owner)
         if not state then continue end
+
+        if not lastWounds[owner] then
+            local currentWounds = GetWoundOrganism(owner)
+            if currentWounds then
+                local count, severity = WoundStats(currentWounds)
+                lastWounds[owner] = {count = count, severity = severity, time = now}
+            end
+        end
 
         local native = GetNativeBloodModule(owner, state)
         if native then
@@ -349,8 +369,13 @@ hook.Add("BZCN_NPCSpawned", "BZCN_NaturalNPCBloodLoss_Init", function(owner)
     if not IsManagedNPC(owner) then return end
     timer.Simple(0, function()
         if not IsValid(owner) then return end
-        local state = GetState(owner)
+        local state = GetOrAttachState(owner)
         if not state then return end
+        local organism = GetWoundOrganism(owner)
+        if organism then
+            local count, severity = WoundStats(organism)
+            lastWounds[owner] = {count = count, severity = severity, time = CurTime()}
+        end
         state.bleedRate = tonumber(state.bleedRate) or 0
         state.bleedActive = state.bleedRate > 0
         local native = GetNativeBloodModule(owner, state)
