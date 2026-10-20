@@ -5,5 +5,5 @@ ENT.Category = "Better ZCity NPCs"
 ENT.Spawnable = true
 ENT.AdminOnly = false
 ENT.BZCNClass = "horror_zombie"
-ENT.Model = "models/zombie/classic.mdl"
+ENT.Model = "models/zcity/m/male_04.mdl"
 ENT.Instructions = "Shambles while searching, charges visible survivors, and feeds on eligible NPC corpses."

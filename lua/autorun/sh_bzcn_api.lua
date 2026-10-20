@@ -9,6 +9,7 @@ if SERVER then
     AddCSLuaFile("autorun/client/cl_bzcn_tpik_adapter.lua")
     AddCSLuaFile("autorun/client/cl_bzcn_npc_chat.lua")
     AddCSLuaFile("autorun/client/cl_bzcn_blood_extension.lua")
+    AddCSLuaFile("autorun/client/cl_bzcn_zombie_visuals.lua")
 end
 
 BZCN = BZCN or {}
@@ -168,6 +169,78 @@ function BZCN.GetClass(className)
     return BZCN.Classes[className] or BZCN.Classes.default
 end
 
+-- Horror zombies retain the Z-City civilian body/model family, but have their
+-- accessories removed and wounds applied after their organism is registered.
+function BZCN.GetRandomCivilianAppearance()
+    local appearanceAPI = hg and hg.Appearance
+    local appearance
+    if appearanceAPI and isfunction(appearanceAPI.GetRandomAppearance) then
+        local ok, result = pcall(appearanceAPI.GetRandomAppearance)
+        if ok and istable(result) then appearance = CopyTable(result) end
+    end
+
+    local function ResolveNativeAppearance(candidate)
+        if not istable(candidate) or not isstring(candidate.AModel) then return nil end
+        local models = appearanceAPI and appearanceAPI.PlayerModels
+        if not istable(models) then return nil end
+        for sexIndex = 1, 2 do
+            local entry = models[sexIndex] and models[sexIndex][candidate.AModel]
+            local model = istable(entry) and (entry.mdl or entry.model)
+                or (isstring(entry) and entry or nil)
+            if isstring(model) and string.find(string.lower(model), "^models/zcity/[mf]/")
+                and util.IsValidModel(model) then
+                candidate.AAttachments = ""
+                return candidate, model
+            end
+        end
+        return nil
+    end
+
+    local nativeAppearance, nativeModel = ResolveNativeAppearance(appearance)
+    if nativeModel then return nativeAppearance, nativeModel end
+
+    -- Fall back to actual registered Z-City civilian models, not the stock
+    -- zombie NPC mesh. Keep AModel/AClothes coherent with the selected sex.
+    local choices = {}
+    local models = appearanceAPI and appearanceAPI.PlayerModels
+    if istable(models) then
+        for sexIndex = 1, 2 do
+            for name, entry in pairs(models[sexIndex] or {}) do
+                local model = istable(entry) and (entry.mdl or entry.model)
+                    or (isstring(entry) and entry or nil)
+                if isstring(model) and string.find(string.lower(model), "^models/zcity/[mf]/")
+                    and util.IsValidModel(model) then
+                    choices[#choices + 1] = {name = name, model = model, sex = sexIndex}
+                end
+            end
+        end
+    end
+    if #choices > 0 then
+        local choice = choices[math.random(#choices)]
+        return {
+            AModel = choice.name,
+            AClothes = {main = "normal", pants = "normal", boots = "normal"},
+            AAttachments = ""
+        }, choice.model
+    end
+
+    local stock = {
+        "models/player/group03/male_01.mdl", "models/player/group03/male_02.mdl",
+        "models/player/group03/male_03.mdl", "models/player/group03/male_04.mdl",
+        "models/player/group03/male_05.mdl", "models/player/group03/male_06.mdl",
+        "models/player/group03/male_07.mdl", "models/player/group03/male_08.mdl",
+        "models/player/group03/male_09.mdl", "models/player/group03/female_01.mdl",
+        "models/player/group03/female_02.mdl", "models/player/group03/female_03.mdl",
+        "models/player/group03/female_04.mdl", "models/player/group03/female_06.mdl"
+    }
+    local valid = {}
+    for _, model in ipairs(stock) do
+        if util.IsValidModel(model) then valid[#valid + 1] = model end
+    end
+    local model = #valid > 0 and valid[math.random(#valid)] or "models/player/group03/male_07.mdl"
+    return {AModel = model, AClothes = {}, AAttachments = ""}, model
+end
+
 BZCN.RegisterClass("default", {
     Name = "Civilian", PlayerClassName = "default",
     -- Give each managed civilian an individual identifier, rather than the
@@ -323,8 +396,8 @@ BZCN.RegisterClass("headcrab_zombie", {
 BZCN.RegisterClass("horror_zombie", {
     Name = "Horror Zombie", PlayerClassName = "horror_zombie",
     DisplayNames = {"Undead", "Infected", "Shambler", "The Dead"},
-    Model = "models/zombie/classic.mdl", Health = 140, Speed = 90,
-    BaseSpeedOverride = 90,
+    Model = "models/zcity/m/male_04.mdl", RandomCivilianAppearance = true,
+    Health = 140, Speed = 90, BaseSpeedOverride = 90, ZombieChargeRange = 540,
     Faction = "zombie", EnemyPlayers = true,
     EnemyFactions = {"default", "civilian", "Combine", "Metrocop", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 850, FollowDistance = 80, HelpRange = 600, HelpMemory = 5,
@@ -1055,6 +1128,9 @@ function BZCN.ApplyClass(ent, className, resetInventory)
     local definition = BZCN.GetClass(className)
     if not definition then return false end
     local profile = CopyTable(definition)
+    if profile.RandomCivilianAppearance == true and isfunction(ent.GetModel) then
+        profile.Model = ent:GetModel()
+    end
 
     -- Resolve each alias once for this NPC, then reuse that exact result in
     -- both WeaponClass and Inventory.Weapons. Resolving each field separately
@@ -1114,7 +1190,8 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             ent.CurAppearance.AAttachments = ""
         end
 
-        if isfunction(ent.GetBodyGroups) and isfunction(ent.SetBodygroup) then
+        if profile.ClassName == "headcrab_zombie"
+            and isfunction(ent.GetBodyGroups) and isfunction(ent.SetBodygroup) then
             for _, group in ipairs(ent:GetBodyGroups() or {}) do
                 if group.id == 1 and (tonumber(group.num) or 0) > 1 then
                     ent:SetBodygroup(1, 1)
@@ -1146,8 +1223,10 @@ function BZCN.ApplyClass(ent, className, resetInventory)
                 or ent.BZCNHeadcrabOriginalFaction or "default"
             local oldAppearance = ent.CurAppearance
             local oldClothes = istable(oldAppearance) and oldAppearance.AClothes or nil
+            local clothingSex = BZCN.GetModelSex(oldAppearance and oldAppearance.AModel or ent)
+                or BZCN.GetModelSex(ent) or 1
             local clothingSets = hg and hg.Appearance and hg.Appearance.Clothes
-                and hg.Appearance.Clothes[1] or nil
+                and (hg.Appearance.Clothes[clothingSex] or hg.Appearance.Clothes[1]) or nil
             local materials = fallbacks[originalClass]
             local keptOriginalClothes = false
             -- Native Z-City keeps a civilian's actual shirt/pants/shoes while
@@ -1182,7 +1261,9 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             end
             -- The fourth slot is blanked by the native class so the old head/
             -- face detail does not remain visible on the decapitated zombie model.
-            pcall(ent.SetSubMaterial, ent, 4, "")
+            if profile.ClassName == "headcrab_zombie" then
+                pcall(ent.SetSubMaterial, ent, 4, "")
+            end
         end
         if not hasZombieAppearanceFallback and isfunction(ent.SetPlayerColor) then
             ent:SetPlayerColor(Vector(75 / 255, 0, 0))
@@ -1410,9 +1491,16 @@ function BZCN.ChangeClass(ent, className, heal)
     local profile = BZCN.GetClass(className)
     BZCN.HideHeldWeapon(ent)
 
+    local selectedModel = profile.Model
+    if profile.RandomCivilianAppearance == true and BZCN.GetRandomCivilianAppearance then
+        local appearance, model = BZCN.GetRandomCivilianAppearance()
+        if istable(appearance) then ent.CurAppearance = appearance end
+        if isstring(model) then selectedModel = model end
+    end
+
     local oldModel = ent:GetModel()
-    if isstring(profile.Model) and util.IsValidModel(profile.Model) then
-        ent:SetModel(profile.Model)
+    if isstring(selectedModel) and util.IsValidModel(selectedModel) then
+        ent:SetModel(selectedModel)
     end
     -- Class conversion must also reset scale; otherwise a small headcrab model
     -- converted to a zombie keeps its old 0.8 scale even with the full zombie model.
@@ -1536,6 +1624,9 @@ function BZCN.ChangeClass(ent, className, heal)
             ent.organism.needfake = false
         end
         BZCN.ShowHeldWeapon(ent)
+        if profile.RandomCivilianAppearance == true and ent.BZCNClassProfile then
+            ent.BZCNClassProfile.Model = ent:GetModel()
+        end
         hook.Run("BZCN_NPCClassChanged", ent, className, ent.BZCNClassProfile)
     end
     return success

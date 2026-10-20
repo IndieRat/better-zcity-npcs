@@ -187,11 +187,50 @@ local function IsArmedCivilian(npc)
     return isstring(class) and class ~= "" and not IsMedicalWeapon(class)
 end
 
+local function GetVisibleVictimBody(victim)
+    if not IsValid(victim) then return nil end
+    if BZCNCombatActor and isfunction(BZCNCombatActor.GetVisibleBody) then
+        local ok, body = pcall(BZCNCombatActor.GetVisibleBody, victim)
+        if ok and IsValid(body) and body ~= victim then return body end
+    end
+    for _, key in ipairs({"FakeRagdoll", "BZCNNPCRagdoll", "ragdoll"}) do
+        local body = victim[key]
+        if IsValid(body) and body:GetClass() == "prop_ragdoll" then return body end
+    end
+    if victim.GetNWEntity then
+        for _, key in ipairs({"FakeRagdoll", "ragdoll"}) do
+            local ok, body = pcall(victim.GetNWEntity, victim, key)
+            if ok and IsValid(body) and body:GetClass() == "prop_ragdoll" then return body end
+        end
+    end
+    return nil
+end
+
+local function IsVulnerableAlly(victim)
+    if not IsValid(victim) then return false end
+    local org = victim.BZCNNPCOrg or victim.BZCN_Organism or victim.organism or {}
+    return (victim.GetNW2Bool and (
+            victim:GetNW2Bool("BZCNNPCDowned", false)
+            or victim:GetNW2Bool("BZCNNPCUnconscious", false)
+            or victim:GetNW2Bool("BZCNNPCIncapacitated", false)
+            or victim:GetNW2Bool("BZCNNPCCrawling", false)))
+        or (istable(org) and (org.downed == true or org.crawling == true
+            or org.otrub == true or org.unconscious == true or org.incapacitated == true))
+end
+
 local function CanWitness(witness, victim, victimPosition)
     if not IsValid(witness) then return false end
     local startPos = isfunction(witness.EyePos) and witness:EyePos() or witness:WorldSpaceCenter()
+    local body = GetVisibleVictimBody(victim)
+    if IsValid(body) and BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetAimPoint) then
+        local ok, position = pcall(BZCNCombatActor.GetTargetAimPoint, victim)
+        if ok and isvector(position) then victimPosition = position end
+    elseif IsValid(body) then
+        victimPosition = body:WorldSpaceCenter()
+    end
     local filter = {witness}
     if IsValid(victim) then filter[#filter + 1] = victim end
+    if IsValid(body) then filter[#filter + 1] = body end
     local trace = util.TraceLine({
         start = startPos,
         endpos = victimPosition,
@@ -493,7 +532,9 @@ local function ReactToAlliedDamage(victim, attacker)
     local faction = FactionOf(victim)
     local attackerFaction = FactionOf(attacker)
     local humanFactions = {civilian = true, ["Combine"] = true, ["Rebel"] = true}
-    if not humanFactions[faction] or not humanFactions[attackerFaction] then return end
+    -- A zombie bite is also a threat that nearby civilian/Combine/Rebel allies answer.
+    if not humanFactions[faction]
+        or (not humanFactions[attackerFaction] and attackerFaction ~= "zombie") then return end
     -- Neutral human classes also record grievances, including civilian-on-civilian
     -- attacks. Do not discard same-faction violence.
 
@@ -506,9 +547,17 @@ local function ReactToAlliedDamage(victim, attacker)
             and (npc == victim.BZCNSquadLeader or npc.BZCNSquadID == victim.BZCNSquadID))
         local distanceSqr = npc:GetPos():DistToSqr(victim:GetPos())
         if distanceSqr > radius * radius then continue end
-        if not inSquad and not CanWitness(npc, victim, victim:WorldSpaceCenter()) then continue end
-        if SetHostileGrievance(npc, attacker, faction == "civilian" and 18 or 24,
-            math.Rand(0.08, 0.28)) then
+        local victimBody = GetVisibleVictimBody(victim)
+        local victimPosition = IsValid(victimBody) and victimBody:WorldSpaceCenter()
+            or victim:WorldSpaceCenter()
+        if not inSquad and not CanWitness(npc, victim, victimPosition) then continue end
+        local vulnerable = IsVulnerableAlly(victim)
+        local duration = attackerFaction == "zombie"
+            and (vulnerable and 55 or 35) or (faction == "civilian" and 18 or 24)
+        local delay = attackerFaction == "zombie"
+            and math.Rand(vulnerable and 0.015 or 0.04, vulnerable and 0.075 or 0.14)
+            or math.Rand(0.08, 0.28)
+        if SetHostileGrievance(npc, attacker, duration, delay) then
             hook.Run("BZCN_NPCDefendedAlly", npc, victim, attacker)
         end
     end

@@ -230,9 +230,14 @@ local function EatCorpse(zombie, corpse)
             newborn:SetAngles(angles)
             newborn:Spawn()
             local applied = false
-            if IsValid(newborn) and BZCN and isfunction(BZCN.ApplyClass) then
-                local ok, result = pcall(BZCN.ApplyClass, newborn, "horror_zombie", true)
-                applied = ok and result == true
+            if IsValid(newborn) and BZCN then
+                if isfunction(BZCN.ChangeClass) then
+                    local ok, result = pcall(BZCN.ChangeClass, newborn, "horror_zombie", true)
+                    applied = ok and result == true
+                elseif isfunction(BZCN.ApplyClass) then
+                    local ok, result = pcall(BZCN.ApplyClass, newborn, "horror_zombie", true)
+                    applied = ok and result == true
+                end
             end
 
             if applied and IsValid(newborn) then
@@ -409,6 +414,81 @@ function Horror.RunIdleTask(zombie)
     return true
 end
 
+
+local function AddPresetZombieWound(ent, api, boneName, size, forwardOffset, verticalOffset)
+    if not IsValid(ent) or not isfunction(ent.LookupBone)
+        or not isfunction(api.AddWoundManual) then return false end
+    local bone = ent:LookupBone(boneName)
+    if not isnumber(bone) or bone < 0 then return false end
+    if ent.SetupBones then pcall(ent.SetupBones, ent) end
+    local bonePos, boneAng
+    if ent.GetBonePosition then
+        local ok, pos, ang = pcall(ent.GetBonePosition, ent, bone)
+        if ok and isvector(pos) and isangle(ang) and pos ~= vector_origin then
+            bonePos, boneAng = pos, ang
+        end
+    end
+    if (not isvector(bonePos) or not isangle(boneAng)) and ent.GetBoneMatrix then
+        local matrix = ent:GetBoneMatrix(bone)
+        if matrix then bonePos, boneAng = matrix:GetTranslation(), matrix:GetAngles() end
+    end
+    if not isvector(bonePos) or not isangle(boneAng) then return false end
+
+    local worldPos = bonePos + boneAng:Forward() * (forwardOffset or 2)
+        + boneAng:Up() * (verticalOffset or 0)
+    local localPos, localAng = WorldToLocal(worldPos, angle_zero, bonePos, boneAng)
+    local ok, result = pcall(api.AddWoundManual, ent, size, localPos, localAng, bone, CurTime())
+    return ok and result ~= false
+end
+
+local function ApplyPresetZombieWounds(ent, attempt)
+    if not IsManagedZombie(ent) then return end
+    if ent.SetNW2Bool then ent:SetNW2Bool("BZCNZombieMouthBlood", true) end
+    if ent.BZCNZombiePresetWoundsApplied then return end
+
+    -- The native registry, not a public organism alias, is authoritative.
+    -- Retry briefly because the support adapter may register the NPC after spawn.
+    local organismAPI = hg and hg.organism
+    local nativeOrg = organismAPI and organismAPI.list and organismAPI.list[ent]
+    if not istable(nativeOrg) or nativeOrg.owner ~= ent or nativeOrg.fakePlayer ~= true then
+        if (attempt or 0) < 10 then
+            timer.Simple(0.35, function()
+                if IsValid(ent) then ApplyPresetZombieWounds(ent, (attempt or 0) + 1) end
+            end)
+        end
+        return
+    end
+
+    local count = 0
+    if AddPresetZombieWound(ent, organismAPI, "ValveBiped.Bip01_Head1", 8, 3, -1) then count = count + 1 end
+    if AddPresetZombieWound(ent, organismAPI, "ValveBiped.Bip01_Spine2", 6, 2, 1) then count = count + 1 end
+    if AddPresetZombieWound(ent, organismAPI, "ValveBiped.Bip01_L_UpperArm", 4, 2, -1) then count = count + 1 end
+
+    if count > 0 then
+        ent.BZCNZombiePresetWoundsApplied = true
+        if ent.SetNetVar then
+            pcall(ent.SetNetVar, ent, "wounds", nativeOrg.wounds or {})
+            pcall(ent.SetNetVar, ent, "arterialwounds", nativeOrg.arterialwounds or {})
+        end
+        if IsValid(ent.BZCNNPCRagdoll) and ent.BZCNNPCRagdoll.SetNetVar then
+            pcall(ent.BZCNNPCRagdoll.SetNetVar, ent.BZCNNPCRagdoll, "wounds", nativeOrg.wounds or {})
+            pcall(ent.BZCNNPCRagdoll.SetNetVar, ent.BZCNNPCRagdoll, "arterialwounds", nativeOrg.arterialwounds or {})
+        end
+    elseif (attempt or 0) < 10 then
+        timer.Simple(0.35, function()
+            if IsValid(ent) then ApplyPresetZombieWounds(ent, (attempt or 0) + 1) end
+        end)
+    end
+end
+
+local function InitializeHorrorZombieVisuals(ent)
+    if not IsManagedZombie(ent) then return end
+    if ent.SetNW2Bool then ent:SetNW2Bool("BZCNZombieMouthBlood", true) end
+    timer.Simple(0, function()
+        if IsValid(ent) then ApplyPresetZombieWounds(ent, 0) end
+    end)
+end
+
 hook.Add("EntityRemoved", "BZCN_ZombieHorror_ReleaseRemovedCorpse", function(ent)
     if not ent then return end
     ent.BZCNZombieClaimedBy = nil
@@ -423,5 +503,15 @@ hook.Add("BZCN_NPCSpawned", "BZCN_ZombieHorror_Init", function(ent)
     if ent.SetNW2Bool then
         ent:SetNW2Bool("BZCNZombieHunting", false)
         ent:SetNW2Bool("BZCNZombieFeeding", false)
+        ent:SetNW2Bool("BZCNZombieMouthBlood", true)
     end
+    InitializeHorrorZombieVisuals(ent)
+end)
+
+hook.Add("BZCN_NPCClassChanged", "BZCN_ZombieHorror_ClassVisuals", function(ent, className)
+    if className == "horror_zombie" then InitializeHorrorZombieVisuals(ent) end
+end)
+
+hook.Add("BZCN_ZombieReanimated", "BZCN_ZombieHorror_ReanimatedVisuals", function(_, ent)
+    InitializeHorrorZombieVisuals(ent)
 end)

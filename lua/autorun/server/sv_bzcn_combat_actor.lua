@@ -280,7 +280,14 @@ local function TraceShotLane(attacker, target, startPos, endPos, weapon)
     local filter = {attacker}
     if IsValidEntity(weapon) then filter[#filter + 1] = weapon end
     if IsValidEntity(attacker.BZCNHeldWeaponProxy) then filter[#filter + 1] = attacker.BZCNHeldWeaponProxy end
-    local tr = util.TraceLine({start = startPos, endpos = endPos, filter = filter, mask = MASK_SHOT})
+    local tr = util.TraceHull({
+        start = startPos,
+        endpos = endPos,
+        mins = Vector(-8, -8, -8),
+        maxs = Vector(8, 8, 8),
+        filter = filter,
+        mask = MASK_SHOT
+    })
     if IsFriendlyActor(attacker, tr.Entity) then return false, tr.Entity end
     -- A lane is valid only if it reaches the intended target/body. An empty
     -- trace is not proof of a safe flank; it could just be a guaranteed miss.

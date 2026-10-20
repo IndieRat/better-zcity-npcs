@@ -229,8 +229,14 @@ end
 function ENT:Initialize()
     local className = self.BZCNClass or "default"
     local profile = BZCN.GetClass(className) or GetProfile(self)
-    if isstring(profile.Model) and util.IsValidModel(profile.Model) then
-        self:SetModel(profile.Model)
+    local spawnModel = profile.Model
+    if profile.RandomCivilianAppearance == true and BZCN.GetRandomCivilianAppearance then
+        local appearance, model = BZCN.GetRandomCivilianAppearance()
+        if istable(appearance) then self.CurAppearance = appearance end
+        if isstring(model) then spawnModel = model end
+    end
+    if isstring(spawnModel) and util.IsValidModel(spawnModel) then
+        self:SetModel(spawnModel)
     else
         self:SetModel(self.Model or "models/player/group03/male_07.mdl")
     end
@@ -285,6 +291,9 @@ function ENT:Initialize()
     -- ApplyClass creates per-entity runtime profile data. Do not replace it
     -- with the shared class template here.
     self.BZCNClassProfile = self.BZCNClassProfile or profile
+    if profile.RandomCivilianAppearance == true and self.BZCNClassProfile then
+        self.BZCNClassProfile.Model = self:GetModel()
+    end
     self.BZCN_Faction = profile.Faction or className
     self.PlayerClassName = self.PlayerClassName or className
     if self.SetNW2String then
@@ -1986,8 +1995,86 @@ function ENT:HaveEnemy()
     return self:FindEnemy()
 end
 
+
+local function FleeFromHorrorZombie(self, target, profile)
+    local targetProfile = IsValid(target) and target.BZCNClassProfile or nil
+    if not profile or profile.CivilianStyle ~= true or profile.Ranged == true
+        or not targetProfile or targetProfile.HorrorZombie ~= true
+        or not self.loco then return false end
+
+    local targetPosition = BZCNCombatActor and isfunction(BZCNCombatActor.GetTargetPosition)
+        and BZCNCombatActor.GetTargetPosition(target) or target:GetPos()
+    local away = self:GetPos() - targetPosition
+    away.z = 0
+    if away:LengthSqr() < 1 then
+        away = -self:GetForward()
+        away.z = 0
+    end
+    away:Normalize()
+    local side = Vector(-away.y, away.x, 0)
+    local origin = self:GetPos()
+    local candidates = {
+        origin + away * 440,
+        origin + away * 350 + side * 190,
+        origin + away * 350 - side * 190
+    }
+    local escapePoint, escapeDistance
+    for _, candidate in ipairs(candidates) do
+        local area = navmesh.GetNearestNavArea(candidate, false, 300, false, true)
+        if IsValid(area) then candidate = area:GetClosestPointOnArea(candidate) end
+        local targetDistance = candidate:DistToSqr(targetPosition)
+        local hull = util.TraceHull({
+            start = candidate + Vector(0, 0, 6),
+            endpos = candidate + Vector(0, 0, 48),
+            mins = Vector(-12, -12, 0), maxs = Vector(12, 12, 10),
+            filter = self, mask = MASK_PLAYERSOLID or MASK_SOLID
+        })
+        if not hull.Hit and (not escapeDistance or targetDistance > escapeDistance) then
+            escapePoint, escapeDistance = candidate, targetDistance
+        end
+    end
+    if not isvector(escapePoint) then return false end
+
+    local path = Path("Follow")
+    path:SetMinLookAheadDistance(90)
+    path:SetGoalTolerance(42)
+    local computed = TryComputePathToGoal(path, self, escapePoint)
+    if not computed then return false end
+
+    local runSpeed = BZCN and isfunction(BZCN.GetBaseMoveSpeed)
+        and BZCN.GetBaseMoveSpeed(self) or tonumber(profile.Speed) or 175
+    self.BZCNFleeThreat = target
+    self.BZCNFleeUntil = CurTime() + 3.2
+    self.BZCNCurrentTask = "flee"
+    if self.SetNW2String then self:SetNW2String("BZCNCurrentTask", "flee") end
+    self.loco:SetDesiredSpeed(math.max(runSpeed * 1.15, 205))
+
+    while IsValid(self) and IsValid(target) and CurTime() < (self.BZCNFleeUntil or 0)
+        and self:Health() > 0 and self:IsBZCNEnemy(target)
+        and self:GetPos():DistToSqr(target:GetPos()) < 900 * 900
+        and not self:GetNW2Bool("BZCNNPCDowned", false) do
+        self.loco:FaceTowards(escapePoint)
+        if path:GetAge() > 0.4 or not path:IsValid() then
+            local ok = TryComputePathToGoal(path, self, escapePoint)
+            if not ok then break end
+        end
+        if path:IsValid() then path:Update(self) end
+        if self.loco:IsStuck() then
+            self.loco:ClearStuck()
+            break
+        end
+        coroutine.wait(0.1)
+    end
+
+    if IsValid(self) and self.loco then self.loco:SetDesiredSpeed(0) end
+    return true
+end
+
 function ENT:ChaseEnemy(target)
     if not IsValid(target) or not self.loco then return end
+
+    local initialProfile = self:GetBZCNProfile()
+    if FleeFromHorrorZombie(self, target, initialProfile) then return end
 
     local path = Path("Follow")
     path:SetMinLookAheadDistance(250)
@@ -2316,7 +2403,18 @@ function ENT:ChaseEnemy(target)
             -- Resident Evil-style behavior belongs only to the independently
             -- spawned horror archetype, not headcrab-converted player bodies.
             -- This intentionally overrides human stamina sprint caps for zombies.
+            local targetOrganism = target.BZCNNPCOrg or target.BZCN_Organism or target.organism
+            local targetDowned = (target.GetNW2Bool and (
+                    target:GetNW2Bool("BZCNNPCDowned", false)
+                    or target:GetNW2Bool("BZCNNPCUnconscious", false)
+                    or target:GetNW2Bool("BZCNNPCIncapacitated", false)
+                    or target:GetNW2Bool("BZCNNPCCrawling", false)))
+                or (istable(targetOrganism) and (targetOrganism.downed == true
+                    or targetOrganism.crawling == true or targetOrganism.otrub == true
+                    or targetOrganism.unconscious == true))
+            local chargeRange = tonumber(profile.ZombieChargeRange) or 540
             local visibleCharge = visible and distance > 92
+                and (distance <= chargeRange or targetDowned == true)
             self.BZCN_Sprinting = visibleCharge
             self.BZCNZombieHunting = visibleCharge
             if self.SetNW2Bool then self:SetNW2Bool("BZCNZombieHunting", visibleCharge) end
