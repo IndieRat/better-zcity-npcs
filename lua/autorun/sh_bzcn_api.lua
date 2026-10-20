@@ -176,7 +176,7 @@ BZCN.RegisterClass("default", {
     Model = "models/player/group03/male_07.mdl", Health = 100, Speed = 175,
     -- Ordinary civilians are not automatically Resistance combatants. They
     -- remain neutral to Combine unless an incident creates a real grievance.
-    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {},
+    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"zombie"},
     FollowAllies = true, FollowRange = 1000, FollowDistance = 150, HelpRange = 1200, HelpMemory = 10,
     CivilianStyle = true, MoodSystem = true, RareGunChance = 0.12,
     ExtraConsumableChance = 0.42,
@@ -259,7 +259,7 @@ BZCN.RegisterClass("civilian_companion", {
     Model = "models/player/group03/male_04.mdl", Health = 110, Speed = 180,
     -- Companions also begin neutral; threat-memory and rescue hooks can still
     -- make them intervene when someone nearby is actually attacked.
-    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {},
+    Faction = "civilian", EnemyPlayers = false, EnemyFactions = {"zombie"},
     Companion = true, CivilianStyle = true, MoodSystem = true, RareGunChance = 0.08,
     ExtraConsumableChance = 0.38,
     ExtraConsumables = {"weapon_painkillers", "weapon_naloxone", "weapon_tourniquet", "weapon_bigbandage_sh"},
@@ -308,13 +308,32 @@ BZCN.RegisterClass("headcrab_zombie", {
     Faction = "zombie", EnemyPlayers = true,
     EnemyFactions = {"default", "civilian", "Combine", "Metrocop", "Rebel", "furry"},
     FollowAllies = true, FollowRange = 850, FollowDistance = 80, HelpRange = 600, HelpMemory = 5,
-    -- Slow search pace; the zombie horror director overrides this with a fast charge only on sight.
+    -- This is the native headcrab-converted body class. The horror director is
+    -- intentionally reserved for the separate, independently spawnable archetype below.
     ZombieWalkSpeed = 78, ZombieSprintSpeed = 248, SenseRange = 1450,
     ZombieStyle = true, Ranged = false, MeleeDamage = 22, MeleeRange = 58, AttackDelay = 1.18,
     MeleeSound = "npc/zombie/claw_strike1.wav", MeleeMissSound = "npc/zombie/claw_miss1.wav",
     AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh",
     MedicalRange = 0,
     Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Armor = {}}
+})
+
+-- A separate non-headcrab zombie archetype. Its AI can search, charge, feed,
+-- and reanimate corpses without participating in headcrab attachment/infection.
+BZCN.RegisterClass("horror_zombie", {
+    Name = "Horror Zombie", PlayerClassName = "horror_zombie",
+    DisplayNames = {"Undead", "Infected", "Shambler", "The Dead"},
+    Model = "models/zombie/classic.mdl", Health = 140, Speed = 90,
+    BaseSpeedOverride = 90,
+    Faction = "zombie", EnemyPlayers = true,
+    EnemyFactions = {"default", "civilian", "Combine", "Metrocop", "Rebel", "furry"},
+    FollowAllies = true, FollowRange = 850, FollowDistance = 80, HelpRange = 600, HelpMemory = 5,
+    ZombieStyle = true, HorrorZombie = true, HeadcrabStyle = false,
+    ZombieWalkSpeed = 78, ZombieSprintSpeed = 248, SenseRange = 1450,
+    Ranged = false, MeleeDamage = 22, MeleeRange = 58, AttackDelay = 1.18,
+    MeleeSound = "npc/zombie/claw_strike1.wav", MeleeMissSound = "npc/zombie/claw_miss1.wav",
+    AnimationHoldType = "normal", WeaponClass = "weapon_hands_sh", MedicalRange = 0,
+    Inventory = {Weapons = {weapon_hands_sh = true}, Items = {}, Ammo = {}, Armor = {}}
 })
 
 local function NetworkKey(key, kind)
@@ -1223,7 +1242,8 @@ function BZCN.ApplyClass(ent, className, resetInventory)
             ) or 0
             if isstring(ammoName) and ammoName ~= "" and string.lower(ammoName) ~= "none"
                 and clip > 0 then
-                local ammoID = game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1
+                local ammoID = (BZCN.ResolveInventoryAmmoKey and BZCN.ResolveInventoryAmmoKey(ammoName))
+                    or (game and game.GetAmmoID and game.GetAmmoID(ammoName) or -1)
                 if isnumber(ammoID) and ammoID >= 0 and inventory.Ammo[ammoID] == nil then
                     inventory.Ammo[ammoID] = math.min(math.max(math.floor(clip * 3), 1), 99999)
                 end

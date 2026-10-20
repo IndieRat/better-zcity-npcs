@@ -610,7 +610,7 @@ local playerClassFaction = {
     default = "default", civilian = "default",
     rebel = "Rebel", furry = "furry",
     headcrab = "zombie", headcrab_zombie = "zombie",
-    headcrabzombie = "zombie", zombie = "zombie"
+    headcrabzombie = "zombie", zombie = "zombie", horror_zombie = "zombie"
 }
 
 local function CanonicalFaction(value)
@@ -787,7 +787,12 @@ function ENT:IsBZCNEnemy(target)
     if target:IsPlayer() then
         if not target:Alive() then return false end
         local targetClass = self:GetBZCNEntityFaction(target)
-        if targetClass == self.BZCN_Faction or targetClass == self.PlayerClassName then return false end
+        local ownFaction = CanonicalFaction(profile.Faction or self.BZCN_Faction or self.PlayerClassName)
+        -- Zombie is a world threat faction, not a relationship that civilians
+        -- must individually opt into. Undead avoid one another but hunt humans.
+        if targetClass == "zombie" then return ownFaction ~= "zombie" end
+        if ownFaction == "zombie" then return targetClass ~= nil and targetClass ~= "zombie" end
+        if targetClass == ownFaction then return false end
         for _, enemyClass in ipairs(profile.EnemyFactions or {}) do
             if CanonicalFaction(enemyClass) == targetClass then return true end
         end
@@ -799,12 +804,16 @@ function ENT:IsBZCNEnemy(target)
     if BZCN.IsManaged(target) then
         local targetProfile = target.BZCNClassProfile or BZCN.GetClass(target.BZCNClass or target.PlayerClassName)
         if not targetProfile then return false end
-        local targetFaction = targetProfile.Faction or target.BZCN_Faction or targetProfile.ClassName
-        local ownFaction = profile.Faction or self.BZCN_Faction
+        local targetFaction = CanonicalFaction(
+            targetProfile.Faction or target.BZCN_Faction or targetProfile.ClassName)
+        local ownFaction = CanonicalFaction(profile.Faction or self.BZCN_Faction or self.PlayerClassName)
+        if targetFaction == "zombie" then return ownFaction ~= "zombie" end
+        if ownFaction == "zombie" then return targetFaction ~= nil and targetFaction ~= "zombie" end
         if targetFaction == ownFaction then return false end
         for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
-            if enemyFaction == targetFaction or enemyFaction == targetProfile.ClassName
-                or enemyFaction == target.PlayerClassName then return true end
+            if CanonicalFaction(enemyFaction) == targetFaction
+                or CanonicalFaction(enemyFaction) == CanonicalFaction(targetProfile.ClassName)
+                or CanonicalFaction(enemyFaction) == CanonicalFaction(target.PlayerClassName) then return true end
         end
         return false
     end
@@ -813,8 +822,11 @@ function ENT:IsBZCNEnemy(target)
     -- this lets scripted NextBots coordinate with the gamemode's native NPCs.
     if target:IsNPC() then
         local faction = CanonicalFaction(nativeNPCFaction[target:GetClass()])
-        local ownFaction = CanonicalFaction(profile.Faction or self.BZCN_Faction)
-        if not faction or faction == ownFaction then return false end
+        local ownFaction = CanonicalFaction(profile.Faction or self.BZCN_Faction or self.PlayerClassName)
+        if not faction then return false end
+        if faction == "zombie" then return ownFaction ~= "zombie" end
+        if ownFaction == "zombie" then return true end
+        if faction == ownFaction then return false end
         for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
             if CanonicalFaction(enemyFaction) == faction then return true end
         end
@@ -837,12 +849,16 @@ function ENT:ApplyBZCNRelationships()
 
     for _, other in ipairs(ents.FindByClass("npc_*")) do
         if not IsValid(other) or other == self then continue end
-        local otherFaction = nativeNPCFaction[other:GetClass()]
+        local otherFaction = CanonicalFaction(nativeNPCFaction[other:GetClass()])
         if not otherFaction then continue end
 
-        local hostile = false
-        for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
-            if enemyFaction == otherFaction then hostile = true break end
+        local ownCanonicalFaction = CanonicalFaction(profile.Faction or self.BZCN_Faction)
+        local hostile = (otherFaction == "zombie" and ownCanonicalFaction ~= "zombie")
+            or (ownCanonicalFaction == "zombie" and otherFaction ~= "zombie")
+        if not hostile then
+            for _, enemyFaction in ipairs(profile.EnemyFactions or {}) do
+                if CanonicalFaction(enemyFaction) == otherFaction then hostile = true break end
+            end
         end
         local disposition = hostile and D_HT or D_LI
         if isfunction(other.AddEntityRelationship) then
@@ -2296,9 +2312,9 @@ function ENT:ChaseEnemy(target)
         local desiredSpeed = baseSpeed * physiologySpeed
         if crawling then
             desiredSpeed = baseSpeed * physiologySpeed * 0.42
-        elseif profile.ZombieStyle == true then
-            -- Resident Evil-style behavior: a slow dragging search, then an
-            -- unmistakable full charge once the target is actually in sight.
+        elseif profile.HorrorZombie == true then
+            -- Resident Evil-style behavior belongs only to the independently
+            -- spawned horror archetype, not headcrab-converted player bodies.
             -- This intentionally overrides human stamina sprint caps for zombies.
             local visibleCharge = visible and distance > 92
             self.BZCN_Sprinting = visibleCharge
@@ -2687,7 +2703,7 @@ function ENT:RunBehaviour()
                 self:ChaseEnemy(enemy)
             else
                 local profile = self:GetBZCNProfile()
-                if profile.ZombieStyle == true and BZCN.ZombieHorror
+                if profile.HorrorZombie == true and BZCN.ZombieHorror
                     and isfunction(BZCN.ZombieHorror.RunIdleTask) then
                     if BZCN.AIManager then
                         BZCN.AIManager.SetIntent(self, "zombie_search", 42,

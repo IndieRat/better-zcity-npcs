@@ -64,6 +64,10 @@ local function ResolveInventoryAmmoKey(ammoName)
     return nil
 end
 
+-- Pickups must use the same Z-City ammo-ID resolver as runtime weapon reloads.
+-- Expose this narrow helper so ent_ammo_* boxes feed the exact inventory key.
+BZCN.ResolveInventoryAmmoKey = ResolveInventoryAmmoKey
+
 local function ReadInventoryAmmo(inventory, ammoKey)
     if not istable(inventory) or not istable(inventory.Ammo) or ammoKey == nil then return nil end
     local value = inventory.Ammo[ammoKey]

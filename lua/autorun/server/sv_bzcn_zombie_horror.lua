@@ -37,7 +37,7 @@ local function IsManagedZombie(ent)
         return false
     end
     local profile = ent.BZCNClassProfile or {}
-    return profile.ZombieStyle == true
+    return profile.HorrorZombie == true
 end
 
 local function IsEligibleCorpseSource(source)
@@ -231,7 +231,7 @@ local function EatCorpse(zombie, corpse)
             newborn:Spawn()
             local applied = false
             if IsValid(newborn) and BZCN and isfunction(BZCN.ApplyClass) then
-                local ok, result = pcall(BZCN.ApplyClass, newborn, "headcrab_zombie", true)
+                local ok, result = pcall(BZCN.ApplyClass, newborn, "horror_zombie", true)
                 applied = ok and result == true
             end
 

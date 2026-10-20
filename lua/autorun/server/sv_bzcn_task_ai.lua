@@ -930,39 +930,76 @@ local function FindDroppedWeapon(ent)
     return best
 end
 
-function Tasks.TryPickupAmmo(ent)
-    if not IsAvailable(ent) or not CanScavengeWeapons(ent) then return false end
+local function GetAmmoPickupData(item)
+    if not IsValid(item) then return nil end
+    local class = item:GetClass()
+    local entry = AMMO_PICKUPS[class]
+    local ammoName, amount
 
-    for _, item in ipairs(ents.FindInSphere(ent:GetPos(), 92)) do
+    if entry then
+        ammoName, amount = entry[1], tonumber(entry[2])
+    else
+        -- Z-City derives ammo entities from ammo_base and publishes their
+        -- ammo metadata as server-side fields, while Use() accepts Players only.
+        local lowered = string.lower(tostring(class or ""))
+        if item.IsZPickup ~= true and string.sub(lowered, 1, 9) ~= "ent_ammo_" then return nil end
+        ammoName = item.AmmoType
+        amount = tonumber(item.AmmoCount or item.Count or item.Amount)
+    end
+
+    if not isstring(ammoName) or ammoName == "" or not amount or amount < 1 then return nil end
+    local ammoKey = BZCN.ResolveInventoryAmmoKey and BZCN.ResolveInventoryAmmoKey(ammoName) or nil
+    if ammoKey == nil and game and game.GetAmmoID then
+        local fallback = game.GetAmmoID(ammoName)
+        if isnumber(fallback) and fallback >= 0 then ammoKey = fallback end
+    end
+    if not isnumber(ammoKey) or ammoKey < 0 then return nil end
+    return ammoName, math.floor(amount), ammoKey
+end
+
+function Tasks.FindAmmoPickup(ent, radius)
+    if not IsAvailable(ent) or not CanScavengeWeapons(ent) then return nil end
+    local best, bestDistance
+    radius = math.max(tonumber(radius) or 140, 64)
+    for _, item in ipairs(ents.FindInSphere(ent:GetPos(), radius)) do
         if not IsValid(item) then continue end
         local owner = item.GetOwner and item:GetOwner() or nil
-        if IsValid(owner) then continue end
-        local entry = AMMO_PICKUPS[item:GetClass()]
-        if not entry or not game or not game.GetAmmoID then continue end
-        local ammoName, amount = entry[1], entry[2]
-        local ammoID = game.GetAmmoID(ammoName)
-        if not isnumber(ammoID) or ammoID < 0 then continue end
-
-        local inventory = BZCN.GetNetVar and BZCN.GetNetVar(ent, "Inventory", {}) or ent.inventory or {}
-        inventory = istable(inventory) and inventory or {}
-        inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
-        inventory.Items = istable(inventory.Items) and inventory.Items or {}
-        inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
-        inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
-        local current = tonumber(inventory.Ammo[ammoID] or inventory.Ammo[tostring(ammoID)]) or 0
-        inventory.Ammo[ammoID] = math.Clamp(current + amount, 0, 999)
-        inventory.Ammo[tostring(ammoID)] = nil
-        if BZCN.SetNetVar then
-            BZCN.SetNetVar(ent, "Inventory", inventory)
-        else
-            ent.inventory, ent.Inventory = inventory, inventory
+        if IsValid(owner) or (item.GetParent and IsValid(item:GetParent())) then continue end
+        if not GetAmmoPickupData(item) then continue end
+        local distance = ent:GetPos():DistToSqr(item:GetPos())
+        if not bestDistance or distance < bestDistance then
+            best, bestDistance = item, distance
         end
-        item:Remove()
-        ent:EmitSound("items/ammo_pickup.wav", 58, math.random(95, 105), 0.55)
-        hook.Run("BZCN_NPCAmmoScavenged", ent, ammoName, amount)
-        return true
     end
-    return false
+    return best
+end
+
+function Tasks.TryPickupAmmo(ent)
+    if not IsAvailable(ent) or not CanScavengeWeapons(ent) then return false end
+    local item = Tasks.FindAmmoPickup(ent, 140)
+    if not IsValid(item) then return false end
+    local ammoName, amount, ammoID = GetAmmoPickupData(item)
+    if not ammoID then return false end
+
+    local inventory = BZCN.GetNetVar and BZCN.GetNetVar(ent, "Inventory", {}) or ent.inventory or {}
+    inventory = istable(inventory) and inventory or {}
+    inventory.Weapons = istable(inventory.Weapons) and inventory.Weapons or {}
+    inventory.Items = istable(inventory.Items) and inventory.Items or {}
+    inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+    inventory.Attachments = istable(inventory.Attachments) and inventory.Attachments or {}
+    local current = tonumber(inventory.Ammo[ammoID] or inventory.Ammo[tostring(ammoID)]) or 0
+    inventory.Ammo[ammoID] = math.Clamp(current + amount, 0, 99999)
+    inventory.Ammo[tostring(ammoID)] = nil
+    if BZCN.SetNetVar then
+        BZCN.SetNetVar(ent, "Inventory", inventory)
+    else
+        ent.inventory, ent.Inventory = inventory, inventory
+    end
+
+    item:Remove()
+    ent:EmitSound("items/ammo_pickup.wav", 58, math.random(95, 105), 0.55)
+    hook.Run("BZCN_NPCAmmoScavenged", ent, ammoName, amount)
+    return true
 end
 
 function Tasks.TryPickupWeapon(ent)
@@ -1350,7 +1387,44 @@ function Tasks.RunIdleTask(ent)
     end
 
     if task == "pickup" then
-        if Tasks.TryPickupWeapon(ent) then coroutine.wait(0.25) return true end
+        if Tasks.TryPickupWeapon(ent)
+            or (Tasks.TryPickupMedicalItem and Tasks.TryPickupMedicalItem(ent))
+            or Tasks.TryPickupAmmo(ent) then
+            coroutine.wait(0.25)
+            return true
+        end
+
+        local ammoTarget = Tasks.FindAmmoPickup(ent, 520)
+        if IsValid(ammoTarget) and ent.loco then
+            local path = Path("Follow")
+            path:SetMinLookAheadDistance(80)
+            path:SetGoalTolerance(48)
+            path:Compute(ent, ammoTarget:GetPos())
+            if path:IsValid() then
+                ent.loco:SetDesiredSpeed(math.min(BZCN.GetBaseMoveSpeed and BZCN.GetBaseMoveSpeed(ent) or 150, 170))
+                local stopAt = CurTime() + 6
+                local repathAt = 0
+                while IsManaged(ent) and IsValid(ammoTarget) and CurTime() < stopAt
+                    and not ent:GetNW2Bool("BZCNNPCDowned", false) do
+                    local threat = isfunction(ent.HaveEnemy) and ent:HaveEnemy() or nil
+                    if IsValid(threat) and isfunction(ent.IsBZCNEnemy) and ent:IsBZCNEnemy(threat) then break end
+                    if ent:GetPos():DistToSqr(ammoTarget:GetPos()) <= 88 * 88 then
+                        if Tasks.TryPickupAmmo(ent) then
+                            coroutine.wait(0.25)
+                            return true
+                        end
+                        break
+                    end
+                    if CurTime() >= repathAt or path:GetAge() > 0.4 then
+                        path:Compute(ent, ammoTarget:GetPos())
+                        repathAt = CurTime() + 0.3
+                    end
+                    if path:IsValid() then path:Update(ent) end
+                    if ent.loco:IsStuck() then ent.loco:ClearStuck() break end
+                    coroutine.wait(0.1)
+                end
+            end
+        end
         task = "hold"
     end
 

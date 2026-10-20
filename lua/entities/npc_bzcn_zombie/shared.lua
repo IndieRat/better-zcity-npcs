@@ -1,0 +1,9 @@
+ENT.Base = "npc_bzcn_base"
+ENT.Type = "nextbot"
+ENT.PrintName = "Horror Zombie"
+ENT.Category = "Better ZCity NPCs"
+ENT.Spawnable = true
+ENT.AdminOnly = false
+ENT.BZCNClass = "horror_zombie"
+ENT.Model = "models/zombie/classic.mdl"
+ENT.Instructions = "Shambles while searching, charges visible survivors, and feeds on eligible NPC corpses."
