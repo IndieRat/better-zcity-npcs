@@ -96,6 +96,20 @@ local function InstallClientAimAdapter(ent)
     ent.BZCNClientAimAdapter = true
 end
 
+local function GetInheritedWeaponField(definition, field)
+    local seen = {}
+    for _ = 1, 16 do
+        if not istable(definition) then return nil end
+        local value = definition[field]
+        if value ~= nil then return value end
+        local base = definition.Base
+        if not isstring(base) or base == "" or seen[base] then return nil end
+        seen[base] = true
+        definition = weapons and weapons.GetStored and weapons.GetStored(base) or nil
+    end
+    return nil
+end
+
 local function GetOrCreateHandWorldModel(weapon, definition)
     if not IsValid(weapon) then return nil end
     if isfunction(weapon.GetWM) then
@@ -110,9 +124,9 @@ local function GetOrCreateHandWorldModel(weapon, definition)
         return weapon.worldModel
     end
 
-    local modelPath = istable(definition) and definition.WorldModelFake or nil
+    local modelPath = GetInheritedWeaponField(definition, "WorldModelFake")
     if not isstring(modelPath) or modelPath == "" then
-        modelPath = istable(definition) and definition.WorldModel or nil
+        modelPath = GetInheritedWeaponField(definition, "WorldModel")
     end
     if not isstring(modelPath) or modelPath == "" or modelPath == "models/weapons/c_arms.mdl" then return nil end
     local ok, model = pcall(ClientsideModel, modelPath, RENDERGROUP_OPAQUE)
@@ -362,15 +376,17 @@ local function UpdateRenderedWeapon(ent)
     -- models additionally require FakePos/FakeAng. Omitting these is what
     -- leaves several models rolled downward or floating away from the grip.
     local source = IsValid(weapon) and weapon or definition
-    -- A spawned SWEP instance does not always expose inherited world-model
-    -- offsets on its entity table. Resolve each field independently so a nil
-    -- runtime field cannot erase the registered weapon's authored grip offset.
+    -- Resolve authored transforms through the class Base chain; HG weapons
+    -- commonly inherit these from homigrad_base instead of defining them per gun.
     local offsetPos = isvector(source.WorldPos) and source.WorldPos
-        or (isvector(definition.WorldPos) and definition.WorldPos or vector_origin)
+        or GetInheritedWeaponField(definition, "WorldPos")
     local offsetAng = isangle(source.WorldAng) and source.WorldAng
-        or (isangle(definition.WorldAng) and definition.WorldAng or angle_zero)
+        or GetInheritedWeaponField(definition, "WorldAng")
     local extraAng = isangle(source.WorldAng2) and source.WorldAng2
-        or (isangle(definition.WorldAng2) and definition.WorldAng2 or angle_zero)
+        or GetInheritedWeaponField(definition, "WorldAng2")
+    offsetPos = isvector(offsetPos) and offsetPos or vector_origin
+    offsetAng = isangle(offsetAng) and offsetAng or angle_zero
+    extraAng = isangle(extraAng) and extraAng or angle_zero
     local pos, ang = LocalToWorld(offsetPos, offsetAng + extraAng,
         matrix:GetTranslation(), matrix:GetAngles())
     ang:RotateAroundAxis(ang:Forward(), 180)
@@ -384,8 +400,12 @@ local function UpdateRenderedWeapon(ent)
         useFake = ok and result == true
     end
     if useFake then
-        local fakePos = isvector(source.FakePos) and source.FakePos or vector_origin
-        local fakeAng = isangle(source.FakeAng) and source.FakeAng or angle_zero
+        local fakePos = isvector(source.FakePos) and source.FakePos
+            or GetInheritedWeaponField(definition, "FakePos")
+        local fakeAng = isangle(source.FakeAng) and source.FakeAng
+            or GetInheritedWeaponField(definition, "FakeAng")
+        fakePos = isvector(fakePos) and fakePos or vector_origin
+        fakeAng = isangle(fakeAng) and fakeAng or angle_zero
         pos, ang = LocalToWorld(fakePos, fakeAng, pos, ang)
     end
 
@@ -509,11 +529,25 @@ local function RunNativeWeaponAnimation(ent, weapon, definition)
 end
 
 local function ResolveNPCWeaponHold(ent, weapon, definition)
-    local hold = IsValid(weapon) and (weapon.holdtype or weapon.HoldType) or nil
+    -- Prefer authored class/base metadata over a runtime instance's generic default.
+    local hold = GetInheritedWeaponField(definition, "HoldType")
+        or GetInheritedWeaponField(definition, "holdtype")
     if not isstring(hold) or hold == "" then
-        hold = istable(definition) and (definition.HoldType or definition.holdtype) or nil
+        hold = IsValid(weapon) and (weapon.holdtype or weapon.HoldType) or nil
     end
-    if not isstring(hold) or hold == "" then hold = "smg" end
+    if not isstring(hold) or hold == "" then
+        local class = string.lower(IsValid(weapon) and weapon:GetClass() or "")
+        if string.find(class, "pistol", 1, true) or string.find(class, "glock", 1, true)
+            or string.find(class, "revolver", 1, true) then
+            hold = "pistol"
+        elseif string.find(class, "shotgun", 1, true) then
+            hold = "shotgun"
+        elseif string.find(class, "knife", 1, true) or string.find(class, "melee", 1, true) then
+            hold = "melee"
+        else
+            hold = "smg"
+        end
+    end
     if IsValid(weapon) then
         weapon.holdtype = hold
         if isfunction(weapon.SetHoldType) then pcall(weapon.SetHoldType, weapon, hold) end

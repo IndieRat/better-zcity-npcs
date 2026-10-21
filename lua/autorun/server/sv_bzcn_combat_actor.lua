@@ -161,6 +161,20 @@ function Actor.GetTargetPosition(target)
     return torso - Vector(0, 0, 30)
 end
 
+local function GetInheritedWeaponField(definition, field)
+    local seen = {}
+    for _ = 1, 16 do
+        if not istable(definition) then return nil end
+        local value = definition[field]
+        if value ~= nil then return value end
+        local base = definition.Base
+        if not isstring(base) or base == "" or seen[base] then return nil end
+        seen[base] = true
+        definition = weapons and weapons.GetStored and weapons.GetStored(base) or nil
+    end
+    return nil
+end
+
 function Actor.GetWeaponHoldType(owner, weapon, weaponClass)
     weaponClass = weaponClass or (IsValidEntity(weapon) and weapon:GetClass())
         or (IsValidEntity(owner) and owner.BZCN_SelectedWeapon) or ""
@@ -175,8 +189,11 @@ function Actor.GetWeaponHoldType(owner, weapon, weaponClass)
     end
 
     local stored = weapons and weapons.GetStored and weapons.GetStored(weaponClass)
-    local hold = IsValidEntity(weapon) and (weapon.HoldType or weapon.holdtype)
-        or (istable(stored) and (stored.HoldType or stored.holdtype)) or nil
+    local hold = GetInheritedWeaponField(stored, "HoldType")
+        or GetInheritedWeaponField(stored, "holdtype")
+    if not isstring(hold) or hold == "" then
+        hold = IsValidEntity(weapon) and (weapon.holdtype or weapon.HoldType) or nil
+    end
     hold = isstring(hold) and string.lower(hold) or nil
     local translator = {
         revolver = "pistol", duel = "pistol",

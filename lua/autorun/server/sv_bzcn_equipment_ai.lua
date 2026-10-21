@@ -683,7 +683,7 @@ function BZCN.FireRuntimeWeapon(ent, target)
         if maxClip and maxClip > 0 then clipSize = maxClip end
     end
     local beforeClip = weapon.Clip1 and weapon:Clip1() or -1
-    if clipSize > 0 and beforeClip == 0 then
+    if clipSize > 0 and beforeClip <= 0 then
         -- Reloads consume the NPC's own Z-City reserve-ammo inventory. A gun
         -- with no reserve stays empty until its carrier scavenges more ammo.
         local ammoName = primary.Ammo
@@ -697,6 +697,15 @@ function BZCN.FireRuntimeWeapon(ent, target)
         local ammoKey = ResolveInventoryAmmoKey(ammoName)
         local inventory = GetInventory(ent)
         inventory.Ammo = istable(inventory.Ammo) and inventory.Ammo or {}
+        -- Some HG SWEPs expose legacy labels while their engine ammo ID is registered.
+        -- Reuse that ID only when the NPC actually has a matching reserve entry.
+        if ammoKey == nil and isfunction(weapon.GetPrimaryAmmoType) then
+            local engineAmmoID = weapon:GetPrimaryAmmoType()
+            if isnumber(engineAmmoID) and engineAmmoID >= 0
+                and ReadInventoryAmmo(inventory, engineAmmoID) ~= nil then
+                ammoKey = engineAmmoID
+            end
+        end
         local reserve = ReadInventoryAmmo(inventory, ammoKey)
         if ammoKey == nil then
             weapon.BZCNReloadUntil = nil
@@ -721,9 +730,13 @@ function BZCN.FireRuntimeWeapon(ent, target)
             return true
         end
         if not weapon.BZCNReloadUntil then
-            weapon.BZCNReloadUntil = now + math.max(tonumber(profile.ReloadDelay) or 1.25, 0.5)
+            weapon.BZCNReloadUntil = now + math.max(
+                tonumber(profile.ReloadDelay) or tonumber(weapon.ReloadTime) or 1.25, 0.5)
             PublishNPCReloadPose(ent, now, weapon.BZCNReloadUntil)
-            if isfunction(weapon.Reload) then pcall(weapon.Reload, weapon) end
+            if ent.SetNW2Bool then ent:SetNW2Bool("BZCNOutOfAmmo", false) end
+            -- Native Reload() is disabled for hidden runtime SWEPs because its
+            -- input/UI path requires a real Player. The replicated reload window
+            -- drives the NPC hand pose while this bridge transfers reserve ammo.
             hook.Run("BZCN_NPCWeaponReload", ent, weapon)
             return true
         end
